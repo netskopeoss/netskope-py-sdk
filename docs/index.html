@@ -11,9 +11,9 @@
                 extend: {
                     colors: {
                         netskope: {
-                            50: '#eef7ff', 100: '#d9edff', 200: '#bce0ff', 300: '#8ecdff',
-                            400: '#59b0ff', 500: '#338dff', 600: '#1b6df5', 700: '#1457e1',
-                            800: '#1746b6', 900: '#193d8f', 950: '#142757',
+                            50: '#F0F9FF', 100: '#D9F2FF', 200: '#B0E3FF', 300: '#7AD1FF',
+                            400: '#33BCFF', 500: '#00AEEF', 600: '#0090CC', 700: '#003087',
+                            800: '#00205B', 900: '#00143c', 950: '#000d28',
                         }
                     }
                 }
@@ -34,12 +34,12 @@
         .op { color: #f472b6; }
         .nb { color: #fb923c; }
         .nav-link { transition: all 0.15s ease; }
-        .nav-link:hover { color: #1b6df5; }
+        .nav-link:hover { color: #00AEEF; }
         .feature-card { transition: transform 0.2s ease, box-shadow 0.2s ease; }
         .feature-card:hover { transform: translateY(-2px); box-shadow: 0 8px 30px rgba(0,0,0,0.12); }
         html { scroll-behavior: smooth; }
         .toc-link { transition: color 0.15s ease, padding-left 0.15s ease; }
-        .toc-link:hover { color: #1b6df5; padding-left: 4px; }
+        .toc-link:hover { color: #00AEEF; padding-left: 4px; }
         .param-row td { padding: 0.5rem 0; }
         .param-row td:first-child code { font-weight: 500; }
         .section-divider { height: 1px; background: linear-gradient(to right, transparent, #e2e8f0, transparent); }
@@ -51,10 +51,8 @@
 <nav class="sticky top-0 z-50 bg-white/80 backdrop-blur-lg border-b border-slate-200">
     <div class="max-w-7xl mx-auto px-6 py-4 flex items-center justify-between">
         <div class="flex items-center gap-3">
-            <div class="w-8 h-8 bg-netskope-600 rounded-lg flex items-center justify-center">
-                <span class="text-white font-bold text-sm">N</span>
-            </div>
-            <span class="font-semibold text-lg">Netskope SDK</span>
+            <svg class="h-5" viewBox="0 0 156 24" fill="none" xmlns="http://www.w3.org/2000/svg"><path d="M9.27374 6.646C9.04602 7.16292 8.7171 7.67985 8.23637 8.12293C7.22431 9.10755 5.95923 9.50139 4.64355 9.55063L9.57735 14.3506C9.65326 13.0706 10.0328 11.8399 11.0448 10.8552C11.5003 10.4122 12.0316 10.0922 12.5629 9.84601C11.0448 9.30447 9.83037 8.12293 9.27374 6.646Z" fill="#FF8200"/><path d="M8.18505 17.5014C10.0574 15.6799 10.0574 12.726 8.18505 10.9045C6.31274 9.08294 3.27655 9.08294 1.40424 10.9045C-0.468079 12.726-0.468079 15.6799 1.40424 17.5014C3.27655 19.323 6.31274 19.323 8.18505 17.5014Z" fill="#FF8200"/><path d="M17.9009 1.477C19.7732 3.29855 19.7732 6.2524 17.9009 8.07395C16.0286 9.8955 12.9924 9.8955 11.1201 8.07395C9.24774 6.2524 9.24774 3.29855 11.1201 1.477C12.9924-0.344547 16.0286-0.344547 17.9009 1.477Z" fill="#00205B"/><path d="M37.3328 1.477C35.4605-0.344547 32.4243-0.344547 30.552 1.477C29.6411 2.36316 29.1857 3.49547 29.1604 4.62778C29.0845 5.90779 28.705 7.13856 27.6929 8.12318C27.2375 8.56626 26.7061 8.91088 26.1748 9.13242C27.7182 9.67396 28.9327 10.8555 29.4893 12.357C29.717 11.8155 30.0459 11.3232 30.5267 10.8801C31.5387 9.8955 32.8038 9.50165 34.1195 9.45242C35.3087 9.4278 36.4725 8.96011 37.3581 8.09857C39.2051 6.25241 39.2051 3.29855 37.3328 1.477ZM35.6629 6.44933C35.2075 6.89241 34.5749 7.13856 33.9424 7.13856C33.2845 7.13856 32.6773 6.89241 32.2219 6.44933C31.2604 5.51394 31.2604 4.0124 32.2219 3.07701C32.6773 2.63393 33.3098 2.38777 33.9424 2.38777C34.6002 2.38777 35.2075 2.63393 35.6629 3.07701C36.1183 3.52009 36.3713 4.13547 36.3713 4.75086C36.3966 5.41548 36.1436 6.00625 35.6629 6.44933Z" fill="#00A9CE"/><path d="M27.6177 10.9294C29.49 12.7509 29.49 15.7048 27.6177 17.5263C25.7454 19.3479 22.7092 19.3479 20.8369 17.5263C18.9645 15.7048 18.9645 12.7509 20.8369 10.9294C22.7092 9.10785 25.7454 9.10785 27.6177 10.9294Z" fill="#00205B"/><path d="M20.785 8.12284C19.7729 7.13822 19.3681 5.90745 19.3175 4.62744L14.3584 9.42746C15.6741 9.50131 16.9392 9.87054 17.9512 10.8552C18.9633 11.8398 19.3681 13.0706 19.4187 14.3506L24.3525 9.55054C23.0621 9.50131 21.7971 9.10746 20.785 8.12284Z" fill="#00205B"/><path d="M78.8816 18.9783C76.4527 18.9783 74.9346 17.526 74.9346 15.2122V1.00903C74.9346 0.442877 75.3647 0.0244141 75.9466 0.0244141C76.5286 0.0244141 76.9587 0.467493 76.9587 1.00903V5.83367H80.5262C81.0575 5.83367 81.513 6.27675 81.513 6.79367C81.513 7.28598 81.0575 7.72906 80.5262 7.72906H76.9587V15.0891C76.9587 16.4429 77.6418 17.083 79.084 17.083C79.6154 17.083 79.9443 16.9845 80.172 16.9106C80.2985 16.8614 80.3997 16.8368 80.5262 16.8368C81.0322 16.8368 81.4877 17.2799 81.4877 17.7722C81.4877 18.166 81.26 18.486 80.8298 18.6337C80.3491 18.7814 79.7166 18.9783 78.8816 18.9783Z" fill="#00205B"/><path d="M89.6348 18.9784C87.889 18.9784 85.8649 18.3138 84.4733 17.3045C84.2962 17.1814 84.0938 16.8614 84.0938 16.5414C84.0938 16.0245 84.5492 15.5568 85.1058 15.5568C85.3335 15.5568 85.5612 15.6307 85.7384 15.7537C87.0034 16.6399 88.3191 17.083 89.7107 17.083C91.2794 17.083 92.3674 16.2707 92.3674 15.1384V15.0891C92.3674 14.0307 91.3047 13.5384 89.3059 12.9968L89.2553 12.9722L89.2047 12.9476C87.1805 12.3814 84.6757 11.6676 84.6757 9.23064V9.18141C84.6757 6.99063 86.5986 5.39062 89.2553 5.39062C90.6468 5.39062 92.2155 5.80909 93.5565 6.54755L93.5818 6.57217C93.9107 6.79371 94.0879 7.08909 94.0879 7.43371C94.0879 7.95063 93.6324 8.41833 93.0758 8.41833C92.8734 8.41833 92.671 8.3691 92.5192 8.27064C91.4312 7.65525 90.2926 7.31063 89.2047 7.31063C87.7372 7.31063 86.7251 8.02448 86.7251 9.05833V9.10756C86.7251 10.1414 88.0661 10.5845 89.9637 11.126C91.6336 11.5691 94.4168 12.3322 94.4168 14.966V15.0153C94.3915 17.2799 92.3927 18.9784 89.6348 18.9784Z" fill="#00205B"/><path d="M98.7942 18.8308C98.2123 18.8308 97.7568 18.4124 97.7568 17.8462V1.00924C97.7568 0.443079 98.187 0 98.7689 0C99.3508 0 99.781 0.443079 99.781 1.00924V17.8216C99.8063 18.4124 99.3761 18.8308 98.7942 18.8308Z" fill="#00205B"/><path d="M117.896 19.0031C114.05 19.0031 111.014 16.0246 111.014 12.2092V12.16C111.014 8.31998 114.05 5.31689 117.946 5.31689C121.792 5.31689 124.828 8.29537 124.828 12.1108V12.16C124.828 16.0246 121.792 19.0031 117.896 19.0031ZM117.896 7.2369C115.188 7.2369 113.139 9.32922 113.139 12.1354V12.1846C113.139 14.9416 115.239 17.1323 117.946 17.1323C120.654 17.1323 122.703 15.04 122.703 12.2338V12.1846C122.703 9.40307 120.603 7.2369 117.896 7.2369Z" fill="#00205B"/><path d="M65.3703 19.0031C61.6004 19.0031 58.7666 16.0739 58.7666 12.1846V12.1354C58.7666 8.31998 61.5751 5.31689 65.1679 5.31689C68.7607 5.31689 71.3668 8.17229 71.3668 12.0862C71.3668 12.5785 70.886 13.0462 70.3547 13.0462H63.4727C62.9161 13.0462 62.5112 12.6523 62.5112 12.1354C62.5112 11.5938 62.9161 11.2 63.4727 11.2H69.2161C68.9378 9.27999 67.7487 7.21229 65.1173 7.21229C62.9667 7.21229 61.2462 8.88614 60.8919 11.2492L60.8413 11.6431C60.7907 12.0615 60.7907 12.4308 60.8413 12.7754V12.8C61.0943 15.3354 62.9667 17.1077 65.3703 17.1077C66.8378 17.1077 68.0523 16.6154 69.1908 15.5323C69.3933 15.3354 69.621 15.2616 69.874 15.2616C70.4306 15.2616 70.886 15.68 70.886 16.2216C70.886 16.3939 70.8354 16.6646 70.5571 16.9108C69.0643 18.3877 67.5209 19.0031 65.3703 19.0031Z" fill="#00205B"/><path d="M128.473 24.0001C127.891 24.0001 127.436 23.5816 127.436 22.9909V11.5693C127.436 7.8031 130.421 5.34155 133.963 5.34155C137.809 5.34155 140.845 8.32003 140.845 12.1354V12.1847C140.845 16.0247 137.809 19.0278 133.913 19.0278C132.167 19.0278 130.598 18.4124 129.46 17.2801V22.9909C129.46 23.5816 129.055 24.0001 128.473 24.0001ZM129.46 12.7508C129.687 15.237 131.408 16.9847 133.736 17.1078C133.812 17.1078 133.913 17.1078 133.989 17.1078C134.824 17.1078 135.608 16.9108 136.291 16.517C136.367 16.4677 136.418 16.4431 136.493 16.3939C137.05 16.0247 137.531 15.557 137.885 14.9416C137.936 14.8677 137.961 14.8185 138.012 14.7447C138.087 14.6216 138.163 14.4739 138.214 14.3262C138.492 13.6616 138.644 12.9477 138.644 12.2093V12.16C138.644 11.5693 138.543 10.9785 138.366 10.437C138.315 10.2893 138.265 10.1416 138.189 9.99388C138.138 9.84619 138.062 9.69849 137.986 9.57542C137.556 8.83695 136.974 8.22156 136.24 7.8031C136.165 7.75387 136.114 7.72925 136.038 7.70464C135.912 7.63079 135.76 7.58156 135.608 7.53233C135.304 7.43387 135.001 7.33541 134.697 7.28618C134.545 7.26156 134.368 7.23694 134.216 7.23694C134.14 7.23694 134.039 7.23694 133.963 7.23694C131.509 7.23694 129.738 8.98464 129.485 11.5693V12.7508H129.46Z" fill="#00205B"/><path d="M108.686 18.8309C108.407 18.8309 108.154 18.7324 107.952 18.5355L101.677 12.357C101.298 11.9878 101.272 11.4216 101.627 11.0278L101.652 10.9785L107.37 5.83389C107.547 5.63697 107.775 5.53851 108.028 5.51389C108.306 5.48928 108.559 5.56312 108.762 5.73543C109.192 6.08005 109.242 6.72005 108.888 7.13852L108.837 7.18775L103.777 11.6678L109.369 17.1816C109.571 17.3786 109.672 17.6247 109.672 17.8955C109.672 18.1663 109.571 18.4124 109.369 18.5847C109.217 18.7324 108.964 18.8309 108.686 18.8309Z" fill="#00205B"/><path d="M54.8197 19.003C54.2378 19.003 53.7824 18.5599 53.7824 17.9938V11.1014C53.7824 8.6891 52.4161 7.2614 50.1137 7.2614C47.8112 7.2614 46.4449 8.6891 46.4449 11.1014V17.9938C46.4449 18.5599 45.9895 19.003 45.4076 19.003C44.8256 19.003 44.3955 18.5845 44.3955 17.9938V10.9045C44.3955 7.55679 46.5714 5.39062 49.9112 5.39062H50.2655C53.6306 5.39062 55.7812 7.55679 55.7812 10.9045V17.9938C55.8065 18.5845 55.4017 19.003 54.8197 19.003Z" fill="#00205B"/><path d="M150.004 19.0031C146.234 19.0031 143.4 16.0739 143.4 12.1846V12.1354C143.4 8.31998 146.209 5.31689 149.802 5.31689C153.394 5.31689 156.001 8.17229 156.001 12.0862C156.001 12.6031 155.545 13.0462 154.988 13.0462H148.081C147.525 13.0462 147.12 12.6523 147.12 12.1354C147.12 11.5938 147.525 11.2 148.081 11.2H153.825C153.546 9.27999 152.357 7.21229 149.726 7.21229C147.575 7.21229 145.855 8.88614 145.5 11.2492L145.45 11.6431C145.399 12.0615 145.399 12.4308 145.45 12.7754V12.8C145.703 15.3354 147.575 17.1077 149.979 17.1077C151.446 17.1077 152.661 16.6154 153.799 15.5323C154.002 15.3354 154.229 15.2616 154.482 15.2616C155.039 15.2616 155.494 15.68 155.494 16.2216C155.494 16.3939 155.444 16.6646 155.166 16.9108C153.698 18.3877 152.155 19.0031 150.004 19.0031Z" fill="#00205B"/></svg>
+            <span class="font-semibold text-lg">SDK</span>
             <span class="text-xs bg-netskope-100 text-netskope-700 px-2 py-0.5 rounded-full font-medium">v1.0.0</span>
         </div>
         <div class="hidden lg:flex items-center gap-6 text-sm">
@@ -78,23 +76,22 @@
 </nav>
 
 <!-- ═══════════════════════ HERO ═══════════════════════ -->
-<header class="relative overflow-hidden">
-    <div class="absolute inset-0 bg-gradient-to-br from-netskope-50 via-white to-indigo-50"></div>
+<header class="relative overflow-hidden" style="background: linear-gradient(135deg, #00143c 0%, #001d52 50%, #002968 100%);">
     <div class="relative max-w-7xl mx-auto px-6 py-24 text-center">
-        <div class="inline-block mb-6 px-4 py-1.5 bg-netskope-100 text-netskope-700 text-sm font-medium rounded-full">
+        <div class="inline-block mb-6 px-4 py-1.5 bg-white/10 text-netskope-300 text-sm font-medium rounded-full border border-white/20">
             Python 3.11+ &bull; Typed &bull; Sync + Async &bull; Pydantic v2
         </div>
-        <h1 class="text-5xl md:text-6xl font-bold tracking-tight mb-6">
+        <h1 class="text-5xl md:text-6xl font-bold tracking-tight mb-6 text-white">
             The Netskope<br>
-            <span class="bg-clip-text text-transparent bg-gradient-to-r from-netskope-600 to-indigo-600">Python SDK</span>
+            <span class="bg-clip-text text-transparent bg-gradient-to-r from-netskope-500 to-netskope-300">Python SDK</span>
         </h1>
-        <p class="text-xl text-slate-600 max-w-2xl mx-auto mb-10 leading-relaxed">
+        <p class="text-xl text-slate-300 max-w-2xl mx-auto mb-10 leading-relaxed">
             A modern, typed, and intuitive interface to the Netskope REST API v2.
             Auto-pagination, retries, and rich models &mdash; so you can focus on security, not HTTP plumbing.
         </p>
         <div class="flex flex-col sm:flex-row items-center justify-center gap-4">
             <div class="code-block px-6 py-3"><code>pip install netskope-py-sdk</code></div>
-            <a href="#quickstart" class="px-6 py-3 bg-netskope-600 text-white rounded-xl font-medium hover:bg-netskope-700 transition-colors">Get Started &rarr;</a>
+            <a href="#quickstart" class="px-6 py-3 bg-netskope-500 text-white rounded-xl font-medium hover:bg-netskope-400 transition-colors">Get Started &rarr;</a>
         </div>
     </div>
 </header>
@@ -222,6 +219,134 @@ client.<span class="fn">close</span>()</code></div>
     alerts = client.alerts.<span class="fn">list</span>().<span class="fn">to_list</span>(max_items=<span class="nb">100</span>)
     <span class="bi">print</span>(f<span class="s">"Found {len(alerts)} alerts"</span>)
 <span class="cm"># Connection pool automatically closed</span></code></div>
+</section>
+
+<div class="section-divider max-w-4xl mx-auto"></div>
+
+<!-- ═══════════════════════ REAL-WORLD EXAMPLES ═══════════════════════ -->
+<section id="examples-section" class="max-w-4xl mx-auto px-6 py-16">
+    <h2 class="text-3xl font-bold mb-8">Real-World Examples</h2>
+
+    <div class="space-y-8">
+        <div>
+            <h3 class="font-semibold text-lg mb-3">SIEM Integration &mdash; Ship Events to Splunk/Sentinel</h3>
+            <div class="code-block p-5">
+<code><span class="kw">from</span> netskope <span class="kw">import</span> NetskopeClient
+<span class="kw">from</span> datetime <span class="kw">import</span> datetime, timedelta
+
+client = NetskopeClient()
+end = datetime.<span class="fn">now</span>()
+start = end - timedelta(hours=<span class="nb">1</span>)
+
+<span class="cm"># Stream all event types from the last hour</span>
+<span class="kw">for</span> event_type <span class="kw">in</span> [<span class="s">"application"</span>, <span class="s">"network"</span>, <span class="s">"page"</span>, <span class="s">"alert"</span>]:
+    <span class="kw">for</span> event <span class="kw">in</span> client.events.<span class="fn">list</span>(event_type, start_time=start, end_time=end):
+        <span class="fn">send_to_siem</span>(event.<span class="fn">model_dump</span>(exclude_none=<span class="nb">True</span>))
+
+client.<span class="fn">close</span>()</code></div>
+        </div>
+
+        <div>
+            <h3 class="font-semibold text-lg mb-3">Automated Threat Response &mdash; Block IOCs from Feed</h3>
+            <div class="code-block p-5">
+<code><span class="kw">from</span> netskope <span class="kw">import</span> NetskopeClient
+
+client = NetskopeClient()
+
+<span class="cm"># Get IOCs from your threat intel feed</span>
+malicious_urls = <span class="fn">fetch_threat_intel</span>()  <span class="cm"># → ["malware.com", "phish.org", ...]</span>
+
+<span class="cm"># Create or update the blocklist</span>
+<span class="kw">try</span>:
+    blocklist = client.url_lists.<span class="fn">create</span>(
+        name=<span class="s">"auto-threat-intel"</span>,
+        urls=malicious_urls,
+        list_type=<span class="s">"exact"</span>,
+    )
+<span class="kw">except</span> Exception:
+    <span class="cm"># List already exists — find and update it</span>
+    <span class="kw">for</span> ul <span class="kw">in</span> client.url_lists.<span class="fn">list</span>():
+        <span class="kw">if</span> ul.name == <span class="s">"auto-threat-intel"</span>:
+            client.url_lists.<span class="fn">update</span>(ul.id, urls=malicious_urls)
+            <span class="kw">break</span>
+
+<span class="cm"># Deploy immediately</span>
+client.url_lists.<span class="fn">deploy</span>()
+<span class="bi">print</span>(f<span class="s">"Blocked {len(malicious_urls)} malicious URLs"</span>)</code></div>
+        </div>
+
+        <div>
+            <h3 class="font-semibold text-lg mb-3">Infrastructure Health Check</h3>
+            <div class="code-block p-5">
+<code><span class="kw">from</span> netskope <span class="kw">import</span> NetskopeClient
+
+<span class="kw">with</span> NetskopeClient() <span class="kw">as</span> client:
+    publishers = client.publishers.<span class="fn">list</span>().<span class="fn">to_list</span>()
+    connected = [p <span class="kw">for</span> p <span class="kw">in</span> publishers <span class="kw">if</span> p.status == <span class="s">"connected"</span>]
+    down = [p <span class="kw">for</span> p <span class="kw">in</span> publishers <span class="kw">if</span> p.status != <span class="s">"connected"</span>]
+
+    <span class="bi">print</span>(f<span class="s">"Publishers: {len(connected)} connected, {len(down)} down"</span>)
+    <span class="kw">for</span> p <span class="kw">in</span> down:
+        <span class="bi">print</span>(f<span class="s">"  ⚠ {p.publisher_name} is {p.status}"</span>)
+
+    apps = client.private_apps.<span class="fn">list</span>().<span class="fn">to_list</span>()
+    <span class="bi">print</span>(f<span class="s">"Private apps: {len(apps)}"</span>)</code></div>
+        </div>
+
+        <div>
+            <h3 class="font-semibold text-lg mb-3">User Lifecycle Automation</h3>
+            <div class="code-block p-5">
+<code><span class="kw">from</span> netskope <span class="kw">import</span> NetskopeClient
+
+client = NetskopeClient()
+
+<span class="cm"># Onboard new employees from HR system</span>
+new_hires = [
+    {<span class="s">"email"</span>: <span class="s">"alice@company.com"</span>, <span class="s">"name"</span>: <span class="s">"Alice Smith"</span>},
+    {<span class="s">"email"</span>: <span class="s">"bob@company.com"</span>, <span class="s">"name"</span>: <span class="s">"Bob Jones"</span>},
+]
+
+<span class="kw">for</span> hire <span class="kw">in</span> new_hires:
+    user = client.scim.users.<span class="fn">create</span>(
+        user_name=hire[<span class="s">"email"</span>],
+        email=hire[<span class="s">"email"</span>],
+        display_name=hire[<span class="s">"name"</span>],
+    )
+    <span class="bi">print</span>(f<span class="s">"Provisioned {user.user_name} (id={user.id})"</span>)
+
+<span class="cm"># Offboard departing employees</span>
+<span class="kw">for</span> email <span class="kw">in</span> departing_employees:
+    users = client.scim.users.<span class="fn">list</span>(
+        filter_expr=f<span class="s">'userName eq "{email}"'</span>
+    ).<span class="fn">to_list</span>()
+    <span class="kw">for</span> user <span class="kw">in</span> users:
+        client.scim.users.<span class="fn">update</span>(user.id, active=<span class="nb">False</span>)
+        <span class="bi">print</span>(f<span class="s">"Deactivated {user.user_name}"</span>)</code></div>
+        </div>
+
+        <div>
+            <h3 class="font-semibold text-lg mb-3">High-Throughput Async Processing</h3>
+            <div class="code-block p-5">
+<code><span class="kw">import</span> asyncio
+<span class="kw">from</span> netskope <span class="kw">import</span> AsyncNetskopeClient
+
+<span class="kw">async def</span> <span class="fn">monitor_all_event_types</span>():
+    <span class="kw">async with</span> AsyncNetskopeClient() <span class="kw">as</span> client:
+        event_types = [<span class="s">"application"</span>, <span class="s">"network"</span>, <span class="s">"page"</span>, <span class="s">"alert"</span>]
+
+        <span class="cm"># Fetch all event types concurrently</span>
+        tasks = [
+            client.events.<span class="fn">list</span>(et, page_size=<span class="nb">100</span>).<span class="fn">to_list</span>(max_items=<span class="nb">500</span>)
+            <span class="kw">for</span> et <span class="kw">in</span> event_types
+        ]
+        results = <span class="kw">await</span> asyncio.<span class="fn">gather</span>(*tasks)
+
+        <span class="kw">for</span> et, events <span class="kw">in</span> <span class="bi">zip</span>(event_types, results):
+            <span class="bi">print</span>(f<span class="s">"{et}: {len(events)} events"</span>)
+
+asyncio.<span class="fn">run</span>(monitor_all_event_types())</code></div>
+        </div>
+    </div>
 </section>
 
 <div class="section-divider max-w-4xl mx-auto"></div>
@@ -994,134 +1119,6 @@ UrlListType.REGEX       <span class="cm"># "regex"</span></code></div>
 
 <div class="section-divider max-w-4xl mx-auto"></div>
 
-<!-- ═══════════════════════ REAL-WORLD EXAMPLES ═══════════════════════ -->
-<section id="examples-section" class="max-w-4xl mx-auto px-6 py-16">
-    <h2 class="text-3xl font-bold mb-8">Real-World Examples</h2>
-
-    <div class="space-y-8">
-        <div>
-            <h3 class="font-semibold text-lg mb-3">SIEM Integration &mdash; Ship Events to Splunk/Sentinel</h3>
-            <div class="code-block p-5">
-<code><span class="kw">from</span> netskope <span class="kw">import</span> NetskopeClient
-<span class="kw">from</span> datetime <span class="kw">import</span> datetime, timedelta
-
-client = NetskopeClient()
-end = datetime.<span class="fn">now</span>()
-start = end - timedelta(hours=<span class="nb">1</span>)
-
-<span class="cm"># Stream all event types from the last hour</span>
-<span class="kw">for</span> event_type <span class="kw">in</span> [<span class="s">"application"</span>, <span class="s">"network"</span>, <span class="s">"page"</span>, <span class="s">"alert"</span>]:
-    <span class="kw">for</span> event <span class="kw">in</span> client.events.<span class="fn">list</span>(event_type, start_time=start, end_time=end):
-        <span class="fn">send_to_siem</span>(event.<span class="fn">model_dump</span>(exclude_none=<span class="nb">True</span>))
-
-client.<span class="fn">close</span>()</code></div>
-        </div>
-
-        <div>
-            <h3 class="font-semibold text-lg mb-3">Automated Threat Response &mdash; Block IOCs from Feed</h3>
-            <div class="code-block p-5">
-<code><span class="kw">from</span> netskope <span class="kw">import</span> NetskopeClient
-
-client = NetskopeClient()
-
-<span class="cm"># Get IOCs from your threat intel feed</span>
-malicious_urls = <span class="fn">fetch_threat_intel</span>()  <span class="cm"># → ["malware.com", "phish.org", ...]</span>
-
-<span class="cm"># Create or update the blocklist</span>
-<span class="kw">try</span>:
-    blocklist = client.url_lists.<span class="fn">create</span>(
-        name=<span class="s">"auto-threat-intel"</span>,
-        urls=malicious_urls,
-        list_type=<span class="s">"exact"</span>,
-    )
-<span class="kw">except</span> Exception:
-    <span class="cm"># List already exists — find and update it</span>
-    <span class="kw">for</span> ul <span class="kw">in</span> client.url_lists.<span class="fn">list</span>():
-        <span class="kw">if</span> ul.name == <span class="s">"auto-threat-intel"</span>:
-            client.url_lists.<span class="fn">update</span>(ul.id, urls=malicious_urls)
-            <span class="kw">break</span>
-
-<span class="cm"># Deploy immediately</span>
-client.url_lists.<span class="fn">deploy</span>()
-<span class="bi">print</span>(f<span class="s">"Blocked {len(malicious_urls)} malicious URLs"</span>)</code></div>
-        </div>
-
-        <div>
-            <h3 class="font-semibold text-lg mb-3">Infrastructure Health Check</h3>
-            <div class="code-block p-5">
-<code><span class="kw">from</span> netskope <span class="kw">import</span> NetskopeClient
-
-<span class="kw">with</span> NetskopeClient() <span class="kw">as</span> client:
-    publishers = client.publishers.<span class="fn">list</span>().<span class="fn">to_list</span>()
-    connected = [p <span class="kw">for</span> p <span class="kw">in</span> publishers <span class="kw">if</span> p.status == <span class="s">"connected"</span>]
-    down = [p <span class="kw">for</span> p <span class="kw">in</span> publishers <span class="kw">if</span> p.status != <span class="s">"connected"</span>]
-
-    <span class="bi">print</span>(f<span class="s">"Publishers: {len(connected)} connected, {len(down)} down"</span>)
-    <span class="kw">for</span> p <span class="kw">in</span> down:
-        <span class="bi">print</span>(f<span class="s">"  ⚠ {p.publisher_name} is {p.status}"</span>)
-
-    apps = client.private_apps.<span class="fn">list</span>().<span class="fn">to_list</span>()
-    <span class="bi">print</span>(f<span class="s">"Private apps: {len(apps)}"</span>)</code></div>
-        </div>
-
-        <div>
-            <h3 class="font-semibold text-lg mb-3">User Lifecycle Automation</h3>
-            <div class="code-block p-5">
-<code><span class="kw">from</span> netskope <span class="kw">import</span> NetskopeClient
-
-client = NetskopeClient()
-
-<span class="cm"># Onboard new employees from HR system</span>
-new_hires = [
-    {<span class="s">"email"</span>: <span class="s">"alice@company.com"</span>, <span class="s">"name"</span>: <span class="s">"Alice Smith"</span>},
-    {<span class="s">"email"</span>: <span class="s">"bob@company.com"</span>, <span class="s">"name"</span>: <span class="s">"Bob Jones"</span>},
-]
-
-<span class="kw">for</span> hire <span class="kw">in</span> new_hires:
-    user = client.scim.users.<span class="fn">create</span>(
-        user_name=hire[<span class="s">"email"</span>],
-        email=hire[<span class="s">"email"</span>],
-        display_name=hire[<span class="s">"name"</span>],
-    )
-    <span class="bi">print</span>(f<span class="s">"Provisioned {user.user_name} (id={user.id})"</span>)
-
-<span class="cm"># Offboard departing employees</span>
-<span class="kw">for</span> email <span class="kw">in</span> departing_employees:
-    users = client.scim.users.<span class="fn">list</span>(
-        filter_expr=f<span class="s">'userName eq "{email}"'</span>
-    ).<span class="fn">to_list</span>()
-    <span class="kw">for</span> user <span class="kw">in</span> users:
-        client.scim.users.<span class="fn">update</span>(user.id, active=<span class="nb">False</span>)
-        <span class="bi">print</span>(f<span class="s">"Deactivated {user.user_name}"</span>)</code></div>
-        </div>
-
-        <div>
-            <h3 class="font-semibold text-lg mb-3">High-Throughput Async Processing</h3>
-            <div class="code-block p-5">
-<code><span class="kw">import</span> asyncio
-<span class="kw">from</span> netskope <span class="kw">import</span> AsyncNetskopeClient
-
-<span class="kw">async def</span> <span class="fn">monitor_all_event_types</span>():
-    <span class="kw">async with</span> AsyncNetskopeClient() <span class="kw">as</span> client:
-        event_types = [<span class="s">"application"</span>, <span class="s">"network"</span>, <span class="s">"page"</span>, <span class="s">"alert"</span>]
-
-        <span class="cm"># Fetch all event types concurrently</span>
-        tasks = [
-            client.events.<span class="fn">list</span>(et, page_size=<span class="nb">100</span>).<span class="fn">to_list</span>(max_items=<span class="nb">500</span>)
-            <span class="kw">for</span> et <span class="kw">in</span> event_types
-        ]
-        results = <span class="kw">await</span> asyncio.<span class="fn">gather</span>(*tasks)
-
-        <span class="kw">for</span> et, events <span class="kw">in</span> <span class="bi">zip</span>(event_types, results):
-            <span class="bi">print</span>(f<span class="s">"{et}: {len(events)} events"</span>)
-
-asyncio.<span class="fn">run</span>(monitor_all_event_types())</code></div>
-        </div>
-    </div>
-</section>
-
-<div class="section-divider max-w-4xl mx-auto"></div>
-
 <!-- ═══════════════════════ RESOURCE OVERVIEW ═══════════════════════ -->
 <section class="max-w-4xl mx-auto px-6 py-16">
     <h2 class="text-3xl font-bold mb-8">Complete API Map</h2>
@@ -1145,7 +1142,7 @@ asyncio.<span class="fn">run</span>(monitor_all_event_types())</code></div>
     <div class="max-w-7xl mx-auto px-6 py-12">
         <div class="flex flex-col md:flex-row items-center justify-between gap-4">
             <div class="flex items-center gap-2">
-                <div class="w-6 h-6 bg-netskope-600 rounded flex items-center justify-center"><span class="text-white font-bold text-xs">N</span></div>
+                <svg class="h-4" viewBox="0 0 156 24" fill="none" xmlns="http://www.w3.org/2000/svg"><path d="M9.27374 6.646C9.04602 7.16292 8.7171 7.67985 8.23637 8.12293C7.22431 9.10755 5.95923 9.50139 4.64355 9.55063L9.57735 14.3506C9.65326 13.0706 10.0328 11.8399 11.0448 10.8552C11.5003 10.4122 12.0316 10.0922 12.5629 9.84601C11.0448 9.30447 9.83037 8.12293 9.27374 6.646Z" fill="#FF8200"/><path d="M8.18505 17.5014C10.0574 15.6799 10.0574 12.726 8.18505 10.9045C6.31274 9.08294 3.27655 9.08294 1.40424 10.9045C-0.468079 12.726-0.468079 15.6799 1.40424 17.5014C3.27655 19.323 6.31274 19.323 8.18505 17.5014Z" fill="#FF8200"/><path d="M17.9009 1.477C19.7732 3.29855 19.7732 6.2524 17.9009 8.07395C16.0286 9.8955 12.9924 9.8955 11.1201 8.07395C9.24774 6.2524 9.24774 3.29855 11.1201 1.477C12.9924-0.344547 16.0286-0.344547 17.9009 1.477Z" fill="#00205B"/><path d="M37.3328 1.477C35.4605-0.344547 32.4243-0.344547 30.552 1.477C29.6411 2.36316 29.1857 3.49547 29.1604 4.62778C29.0845 5.90779 28.705 7.13856 27.6929 8.12318C27.2375 8.56626 26.7061 8.91088 26.1748 9.13242C27.7182 9.67396 28.9327 10.8555 29.4893 12.357C29.717 11.8155 30.0459 11.3232 30.5267 10.8801C31.5387 9.8955 32.8038 9.50165 34.1195 9.45242C35.3087 9.4278 36.4725 8.96011 37.3581 8.09857C39.2051 6.25241 39.2051 3.29855 37.3328 1.477ZM35.6629 6.44933C35.2075 6.89241 34.5749 7.13856 33.9424 7.13856C33.2845 7.13856 32.6773 6.89241 32.2219 6.44933C31.2604 5.51394 31.2604 4.0124 32.2219 3.07701C32.6773 2.63393 33.3098 2.38777 33.9424 2.38777C34.6002 2.38777 35.2075 2.63393 35.6629 3.07701C36.1183 3.52009 36.3713 4.13547 36.3713 4.75086C36.3966 5.41548 36.1436 6.00625 35.6629 6.44933Z" fill="#00A9CE"/><path d="M27.6177 10.9294C29.49 12.7509 29.49 15.7048 27.6177 17.5263C25.7454 19.3479 22.7092 19.3479 20.8369 17.5263C18.9645 15.7048 18.9645 12.7509 20.8369 10.9294C22.7092 9.10785 25.7454 9.10785 27.6177 10.9294Z" fill="#00205B"/><path d="M20.785 8.12284C19.7729 7.13822 19.3681 5.90745 19.3175 4.62744L14.3584 9.42746C15.6741 9.50131 16.9392 9.87054 17.9512 10.8552C18.9633 11.8398 19.3681 13.0706 19.4187 14.3506L24.3525 9.55054C23.0621 9.50131 21.7971 9.10746 20.785 8.12284Z" fill="#00205B"/><path d="M54.8197 19.003C54.2378 19.003 53.7824 18.5599 53.7824 17.9938V11.1014C53.7824 8.6891 52.4161 7.2614 50.1137 7.2614C47.8112 7.2614 46.4449 8.6891 46.4449 11.1014V17.9938C46.4449 18.5599 45.9895 19.003 45.4076 19.003C44.8256 19.003 44.3955 18.5845 44.3955 17.9938V10.9045C44.3955 7.55679 46.5714 5.39062 49.9112 5.39062H50.2655C53.6306 5.39062 55.7812 7.55679 55.7812 10.9045V17.9938C55.8065 18.5845 55.4017 19.003 54.8197 19.003Z" fill="#00205B"/><path d="M65.3703 19.0031C61.6004 19.0031 58.7666 16.0739 58.7666 12.1846V12.1354C58.7666 8.31998 61.5751 5.31689 65.1679 5.31689C68.7607 5.31689 71.3668 8.17229 71.3668 12.0862C71.3668 12.5785 70.886 13.0462 70.3547 13.0462H63.4727C62.9161 13.0462 62.5112 12.6523 62.5112 12.1354C62.5112 11.5938 62.9161 11.2 63.4727 11.2H69.2161C68.9378 9.27999 67.7487 7.21229 65.1173 7.21229C62.9667 7.21229 61.2462 8.88614 60.8919 11.2492L60.8413 11.6431C60.7907 12.0615 60.7907 12.4308 60.8413 12.7754V12.8C61.0943 15.3354 62.9667 17.1077 65.3703 17.1077C66.8378 17.1077 68.0523 16.6154 69.1908 15.5323C69.3933 15.3354 69.621 15.2616 69.874 15.2616C70.4306 15.2616 70.886 15.68 70.886 16.2216C70.886 16.3939 70.8354 16.6646 70.5571 16.9108C69.0643 18.3877 67.5209 19.0031 65.3703 19.0031Z" fill="#00205B"/></svg>
                 <span class="text-sm text-slate-600">netskope-py-sdk v1.0.0</span>
             </div>
             <div class="flex items-center gap-6 text-sm text-slate-500">
