@@ -1,3 +1,3 @@
 """Version information for the Netskope SDK."""
 
-__version__ = "1.0.2"
+__version__ = "1.0.3"
