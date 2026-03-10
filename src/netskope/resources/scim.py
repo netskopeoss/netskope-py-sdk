@@ -40,6 +40,7 @@ def _validate_id(value: str, name: str) -> None:
 
         raise ValidationError(f"Invalid {name} format: {value!r}")
 
+
 _USERS_PATH = "/api/v2/scim/Users"
 _GROUPS_PATH = "/api/v2/scim/Groups"
 

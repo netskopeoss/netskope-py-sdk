@@ -110,9 +110,8 @@ class EventsResource(SyncResource):
         _valid = {e.value for e in EventType}
         if et not in _valid:
             from netskope.exceptions import ValidationError
-            raise ValidationError(
-                f"Invalid event_type: {et!r}. Must be one of {sorted(_valid)}"
-            )
+
+            raise ValidationError(f"Invalid event_type: {et!r}. Must be one of {sorted(_valid)}")
         model = _MODEL_MAP.get(et, Event)
         params = _build_params(query, fields, start_time, end_time, group_by, order_by, descending)
         return SyncPaginatedResponse(
@@ -147,9 +146,8 @@ class AsyncEventsResource(AsyncResource):
         _valid = {e.value for e in EventType}
         if et not in _valid:
             from netskope.exceptions import ValidationError
-            raise ValidationError(
-                f"Invalid event_type: {et!r}. Must be one of {sorted(_valid)}"
-            )
+
+            raise ValidationError(f"Invalid event_type: {et!r}. Must be one of {sorted(_valid)}")
         model = _MODEL_MAP.get(et, Event)
         params = _build_params(query, fields, start_time, end_time, group_by, order_by, descending)
         return AsyncPaginatedResponse(

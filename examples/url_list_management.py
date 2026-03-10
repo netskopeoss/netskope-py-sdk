@@ -11,7 +11,6 @@ Usage:
 from __future__ import annotations
 
 from netskope import NetskopeClient
-from netskope.exceptions import APIError
 
 
 def main() -> None:

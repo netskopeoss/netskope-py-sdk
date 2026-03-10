@@ -30,9 +30,9 @@ def main() -> None:
     ]
 
     for event_type in event_types:
-        print(f"\n{'='*60}")
+        print(f"\n{'=' * 60}")
         print(f" {event_type.upper()} Events (last 24h)")
-        print(f"{'='*60}")
+        print(f"{'=' * 60}")
 
         events = client.events.list(
             event_type,

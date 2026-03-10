@@ -67,6 +67,7 @@ class Alert(NetskopeModel, TimestampMixin):
         if v is None or v == "":
             return None
         return int(v)
+
     ccl: str | None = None
     access_method: str | None = None
     traffic_type: str | None = None

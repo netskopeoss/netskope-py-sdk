@@ -19,13 +19,16 @@ class TestAlertsResource:
     @respx.mock
     def test_list_returns_alerts(self) -> None:
         respx.get("https://t.goskope.com/api/v2/events/datasearch/alert").mock(
-            return_value=httpx.Response(200, json={
-                "result": [
-                    {"_id": "a1", "alert_name": "Test Alert", "severity_level": "high"},
-                    {"_id": "a2", "alert_name": "Alert 2", "severity_level": "low"},
-                ],
-                "status": {"total": 2},
-            })
+            return_value=httpx.Response(
+                200,
+                json={
+                    "result": [
+                        {"_id": "a1", "alert_name": "Test Alert", "severity_level": "high"},
+                        {"_id": "a2", "alert_name": "Alert 2", "severity_level": "low"},
+                    ],
+                    "status": {"total": 2},
+                },
+            )
         )
         client = NetskopeClient(tenant="t.goskope.com", api_token="tok")
         alerts = list(client.alerts.list())
@@ -48,9 +51,12 @@ class TestAlertsResource:
     @respx.mock
     def test_get_alert(self) -> None:
         respx.get("https://t.goskope.com/api/v2/events/datasearch/alert").mock(
-            return_value=httpx.Response(200, json={
-                "result": [{"_id": "abc", "alert_name": "Found"}],
-            })
+            return_value=httpx.Response(
+                200,
+                json={
+                    "result": [{"_id": "abc", "alert_name": "Found"}],
+                },
+            )
         )
         client = NetskopeClient(tenant="t.goskope.com", api_token="tok")
         alert = client.alerts.get("abc")
@@ -75,10 +81,13 @@ class TestEventsResource:
     @respx.mock
     def test_list_application_events(self) -> None:
         respx.get("https://t.goskope.com/api/v2/events/datasearch/application").mock(
-            return_value=httpx.Response(200, json={
-                "result": [{"_id": "e1", "user": "alice@ex.com", "app": "Slack"}],
-                "status": {"total": 1},
-            })
+            return_value=httpx.Response(
+                200,
+                json={
+                    "result": [{"_id": "e1", "user": "alice@ex.com", "app": "Slack"}],
+                    "status": {"total": 1},
+                },
+            )
         )
         client = NetskopeClient(tenant="t.goskope.com", api_token="tok")
         events = list(client.events.list("application"))
@@ -89,10 +98,13 @@ class TestEventsResource:
     @respx.mock
     def test_list_network_events(self) -> None:
         respx.get("https://t.goskope.com/api/v2/events/datasearch/network").mock(
-            return_value=httpx.Response(200, json={
-                "result": [{"_id": "n1", "src_ip": "10.0.0.1", "dst_ip": "8.8.8.8"}],
-                "status": {"total": 1},
-            })
+            return_value=httpx.Response(
+                200,
+                json={
+                    "result": [{"_id": "n1", "src_ip": "10.0.0.1", "dst_ip": "8.8.8.8"}],
+                    "status": {"total": 1},
+                },
+            )
         )
         client = NetskopeClient(tenant="t.goskope.com", api_token="tok")
         events = list(client.events.list("network"))
@@ -107,12 +119,17 @@ class TestUrlListsResource:
     @respx.mock
     def test_list(self) -> None:
         respx.get("https://t.goskope.com/api/v2/policy/urllist").mock(
-            return_value=httpx.Response(200, json={
-                "data": {"urllists": [
-                    {"id": 1, "name": "Block", "urls": ["bad.com"]},
-                ]},
-                "status": {"total": 1},
-            })
+            return_value=httpx.Response(
+                200,
+                json={
+                    "data": {
+                        "urllists": [
+                            {"id": 1, "name": "Block", "urls": ["bad.com"]},
+                        ]
+                    },
+                    "status": {"total": 1},
+                },
+            )
         )
         client = NetskopeClient(tenant="t.goskope.com", api_token="tok")
         lists = list(client.url_lists.list())
@@ -124,9 +141,12 @@ class TestUrlListsResource:
     @respx.mock
     def test_create(self) -> None:
         respx.post("https://t.goskope.com/api/v2/policy/urllist").mock(
-            return_value=httpx.Response(200, json={
-                "data": {"id": 42, "name": "NewList", "urls": ["new.com"]},
-            })
+            return_value=httpx.Response(
+                200,
+                json={
+                    "data": {"id": 42, "name": "NewList", "urls": ["new.com"]},
+                },
+            )
         )
         client = NetskopeClient(tenant="t.goskope.com", api_token="tok")
         result = client.url_lists.create("NewList", ["new.com"])
@@ -160,12 +180,17 @@ class TestPublishersResource:
     @respx.mock
     def test_list(self) -> None:
         respx.get("https://t.goskope.com/api/v2/infrastructure/publishers").mock(
-            return_value=httpx.Response(200, json={
-                "data": {"publishers": [
-                    {"publisher_id": 1, "publisher_name": "Pub1", "status": "connected"},
-                ]},
-                "status": {"total": 1},
-            })
+            return_value=httpx.Response(
+                200,
+                json={
+                    "data": {
+                        "publishers": [
+                            {"publisher_id": 1, "publisher_name": "Pub1", "status": "connected"},
+                        ]
+                    },
+                    "status": {"total": 1},
+                },
+            )
         )
         client = NetskopeClient(tenant="t.goskope.com", api_token="tok")
         pubs = list(client.publishers.list())
@@ -177,9 +202,12 @@ class TestPublishersResource:
     @respx.mock
     def test_create(self) -> None:
         respx.post("https://t.goskope.com/api/v2/infrastructure/publishers").mock(
-            return_value=httpx.Response(200, json={
-                "data": {"publisher_id": 99, "publisher_name": "NewPub"},
-            })
+            return_value=httpx.Response(
+                200,
+                json={
+                    "data": {"publisher_id": 99, "publisher_name": "NewPub"},
+                },
+            )
         )
         client = NetskopeClient(tenant="t.goskope.com", api_token="tok")
         pub = client.publishers.create(name="NewPub")

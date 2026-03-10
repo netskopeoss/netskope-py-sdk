@@ -169,6 +169,7 @@ class TestClientProperties:
 
     def test_version(self, client: NetskopeClient) -> None:
         from netskope._version import __version__
+
         assert client.version == __version__
 
     def test_tenant(self, client: NetskopeClient) -> None:

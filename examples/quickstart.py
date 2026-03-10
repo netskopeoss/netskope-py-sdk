@@ -19,8 +19,6 @@ Usage:
 
 from __future__ import annotations
 
-from datetime import datetime, timedelta
-
 from netskope import NetskopeClient
 from netskope.exceptions import AuthenticationError, NotFoundError, RateLimitError
 

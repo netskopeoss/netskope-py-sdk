@@ -60,12 +60,14 @@ class TestAlert:
 
 class TestEvent:
     def test_generic_event(self) -> None:
-        event = Event.model_validate({
-            "_id": "evt1",
-            "user": "bob@example.com",
-            "app": "Gmail",
-            "activity": "Download",
-        })
+        event = Event.model_validate(
+            {
+                "_id": "evt1",
+                "user": "bob@example.com",
+                "app": "Gmail",
+                "activity": "Download",
+            }
+        )
         assert event.user == "bob@example.com"
 
     def test_network_event(self) -> None:
@@ -198,20 +200,24 @@ class TestInfrastructure:
         assert pop.name == "US-East"
 
     def test_tunnel(self) -> None:
-        tunnel = IPSecTunnel.model_validate({
-            "id": 1,
-            "name": "HQ-Tunnel",
-            "status": "up",
-        })
+        tunnel = IPSecTunnel.model_validate(
+            {
+                "id": 1,
+                "name": "HQ-Tunnel",
+                "status": "up",
+            }
+        )
         assert tunnel.name == "HQ-Tunnel"
 
 
 class TestUserConfidenceIndex:
     def test_parse(self) -> None:
-        uci = UserConfidenceIndex.model_validate({
-            "user": "alice@example.com",
-            "score": 75.5,
-            "severity": "medium",
-        })
+        uci = UserConfidenceIndex.model_validate(
+            {
+                "user": "alice@example.com",
+                "score": 75.5,
+                "severity": "medium",
+            }
+        )
         assert uci.score == 75.5
         assert uci.severity == "medium"

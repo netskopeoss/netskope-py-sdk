@@ -36,14 +36,20 @@ class TestSyncPaginatedResponse:
     def test_iterates_all_items(self, transport: SyncTransport) -> None:
         route = respx.get("https://test.goskope.com/api/v2/test")
         route.side_effect = [
-            httpx.Response(200, json={
-                "result": [{"_id": "1"}, {"_id": "2"}],
-                "status": {"total": 3},
-            }),
-            httpx.Response(200, json={
-                "result": [{"_id": "3"}],
-                "status": {"total": 3},
-            }),
+            httpx.Response(
+                200,
+                json={
+                    "result": [{"_id": "1"}, {"_id": "2"}],
+                    "status": {"total": 3},
+                },
+            ),
+            httpx.Response(
+                200,
+                json={
+                    "result": [{"_id": "3"}],
+                    "status": {"total": 3},
+                },
+            ),
         ]
         paginator = SyncPaginatedResponse(
             transport=transport,
@@ -63,14 +69,20 @@ class TestSyncPaginatedResponse:
     def test_pages_yields_page_objects(self, transport: SyncTransport) -> None:
         route = respx.get("https://test.goskope.com/api/v2/test")
         route.side_effect = [
-            httpx.Response(200, json={
-                "result": [{"_id": "1"}, {"_id": "2"}],
-                "status": {"total": 4},
-            }),
-            httpx.Response(200, json={
-                "result": [{"_id": "3"}, {"_id": "4"}],
-                "status": {"total": 4},
-            }),
+            httpx.Response(
+                200,
+                json={
+                    "result": [{"_id": "1"}, {"_id": "2"}],
+                    "status": {"total": 4},
+                },
+            ),
+            httpx.Response(
+                200,
+                json={
+                    "result": [{"_id": "3"}, {"_id": "4"}],
+                    "status": {"total": 4},
+                },
+            ),
         ]
         paginator = SyncPaginatedResponse(
             transport=transport,
@@ -108,10 +120,13 @@ class TestSyncPaginatedResponse:
     def test_to_list_with_limit(self, transport: SyncTransport) -> None:
         route = respx.get("https://test.goskope.com/api/v2/test")
         route.side_effect = [
-            httpx.Response(200, json={
-                "result": [{"_id": str(i)} for i in range(100)],
-                "status": {"total": 500},
-            }),
+            httpx.Response(
+                200,
+                json={
+                    "result": [{"_id": str(i)} for i in range(100)],
+                    "status": {"total": 500},
+                },
+            ),
         ]
         paginator = SyncPaginatedResponse(
             transport=transport,
@@ -128,10 +143,13 @@ class TestSyncPaginatedResponse:
     @respx.mock
     def test_first(self, transport: SyncTransport) -> None:
         respx.get("https://test.goskope.com/api/v2/test").mock(
-            return_value=httpx.Response(200, json={
-                "result": [{"_id": "first"}],
-                "status": {"total": 1},
-            })
+            return_value=httpx.Response(
+                200,
+                json={
+                    "result": [{"_id": "first"}],
+                    "status": {"total": 1},
+                },
+            )
         )
         paginator = SyncPaginatedResponse(
             transport=transport,

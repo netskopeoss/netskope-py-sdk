@@ -92,7 +92,9 @@ class TestNetskopeConfig:
 
     def test_allows_custom_tenant_escape_hatch(self) -> None:
         config = NetskopeConfig.resolve(
-            tenant="custom.internal.corp", api_token="tok", allow_custom_tenant=True,
+            tenant="custom.internal.corp",
+            api_token="tok",
+            allow_custom_tenant=True,
         )
         assert config.tenant == "custom.internal.corp"
 
