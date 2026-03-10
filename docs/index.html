@@ -1,0 +1,1162 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Netskope Python SDK — Documentation</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script>
+        tailwind.config = {
+            theme: {
+                extend: {
+                    colors: {
+                        netskope: {
+                            50: '#eef7ff', 100: '#d9edff', 200: '#bce0ff', 300: '#8ecdff',
+                            400: '#59b0ff', 500: '#338dff', 600: '#1b6df5', 700: '#1457e1',
+                            800: '#1746b6', 900: '#193d8f', 950: '#142757',
+                        }
+                    }
+                }
+            }
+        }
+    </script>
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap');
+        body { font-family: 'Inter', system-ui, sans-serif; }
+        code, pre { font-family: 'JetBrains Mono', monospace; }
+        .code-block { background: #0f172a; border-radius: 0.75rem; overflow-x: auto; }
+        .code-block code { color: #e2e8f0; font-size: 0.8125rem; line-height: 1.7; white-space: pre; display: block; }
+        .kw { color: #c084fc; }
+        .s { color: #86efac; }
+        .cm { color: #64748b; }
+        .fn { color: #67e8f9; }
+        .bi { color: #fbbf24; }
+        .op { color: #f472b6; }
+        .nb { color: #fb923c; }
+        .nav-link { transition: all 0.15s ease; }
+        .nav-link:hover { color: #1b6df5; }
+        .feature-card { transition: transform 0.2s ease, box-shadow 0.2s ease; }
+        .feature-card:hover { transform: translateY(-2px); box-shadow: 0 8px 30px rgba(0,0,0,0.12); }
+        html { scroll-behavior: smooth; }
+        .toc-link { transition: color 0.15s ease, padding-left 0.15s ease; }
+        .toc-link:hover { color: #1b6df5; padding-left: 4px; }
+        .param-row td { padding: 0.5rem 0; }
+        .param-row td:first-child code { font-weight: 500; }
+        .section-divider { height: 1px; background: linear-gradient(to right, transparent, #e2e8f0, transparent); }
+    </style>
+</head>
+<body class="bg-white text-slate-900">
+
+<!-- ═══════════════════════ NAVIGATION ═══════════════════════ -->
+<nav class="sticky top-0 z-50 bg-white/80 backdrop-blur-lg border-b border-slate-200">
+    <div class="max-w-7xl mx-auto px-6 py-4 flex items-center justify-between">
+        <div class="flex items-center gap-3">
+            <div class="w-8 h-8 bg-netskope-600 rounded-lg flex items-center justify-center">
+                <span class="text-white font-bold text-sm">N</span>
+            </div>
+            <span class="font-semibold text-lg">Netskope SDK</span>
+            <span class="text-xs bg-netskope-100 text-netskope-700 px-2 py-0.5 rounded-full font-medium">v1.0.0</span>
+        </div>
+        <div class="hidden lg:flex items-center gap-6 text-sm">
+            <a href="#installation" class="nav-link text-slate-600">Install</a>
+            <a href="#quickstart" class="nav-link text-slate-600">Quick Start</a>
+            <a href="#configuration" class="nav-link text-slate-600">Config</a>
+            <a href="#alerts" class="nav-link text-slate-600">Alerts</a>
+            <a href="#events" class="nav-link text-slate-600">Events</a>
+            <a href="#url-lists" class="nav-link text-slate-600">URL Lists</a>
+            <a href="#publishers" class="nav-link text-slate-600">Publishers</a>
+            <a href="#private-apps" class="nav-link text-slate-600">Private Apps</a>
+            <a href="#scim" class="nav-link text-slate-600">SCIM</a>
+            <a href="#incidents" class="nav-link text-slate-600">Incidents</a>
+            <a href="#steering" class="nav-link text-slate-600">Steering</a>
+            <a href="#pagination" class="nav-link text-slate-600">Pagination</a>
+            <a href="#errors" class="nav-link text-slate-600">Errors</a>
+            <a href="#models" class="nav-link text-slate-600">Models</a>
+            <a href="https://github.com/netSkopeoss/netskope-py-sdk" class="nav-link text-slate-600">GitHub</a>
+        </div>
+    </div>
+</nav>
+
+<!-- ═══════════════════════ HERO ═══════════════════════ -->
+<header class="relative overflow-hidden">
+    <div class="absolute inset-0 bg-gradient-to-br from-netskope-50 via-white to-indigo-50"></div>
+    <div class="relative max-w-7xl mx-auto px-6 py-24 text-center">
+        <div class="inline-block mb-6 px-4 py-1.5 bg-netskope-100 text-netskope-700 text-sm font-medium rounded-full">
+            Python 3.11+ &bull; Typed &bull; Sync + Async &bull; Pydantic v2
+        </div>
+        <h1 class="text-5xl md:text-6xl font-bold tracking-tight mb-6">
+            The Netskope<br>
+            <span class="bg-clip-text text-transparent bg-gradient-to-r from-netskope-600 to-indigo-600">Python SDK</span>
+        </h1>
+        <p class="text-xl text-slate-600 max-w-2xl mx-auto mb-10 leading-relaxed">
+            A modern, typed, and intuitive interface to the Netskope REST API v2.
+            Auto-pagination, retries, and rich models &mdash; so you can focus on security, not HTTP plumbing.
+        </p>
+        <div class="flex flex-col sm:flex-row items-center justify-center gap-4">
+            <div class="code-block px-6 py-3"><code>pip install netskope-py-sdk</code></div>
+            <a href="#quickstart" class="px-6 py-3 bg-netskope-600 text-white rounded-xl font-medium hover:bg-netskope-700 transition-colors">Get Started &rarr;</a>
+        </div>
+    </div>
+</header>
+
+<!-- ═══════════════════════ FEATURES ═══════════════════════ -->
+<section class="max-w-7xl mx-auto px-6 py-20">
+    <h2 class="text-3xl font-bold text-center mb-4">Built for Developers &amp; AI Agents</h2>
+    <p class="text-slate-600 text-center max-w-2xl mx-auto mb-12">Every design decision optimized for discoverability, safety, and minimal surprise.</p>
+    <div class="grid md:grid-cols-2 lg:grid-cols-3 gap-6">
+        <div class="feature-card p-6 rounded-2xl border border-slate-200 bg-white">
+            <div class="w-10 h-10 bg-netskope-100 rounded-xl flex items-center justify-center text-netskope-700 font-bold mb-3">NS</div>
+            <h3 class="font-semibold text-lg mb-2">Hierarchical Namespaces</h3>
+            <p class="text-slate-600 text-sm">Navigate the entire API through autocomplete: <code class="text-xs bg-slate-100 px-1.5 py-0.5 rounded">client.alerts.list()</code>, <code class="text-xs bg-slate-100 px-1.5 py-0.5 rounded">client.scim.users.create()</code></p>
+        </div>
+        <div class="feature-card p-6 rounded-2xl border border-slate-200 bg-white">
+            <div class="w-10 h-10 bg-emerald-100 rounded-xl flex items-center justify-center text-emerald-700 font-bold mb-3">AP</div>
+            <h3 class="font-semibold text-lg mb-2">Automatic Pagination</h3>
+            <p class="text-slate-600 text-sm">Just iterate. No page loops, no offset math. Works across all list endpoints with lazy fetching.</p>
+        </div>
+        <div class="feature-card p-6 rounded-2xl border border-slate-200 bg-white">
+            <div class="w-10 h-10 bg-violet-100 rounded-xl flex items-center justify-center text-violet-700 font-bold mb-3">TS</div>
+            <h3 class="font-semibold text-lg mb-2">Full Type Safety</h3>
+            <p class="text-slate-600 text-sm">Pydantic v2 models for every response. Full <code class="text-xs bg-slate-100 px-1.5 py-0.5 rounded">py.typed</code> support for mypy and pyright.</p>
+        </div>
+        <div class="feature-card p-6 rounded-2xl border border-slate-200 bg-white">
+            <div class="w-10 h-10 bg-amber-100 rounded-xl flex items-center justify-center text-amber-700 font-bold mb-3">RT</div>
+            <h3 class="font-semibold text-lg mb-2">Automatic Retries</h3>
+            <p class="text-slate-600 text-sm">Exponential backoff with jitter. Respects <code class="text-xs bg-slate-100 px-1.5 py-0.5 rounded">Retry-After</code> headers. Configurable per client.</p>
+        </div>
+        <div class="feature-card p-6 rounded-2xl border border-slate-200 bg-white">
+            <div class="w-10 h-10 bg-sky-100 rounded-xl flex items-center justify-center text-sky-700 font-bold mb-3">SA</div>
+            <h3 class="font-semibold text-lg mb-2">Sync + Async</h3>
+            <p class="text-slate-600 text-sm">Choose <code class="text-xs bg-slate-100 px-1.5 py-0.5 rounded">NetskopeClient</code> for scripts or <code class="text-xs bg-slate-100 px-1.5 py-0.5 rounded">AsyncNetskopeClient</code> for high-throughput.</p>
+        </div>
+        <div class="feature-card p-6 rounded-2xl border border-slate-200 bg-white">
+            <div class="w-10 h-10 bg-rose-100 rounded-xl flex items-center justify-center text-rose-700 font-bold mb-3">EX</div>
+            <h3 class="font-semibold text-lg mb-2">Rich Exceptions</h3>
+            <p class="text-slate-600 text-sm">Specific exception types with request IDs. Catch <code class="text-xs bg-slate-100 px-1.5 py-0.5 rounded">RateLimitError</code>, <code class="text-xs bg-slate-100 px-1.5 py-0.5 rounded">NotFoundError</code> precisely.</p>
+        </div>
+    </div>
+</section>
+
+<!-- ═══════════════════════ TABLE OF CONTENTS ═══════════════════════ -->
+<section class="bg-slate-50 border-y border-slate-200">
+    <div class="max-w-7xl mx-auto px-6 py-16">
+        <h2 class="text-2xl font-bold mb-8 text-center">Documentation</h2>
+        <div class="grid md:grid-cols-3 lg:grid-cols-4 gap-6 max-w-5xl mx-auto">
+            <div>
+                <h3 class="text-xs font-semibold text-slate-500 uppercase tracking-wider mb-3">Getting Started</h3>
+                <ul class="space-y-2 text-sm"><li><a href="#installation" class="toc-link text-slate-700">Installation</a></li><li><a href="#quickstart" class="toc-link text-slate-700">Quick Start</a></li><li><a href="#configuration" class="toc-link text-slate-700">Configuration</a></li><li><a href="#async" class="toc-link text-slate-700">Async Usage</a></li></ul>
+            </div>
+            <div>
+                <h3 class="text-xs font-semibold text-slate-500 uppercase tracking-wider mb-3">Resources</h3>
+                <ul class="space-y-2 text-sm"><li><a href="#alerts" class="toc-link text-slate-700">Alerts</a></li><li><a href="#events" class="toc-link text-slate-700">Events</a></li><li><a href="#url-lists" class="toc-link text-slate-700">URL Lists</a></li><li><a href="#publishers" class="toc-link text-slate-700">Publishers</a></li><li><a href="#private-apps" class="toc-link text-slate-700">Private Apps</a></li><li><a href="#scim" class="toc-link text-slate-700">SCIM Users &amp; Groups</a></li><li><a href="#incidents" class="toc-link text-slate-700">Incidents</a></li><li><a href="#steering" class="toc-link text-slate-700">Steering &amp; IPSec</a></li></ul>
+            </div>
+            <div>
+                <h3 class="text-xs font-semibold text-slate-500 uppercase tracking-wider mb-3">Core Concepts</h3>
+                <ul class="space-y-2 text-sm"><li><a href="#pagination" class="toc-link text-slate-700">Pagination</a></li><li><a href="#errors" class="toc-link text-slate-700">Error Handling</a></li><li><a href="#retries" class="toc-link text-slate-700">Retries &amp; Backoff</a></li><li><a href="#logging" class="toc-link text-slate-700">Logging</a></li></ul>
+            </div>
+            <div>
+                <h3 class="text-xs font-semibold text-slate-500 uppercase tracking-wider mb-3">Reference</h3>
+                <ul class="space-y-2 text-sm"><li><a href="#models" class="toc-link text-slate-700">All Models</a></li><li><a href="#client-ref" class="toc-link text-slate-700">Client Reference</a></li><li><a href="#jql" class="toc-link text-slate-700">JQL Query Syntax</a></li><li><a href="#examples-section" class="toc-link text-slate-700">Real-World Examples</a></li></ul>
+            </div>
+        </div>
+    </div>
+</section>
+
+<!-- ═══════════════════════ INSTALLATION ═══════════════════════ -->
+<section id="installation" class="max-w-4xl mx-auto px-6 py-16">
+    <h2 class="text-3xl font-bold mb-8">Installation</h2>
+    <div class="code-block p-5 mb-4"><code>pip install netskope-py-sdk</code></div>
+    <p class="text-slate-600 mb-6">The SDK has only two dependencies: <code class="text-sm bg-slate-100 px-1.5 py-0.5 rounded">httpx</code> and <code class="text-sm bg-slate-100 px-1.5 py-0.5 rounded">pydantic</code>. Python 3.11 or newer is required.</p>
+    <h3 class="font-semibold text-lg mb-3">Development Installation</h3>
+    <div class="code-block p-5 mb-4"><code><span class="cm"># Clone and install with test dependencies</span>
+git clone https://github.com/netSkopeoss/netskope-py-sdk.git
+cd netskope-py-sdk
+pip install -e ".[dev]"</code></div>
+    <h3 class="font-semibold text-lg mb-3">Verify Installation</h3>
+    <div class="code-block p-5"><code><span class="kw">import</span> netskope
+<span class="bi">print</span>(netskope.__version__)  <span class="cm"># "1.0.0"</span></code></div>
+</section>
+
+<div class="section-divider max-w-4xl mx-auto"></div>
+
+<!-- ═══════════════════════ QUICK START ═══════════════════════ -->
+<section id="quickstart" class="max-w-4xl mx-auto px-6 py-16">
+    <h2 class="text-3xl font-bold mb-8">Quick Start</h2>
+    <div class="code-block p-5 mb-6">
+<code><span class="kw">from</span> netskope <span class="kw">import</span> NetskopeClient
+
+<span class="cm"># Initialize — reads NETSKOPE_TENANT and NETSKOPE_API_TOKEN env vars</span>
+client = NetskopeClient()
+
+<span class="cm"># Or pass credentials explicitly</span>
+client = NetskopeClient(
+    tenant=<span class="s">"mycompany.goskope.com"</span>,
+    api_token=<span class="s">"your-v2-api-token"</span>,
+)
+
+<span class="cm"># List alerts — pagination is completely automatic</span>
+<span class="kw">for</span> alert <span class="kw">in</span> client.alerts.<span class="fn">list</span>():
+    <span class="bi">print</span>(f<span class="s">"{alert.alert_name} — {alert.user} — {alert.app}"</span>)
+
+<span class="cm"># Query network events with JQL filtering</span>
+<span class="kw">for</span> event <span class="kw">in</span> client.events.<span class="fn">list</span>(<span class="s">"application"</span>, page_size=<span class="nb">50</span>):
+    <span class="bi">print</span>(f<span class="s">"{event.user} → {event.app} ({event.activity})"</span>)
+
+<span class="cm"># Manage URL allow/block lists</span>
+blocklist = client.url_lists.<span class="fn">create</span>(<span class="s">"threat-iocs"</span>, [<span class="s">"malware.example.com"</span>])
+client.url_lists.<span class="fn">deploy</span>()
+
+<span class="cm"># List publishers and their status</span>
+<span class="kw">for</span> pub <span class="kw">in</span> client.publishers.<span class="fn">list</span>():
+    <span class="bi">print</span>(f<span class="s">"{pub.publisher_name}: {pub.status} ({pub.apps_count} apps)"</span>)
+
+<span class="cm"># SCIM user provisioning</span>
+<span class="kw">for</span> user <span class="kw">in</span> client.scim.users.<span class="fn">list</span>():
+    <span class="bi">print</span>(f<span class="s">"{user.user_name} active={user.active}"</span>)
+
+<span class="cm"># Always close when done (or use context manager)</span>
+client.<span class="fn">close</span>()</code></div>
+    <h3 class="font-semibold text-lg mb-3">Context Manager (Recommended)</h3>
+    <div class="code-block p-5">
+<code><span class="kw">with</span> NetskopeClient(tenant=<span class="s">"mycompany.goskope.com"</span>, api_token=<span class="s">"..."</span>) <span class="kw">as</span> client:
+    alerts = client.alerts.<span class="fn">list</span>().<span class="fn">to_list</span>(max_items=<span class="nb">100</span>)
+    <span class="bi">print</span>(f<span class="s">"Found {len(alerts)} alerts"</span>)
+<span class="cm"># Connection pool automatically closed</span></code></div>
+</section>
+
+<div class="section-divider max-w-4xl mx-auto"></div>
+
+<!-- ═══════════════════════ CONFIGURATION ═══════════════════════ -->
+<section id="configuration" class="max-w-4xl mx-auto px-6 py-16">
+    <h2 class="text-3xl font-bold mb-8">Configuration</h2>
+
+    <h3 class="font-semibold text-lg mb-3" id="client-ref">NetskopeClient Constructor</h3>
+    <div class="overflow-x-auto mb-8">
+        <table class="w-full text-sm border-collapse">
+            <thead><tr class="text-left border-b-2 border-slate-200"><th class="py-3 pr-4 font-semibold">Parameter</th><th class="py-3 pr-4 font-semibold">Type</th><th class="py-3 pr-4 font-semibold">Default</th><th class="py-3 font-semibold">Description</th></tr></thead>
+            <tbody class="text-slate-600">
+                <tr class="border-b border-slate-100 param-row"><td class="pr-4"><code>tenant</code></td><td class="pr-4"><code>str | None</code></td><td class="pr-4"><code>NETSKOPE_TENANT</code></td><td>Tenant hostname, e.g. <code>"mycompany.goskope.com"</code>. Falls back to the <code>NETSKOPE_TENANT</code> environment variable.</td></tr>
+                <tr class="border-b border-slate-100 param-row"><td class="pr-4"><code>api_token</code></td><td class="pr-4"><code>str | None</code></td><td class="pr-4"><code>NETSKOPE_API_TOKEN</code></td><td>REST API v2 token from your Netskope admin console. Falls back to the <code>NETSKOPE_API_TOKEN</code> environment variable.</td></tr>
+                <tr class="border-b border-slate-100 param-row"><td class="pr-4"><code>timeout</code></td><td class="pr-4"><code>float</code></td><td class="pr-4"><code>30.0</code></td><td>HTTP request timeout in seconds.</td></tr>
+                <tr class="border-b border-slate-100 param-row"><td class="pr-4"><code>max_retries</code></td><td class="pr-4"><code>int</code></td><td class="pr-4"><code>3</code></td><td>Maximum automatic retries for transient errors (429, 5xx).</td></tr>
+                <tr class="border-b border-slate-100 param-row"><td class="pr-4"><code>backoff_factor</code></td><td class="pr-4"><code>float</code></td><td class="pr-4"><code>0.5</code></td><td>Exponential backoff base multiplier. Sleep = <code>factor * 2^attempt</code>, capped at 60s, plus jitter.</td></tr>
+                <tr class="param-row"><td class="pr-4"><code>retry_on_status</code></td><td class="pr-4"><code>frozenset[int] | None</code></td><td class="pr-4"><code>{429,500,502,503,504}</code></td><td>HTTP status codes that trigger automatic retry.</td></tr>
+            </tbody>
+        </table>
+    </div>
+
+    <h3 class="font-semibold text-lg mb-3">Credential Resolution Chain</h3>
+    <p class="text-slate-600 mb-4">Credentials resolve in priority order (inspired by boto3):</p>
+    <div class="space-y-2 mb-8">
+        <div class="flex items-center gap-3 p-3 bg-netskope-50 rounded-lg"><span class="w-6 h-6 bg-netskope-600 text-white rounded-full flex items-center justify-center text-xs font-bold">1</span><span class="text-sm">Explicit constructor parameters (<code class="bg-white px-1 rounded">tenant=</code>, <code class="bg-white px-1 rounded">api_token=</code>)</span></div>
+        <div class="flex items-center gap-3 p-3 bg-slate-100 rounded-lg"><span class="w-6 h-6 bg-slate-500 text-white rounded-full flex items-center justify-center text-xs font-bold">2</span><span class="text-sm">Environment variables: <code class="bg-white px-1 rounded">NETSKOPE_TENANT</code>, <code class="bg-white px-1 rounded">NETSKOPE_API_TOKEN</code></span></div>
+    </div>
+    <p class="text-slate-600 mb-4">If neither source provides a value, a <code class="bg-slate-100 px-1.5 py-0.5 rounded text-sm">ValidationError</code> is raised at construction time (fail fast).</p>
+
+    <h3 class="font-semibold text-lg mb-3">Environment Variables</h3>
+    <div class="code-block p-5 mb-8">
+<code><span class="cm"># Set credentials via environment</span>
+export NETSKOPE_TENANT="mycompany.goskope.com"
+export NETSKOPE_API_TOKEN="your-v2-token"
+
+<span class="cm"># Then just:</span>
+client = NetskopeClient()  <span class="cm"># reads from env automatically</span></code></div>
+
+    <h3 class="font-semibold text-lg mb-3">Multiple Tenants</h3>
+    <div class="code-block p-5 mb-8">
+<code><span class="cm"># Manage multiple tenants simultaneously</span>
+prod = NetskopeClient(tenant=<span class="s">"prod.goskope.com"</span>, api_token=prod_token)
+staging = NetskopeClient(tenant=<span class="s">"staging.goskope.com"</span>, api_token=staging_token)
+
+<span class="cm"># Compare publisher counts across environments</span>
+prod_pubs = prod.publishers.<span class="fn">list</span>().<span class="fn">to_list</span>()
+staging_pubs = staging.publishers.<span class="fn">list</span>().<span class="fn">to_list</span>()
+<span class="bi">print</span>(f<span class="s">"Production: {len(prod_pubs)} publishers"</span>)
+<span class="bi">print</span>(f<span class="s">"Staging: {len(staging_pubs)} publishers"</span>)</code></div>
+
+    <h3 class="font-semibold text-lg mb-3">Client Properties</h3>
+    <div class="code-block p-5">
+<code>client = NetskopeClient(tenant=<span class="s">"mycompany.goskope.com"</span>, api_token=<span class="s">"..."</span>)
+
+client.version   <span class="cm"># "1.0.0"</span>
+client.tenant    <span class="cm"># "mycompany.goskope.com"</span>
+client.base_url  <span class="cm"># "https://mycompany.goskope.com"</span></code></div>
+</section>
+
+<div class="section-divider max-w-4xl mx-auto"></div>
+
+<!-- ═══════════════════════ ASYNC ═══════════════════════ -->
+<section id="async" class="max-w-4xl mx-auto px-6 py-16">
+    <h2 class="text-3xl font-bold mb-8">Async Usage</h2>
+    <p class="text-slate-600 mb-6">The <code class="bg-slate-100 px-1.5 py-0.5 rounded text-sm">AsyncNetskopeClient</code> provides the exact same API as the sync client, but all methods are coroutines and list endpoints return async iterators.</p>
+    <div class="code-block p-5 mb-6">
+<code><span class="kw">import</span> asyncio
+<span class="kw">from</span> netskope <span class="kw">import</span> AsyncNetskopeClient
+
+<span class="kw">async def</span> <span class="fn">main</span>():
+    <span class="kw">async with</span> AsyncNetskopeClient(tenant=<span class="s">"mycompany.goskope.com"</span>, api_token=<span class="s">"..."</span>) <span class="kw">as</span> client:
+        <span class="cm"># Async iteration</span>
+        <span class="kw">async for</span> alert <span class="kw">in</span> client.alerts.<span class="fn">list</span>(page_size=<span class="nb">50</span>):
+            <span class="bi">print</span>(alert.alert_name)
+
+        <span class="cm"># Async to_list</span>
+        publishers = <span class="kw">await</span> client.publishers.<span class="fn">list</span>().<span class="fn">to_list</span>(max_items=<span class="nb">100</span>)
+
+        <span class="cm"># Async first</span>
+        first_alert = <span class="kw">await</span> client.alerts.<span class="fn">list</span>().<span class="fn">first</span>()
+
+        <span class="cm"># Async page-level access</span>
+        <span class="kw">async for</span> page <span class="kw">in</span> client.alerts.<span class="fn">list</span>().<span class="fn">pages</span>():
+            <span class="bi">print</span>(f<span class="s">"Page: {len(page.items)} items"</span>)
+
+        <span class="cm"># Async CRUD</span>
+        url_list = <span class="kw">await</span> client.url_lists.<span class="fn">create</span>(<span class="s">"blocklist"</span>, [<span class="s">"bad.com"</span>])
+        <span class="kw">await</span> client.url_lists.<span class="fn">deploy</span>()
+
+asyncio.<span class="fn">run</span>(main())</code></div>
+    <div class="p-4 bg-amber-50 border border-amber-200 rounded-xl text-sm text-amber-800">
+        <strong>Note:</strong> Every method available on <code>NetskopeClient</code> is also available on <code>AsyncNetskopeClient</code> with the same signature. The only difference is <code>await</code> for single-resource methods and <code>async for</code> for iterators.
+    </div>
+</section>
+
+<div class="section-divider max-w-4xl mx-auto"></div>
+
+<!-- ═══════════════════════ ALERTS ═══════════════════════ -->
+<section id="alerts" class="max-w-4xl mx-auto px-6 py-16">
+    <h2 class="text-3xl font-bold mb-2">Alerts</h2>
+    <p class="text-slate-500 text-sm mb-8"><code>client.alerts</code> &mdash; Query and retrieve security alerts via <code>/api/v2/events/datasearch/alert</code></p>
+
+    <h3 class="font-semibold text-lg mb-3"><code>.list()</code> &mdash; List Alerts</h3>
+    <div class="overflow-x-auto mb-4">
+        <table class="w-full text-sm border-collapse"><thead><tr class="text-left border-b-2 border-slate-200"><th class="py-2 pr-4 font-semibold">Parameter</th><th class="py-2 pr-4 font-semibold">Type</th><th class="py-2 pr-4 font-semibold">Default</th><th class="py-2 font-semibold">Description</th></tr></thead>
+        <tbody class="text-slate-600">
+            <tr class="border-b border-slate-100 param-row"><td class="pr-4"><code>query</code></td><td class="pr-4"><code>str | None</code></td><td class="pr-4"><code>None</code></td><td>JQL filter expression, e.g. <code>'alert_type eq "DLP"'</code></td></tr>
+            <tr class="border-b border-slate-100 param-row"><td class="pr-4"><code>fields</code></td><td class="pr-4"><code>list[str] | None</code></td><td class="pr-4"><code>None</code></td><td>Specific fields to return (reduces response size)</td></tr>
+            <tr class="border-b border-slate-100 param-row"><td class="pr-4"><code>start_time</code></td><td class="pr-4"><code>datetime | int | None</code></td><td class="pr-4"><code>None</code></td><td>Start of time range (datetime object or Unix epoch int)</td></tr>
+            <tr class="border-b border-slate-100 param-row"><td class="pr-4"><code>end_time</code></td><td class="pr-4"><code>datetime | int | None</code></td><td class="pr-4"><code>None</code></td><td>End of time range</td></tr>
+            <tr class="border-b border-slate-100 param-row"><td class="pr-4"><code>group_by</code></td><td class="pr-4"><code>str | None</code></td><td class="pr-4"><code>None</code></td><td>Field to aggregate results by</td></tr>
+            <tr class="border-b border-slate-100 param-row"><td class="pr-4"><code>order_by</code></td><td class="pr-4"><code>str | None</code></td><td class="pr-4"><code>None</code></td><td>Field to sort by</td></tr>
+            <tr class="border-b border-slate-100 param-row"><td class="pr-4"><code>descending</code></td><td class="pr-4"><code>bool</code></td><td class="pr-4"><code>True</code></td><td>Sort order (True = newest first)</td></tr>
+            <tr class="param-row"><td class="pr-4"><code>page_size</code></td><td class="pr-4"><code>int</code></td><td class="pr-4"><code>100</code></td><td>Results per API call</td></tr>
+        </tbody></table>
+    </div>
+    <p class="text-slate-600 text-sm mb-4"><strong>Returns:</strong> <code>SyncPaginatedResponse[Alert]</code> &mdash; a lazy iterator of <code>Alert</code> objects.</p>
+    <div class="code-block p-5 mb-8">
+<code><span class="kw">from</span> datetime <span class="kw">import</span> datetime, timedelta
+
+<span class="cm"># List all alerts (auto-paginated)</span>
+<span class="kw">for</span> alert <span class="kw">in</span> client.alerts.<span class="fn">list</span>():
+    <span class="bi">print</span>(f<span class="s">"{alert.alert_name} — {alert.alert_type} — {alert.app}"</span>)
+
+<span class="cm"># Filter by JQL query</span>
+<span class="kw">for</span> alert <span class="kw">in</span> client.alerts.<span class="fn">list</span>(query=<span class="s">'alert_type eq "DLP"'</span>):
+    <span class="bi">print</span>(alert.alert_name)
+
+<span class="cm"># Time-range query (last 7 days)</span>
+alerts = client.alerts.<span class="fn">list</span>(
+    start_time=datetime.<span class="fn">now</span>() - timedelta(days=<span class="nb">7</span>),
+    end_time=datetime.<span class="fn">now</span>(),
+    page_size=<span class="nb">200</span>,
+).<span class="fn">to_list</span>(max_items=<span class="nb">1000</span>)
+<span class="bi">print</span>(f<span class="s">"Found {len(alerts)} alerts in the last 7 days"</span>)
+
+<span class="cm"># Get just the first alert</span>
+first = client.alerts.<span class="fn">list</span>().<span class="fn">first</span>()
+<span class="cm"># → Alert(alert_name="Password should be changed every 90 days", ...)</span></code></div>
+
+    <h3 class="font-semibold text-lg mb-3"><code>.get(alert_id)</code> &mdash; Get Single Alert</h3>
+    <p class="text-slate-600 text-sm mb-4">Retrieve a single alert by its <code>_id</code>. Raises <code>NotFoundError</code> if not found.</p>
+    <div class="code-block p-5 mb-8">
+<code><span class="kw">from</span> netskope.exceptions <span class="kw">import</span> NotFoundError
+
+<span class="kw">try</span>:
+    alert = client.alerts.<span class="fn">get</span>(<span class="s">"44d8af1bcc1d7bd0fc8aa698"</span>)
+    <span class="bi">print</span>(f<span class="s">"Name: {alert.alert_name}"</span>)
+    <span class="bi">print</span>(f<span class="s">"Type: {alert.alert_type}"</span>)
+    <span class="bi">print</span>(f<span class="s">"App:  {alert.app}"</span>)
+<span class="kw">except</span> NotFoundError:
+    <span class="bi">print</span>(<span class="s">"Alert not found"</span>)</code></div>
+
+    <h3 class="font-semibold text-lg mb-3">Alert Model Fields</h3>
+    <div class="overflow-x-auto mb-4">
+        <table class="w-full text-sm border-collapse"><thead><tr class="text-left border-b-2 border-slate-200"><th class="py-2 pr-4 font-semibold">Field</th><th class="py-2 pr-4 font-semibold">Type</th><th class="py-2 font-semibold">Description</th></tr></thead>
+        <tbody class="text-slate-600">
+            <tr class="border-b border-slate-100 param-row"><td class="pr-4"><code>id</code></td><td class="pr-4"><code>str | None</code></td><td>Alert unique identifier (API field: <code>_id</code>)</td></tr>
+            <tr class="border-b border-slate-100 param-row"><td class="pr-4"><code>alert_name</code></td><td class="pr-4"><code>str | None</code></td><td>Human-readable alert name</td></tr>
+            <tr class="border-b border-slate-100 param-row"><td class="pr-4"><code>alert_type</code></td><td class="pr-4"><code>str | None</code></td><td>Alert category (DLP, malware, anomaly, Security Assessment, etc.)</td></tr>
+            <tr class="border-b border-slate-100 param-row"><td class="pr-4"><code>severity</code></td><td class="pr-4"><code>str | None</code></td><td>Severity level (critical, high, medium, low)</td></tr>
+            <tr class="border-b border-slate-100 param-row"><td class="pr-4"><code>user</code></td><td class="pr-4"><code>str | None</code></td><td>Affected user email</td></tr>
+            <tr class="border-b border-slate-100 param-row"><td class="pr-4"><code>app</code></td><td class="pr-4"><code>str | None</code></td><td>Application name (e.g. "Workday", "Slack")</td></tr>
+            <tr class="border-b border-slate-100 param-row"><td class="pr-4"><code>activity</code></td><td class="pr-4"><code>str | None</code></td><td>Activity that triggered the alert</td></tr>
+            <tr class="border-b border-slate-100 param-row"><td class="pr-4"><code>policy_name</code></td><td class="pr-4"><code>str | None</code></td><td>Policy that generated the alert</td></tr>
+            <tr class="border-b border-slate-100 param-row"><td class="pr-4"><code>action</code></td><td class="pr-4"><code>str | None</code></td><td>Action taken (alert, block, etc.)</td></tr>
+            <tr class="border-b border-slate-100 param-row"><td class="pr-4"><code>category</code></td><td class="pr-4"><code>str | None</code></td><td>URL/app category</td></tr>
+            <tr class="border-b border-slate-100 param-row"><td class="pr-4"><code>cci</code></td><td class="pr-4"><code>int | None</code></td><td>Cloud Confidence Index score</td></tr>
+            <tr class="border-b border-slate-100 param-row"><td class="pr-4"><code>ccl</code></td><td class="pr-4"><code>str | None</code></td><td>Cloud Confidence Level</td></tr>
+            <tr class="border-b border-slate-100 param-row"><td class="pr-4"><code>access_method</code></td><td class="pr-4"><code>str | None</code></td><td>How traffic was accessed (Client, API, etc.)</td></tr>
+            <tr class="border-b border-slate-100 param-row"><td class="pr-4"><code>traffic_type</code></td><td class="pr-4"><code>str | None</code></td><td>Traffic classification</td></tr>
+            <tr class="param-row"><td class="pr-4"><code>timestamp</code></td><td class="pr-4"><code>datetime | None</code></td><td>When the alert occurred (auto-parsed from epoch)</td></tr>
+        </tbody></table>
+    </div>
+</section>
+
+<div class="section-divider max-w-4xl mx-auto"></div>
+
+<!-- ═══════════════════════ EVENTS ═══════════════════════ -->
+<section id="events" class="max-w-4xl mx-auto px-6 py-16">
+    <h2 class="text-3xl font-bold mb-2">Events</h2>
+    <p class="text-slate-500 text-sm mb-8"><code>client.events</code> &mdash; Query security events across 10 event types via <code>/api/v2/events/datasearch/{type}</code></p>
+
+    <h3 class="font-semibold text-lg mb-3">Supported Event Types</h3>
+    <div class="grid grid-cols-2 md:grid-cols-5 gap-2 mb-8">
+        <div class="p-2 bg-slate-50 rounded-lg text-center text-sm font-mono">application</div>
+        <div class="p-2 bg-slate-50 rounded-lg text-center text-sm font-mono">network</div>
+        <div class="p-2 bg-slate-50 rounded-lg text-center text-sm font-mono">page</div>
+        <div class="p-2 bg-slate-50 rounded-lg text-center text-sm font-mono">alert</div>
+        <div class="p-2 bg-slate-50 rounded-lg text-center text-sm font-mono">incident</div>
+        <div class="p-2 bg-slate-50 rounded-lg text-center text-sm font-mono">audit</div>
+        <div class="p-2 bg-slate-50 rounded-lg text-center text-sm font-mono">infrastructure</div>
+        <div class="p-2 bg-slate-50 rounded-lg text-center text-sm font-mono">clientstatus</div>
+        <div class="p-2 bg-slate-50 rounded-lg text-center text-sm font-mono">epdlp</div>
+        <div class="p-2 bg-slate-50 rounded-lg text-center text-sm font-mono">transaction</div>
+    </div>
+
+    <h3 class="font-semibold text-lg mb-3"><code>.list(event_type, ...)</code> &mdash; List Events</h3>
+    <p class="text-slate-600 text-sm mb-4">Same parameters as <code>alerts.list()</code>, plus the required <code>event_type</code> first argument. Returns type-specific models for <code>network</code>, <code>page</code>, and <code>audit</code>.</p>
+    <div class="code-block p-5 mb-8">
+<code><span class="kw">from</span> netskope.models.events <span class="kw">import</span> EventType
+
+<span class="cm"># Application events — SaaS/cloud app access</span>
+<span class="kw">for</span> event <span class="kw">in</span> client.events.<span class="fn">list</span>(EventType.APPLICATION, page_size=<span class="nb">50</span>):
+    <span class="bi">print</span>(f<span class="s">"{event.user} → {event.app} ({event.activity})"</span>)
+<span class="cm"># → onasr+web@netskope.com → Amazon Systems Manager (View)</span>
+
+<span class="cm"># Network events — returns NetworkEvent with src_ip, dst_ip, protocol</span>
+<span class="kw">for</span> event <span class="kw">in</span> client.events.<span class="fn">list</span>(<span class="s">"network"</span>, page_size=<span class="nb">20</span>):
+    <span class="bi">print</span>(f<span class="s">"{event.src_ip} → {event.dst_ip} ({event.protocol})"</span>)
+
+<span class="cm"># Page events — returns PageEvent with url, domain, browser</span>
+<span class="kw">for</span> event <span class="kw">in</span> client.events.<span class="fn">list</span>(<span class="s">"page"</span>):
+    <span class="bi">print</span>(f<span class="s">"{event.url} — {event.domain}"</span>)
+
+<span class="cm"># Filter by JQL and time range</span>
+<span class="kw">from</span> datetime <span class="kw">import</span> datetime, timedelta
+events = client.events.<span class="fn">list</span>(
+    <span class="s">"application"</span>,
+    query=<span class="s">'user eq "alice@example.com"'</span>,
+    start_time=datetime.<span class="fn">now</span>() - timedelta(days=<span class="nb">1</span>),
+    end_time=datetime.<span class="fn">now</span>(),
+).<span class="fn">to_list</span>(max_items=<span class="nb">500</span>)</code></div>
+
+    <h3 class="font-semibold text-lg mb-3">Type-Specific Models</h3>
+    <p class="text-slate-600 text-sm mb-4">The SDK automatically returns the right model subclass based on event type:</p>
+    <div class="overflow-x-auto mb-4">
+        <table class="w-full text-sm border-collapse"><thead><tr class="text-left border-b-2 border-slate-200"><th class="py-2 pr-4 font-semibold">Event Type</th><th class="py-2 pr-4 font-semibold">Model</th><th class="py-2 font-semibold">Extra Fields</th></tr></thead>
+        <tbody class="text-slate-600">
+            <tr class="border-b border-slate-100 param-row"><td class="pr-4"><code>"network"</code></td><td class="pr-4"><code>NetworkEvent</code></td><td><code>src_ip</code>, <code>dst_ip</code>, <code>src_port</code>, <code>dst_port</code>, <code>protocol</code>, <code>num_bytes</code>, <code>domain</code></td></tr>
+            <tr class="border-b border-slate-100 param-row"><td class="pr-4"><code>"page"</code></td><td class="pr-4"><code>PageEvent</code></td><td><code>url</code>, <code>domain</code>, <code>page_id</code>, <code>page_duration</code>, <code>referer</code>, <code>browser</code>, <code>os</code>, <code>device</code></td></tr>
+            <tr class="border-b border-slate-100 param-row"><td class="pr-4"><code>"audit"</code></td><td class="pr-4"><code>AuditEvent</code></td><td><code>audit_log_event</code>, <code>audit_category</code>, <code>supporting_data</code>, <code>organization_unit</code></td></tr>
+            <tr class="param-row"><td class="pr-4">All others</td><td class="pr-4"><code>Event</code></td><td>Base fields: <code>user</code>, <code>app</code>, <code>activity</code>, <code>action</code>, <code>site</code>, <code>category</code>, <code>severity</code>, <code>timestamp</code>, etc.</td></tr>
+        </tbody></table>
+    </div>
+</section>
+
+<div class="section-divider max-w-4xl mx-auto"></div>
+
+<!-- ═══════════════════════ URL LISTS ═══════════════════════ -->
+<section id="url-lists" class="max-w-4xl mx-auto px-6 py-16">
+    <h2 class="text-3xl font-bold mb-2">URL Lists</h2>
+    <p class="text-slate-500 text-sm mb-8"><code>client.url_lists</code> &mdash; Full CRUD for URL allow/block lists and policy deployment via <code>/api/v2/policy/urllist</code></p>
+    <div class="code-block p-5 mb-8">
+<code><span class="cm"># List all URL lists</span>
+<span class="kw">for</span> url_list <span class="kw">in</span> client.url_lists.<span class="fn">list</span>():
+    <span class="bi">print</span>(f<span class="s">"[{url_list.id}] {url_list.name}: {len(url_list.urls)} URLs ({url_list.type})"</span>)
+<span class="cm"># → [1] Exceptions to prohibited sites: 5 URLs (exact)</span>
+<span class="cm"># → [3] YouTube Allowed: 2 URLs (exact)</span>
+<span class="cm"># → [5] malwareDomains: 26874 URLs (exact)</span>
+
+<span class="cm"># Get a specific URL list by ID</span>
+url_list = client.url_lists.<span class="fn">get</span>(<span class="nb">1</span>)
+
+<span class="cm"># Create a new URL list</span>
+new_list = client.url_lists.<span class="fn">create</span>(
+    name=<span class="s">"threat-intel-iocs"</span>,
+    urls=[<span class="s">"malware.example.com"</span>, <span class="s">"phishing.bad.org"</span>],
+    list_type=<span class="s">"exact"</span>,  <span class="cm"># or "regex"</span>
+)
+<span class="bi">print</span>(f<span class="s">"Created: id={new_list.id}, name={new_list.name}"</span>)
+
+<span class="cm"># Update — add more URLs</span>
+updated = client.url_lists.<span class="fn">update</span>(
+    new_list.id,
+    urls=[<span class="s">"malware.example.com"</span>, <span class="s">"phishing.bad.org"</span>, <span class="s">"new-threat.evil.net"</span>],
+)
+
+<span class="cm"># Deploy all pending policy changes (required after create/update/delete)</span>
+client.url_lists.<span class="fn">deploy</span>()
+
+<span class="cm"># Delete</span>
+client.url_lists.<span class="fn">delete</span>(new_list.id)
+client.url_lists.<span class="fn">deploy</span>()</code></div>
+
+    <div class="p-4 bg-blue-50 border border-blue-200 rounded-xl text-sm text-blue-800 mb-4">
+        <strong>Important:</strong> Changes to URL lists are staged until you call <code>client.url_lists.deploy()</code>. This matches the Netskope admin console behavior &mdash; create, update, or delete, then deploy all changes at once.
+    </div>
+
+    <h3 class="font-semibold text-lg mb-3">UrlList Model Fields</h3>
+    <div class="overflow-x-auto"><table class="w-full text-sm border-collapse"><thead><tr class="text-left border-b-2 border-slate-200"><th class="py-2 pr-4 font-semibold">Field</th><th class="py-2 pr-4 font-semibold">Type</th><th class="py-2 font-semibold">Description</th></tr></thead>
+    <tbody class="text-slate-600">
+        <tr class="border-b border-slate-100 param-row"><td class="pr-4"><code>id</code></td><td class="pr-4"><code>int | None</code></td><td>Numeric identifier</td></tr>
+        <tr class="border-b border-slate-100 param-row"><td class="pr-4"><code>name</code></td><td class="pr-4"><code>str | None</code></td><td>Human-readable name</td></tr>
+        <tr class="border-b border-slate-100 param-row"><td class="pr-4"><code>type</code></td><td class="pr-4"><code>str | None</code></td><td>Matching strategy: <code>"exact"</code> or <code>"regex"</code></td></tr>
+        <tr class="border-b border-slate-100 param-row"><td class="pr-4"><code>urls</code></td><td class="pr-4"><code>list[str]</code></td><td>The URL entries</td></tr>
+        <tr class="border-b border-slate-100 param-row"><td class="pr-4"><code>pending</code></td><td class="pr-4"><code>bool | None</code></td><td>Whether changes await deployment</td></tr>
+        <tr class="param-row"><td class="pr-4"><code>modify_by</code></td><td class="pr-4"><code>str | None</code></td><td>Last modified by (admin email)</td></tr>
+    </tbody></table></div>
+</section>
+
+<div class="section-divider max-w-4xl mx-auto"></div>
+
+<!-- ═══════════════════════ PUBLISHERS ═══════════════════════ -->
+<section id="publishers" class="max-w-4xl mx-auto px-6 py-16">
+    <h2 class="text-3xl font-bold mb-2">Publishers</h2>
+    <p class="text-slate-500 text-sm mb-8"><code>client.publishers</code> &mdash; Manage private-access gateway publishers via <code>/api/v2/infrastructure/publishers</code></p>
+    <div class="code-block p-5 mb-6">
+<code><span class="cm"># List all publishers</span>
+<span class="kw">for</span> pub <span class="kw">in</span> client.publishers.<span class="fn">list</span>():
+    <span class="bi">print</span>(f<span class="s">"{pub.publisher_name}: {pub.status} ({pub.apps_count} apps)"</span>)
+<span class="cm"># → flonkerton-sedemo-publisher: connected (6 apps)</span>
+<span class="cm"># → NPA-Unified-Pub-US-EAST-1: connected (18 apps)</span>
+<span class="cm"># → NPA-Unified-Pub-US-WEST-1: connected (7 apps)</span>
+
+<span class="cm"># Get by ID</span>
+pub = client.publishers.<span class="fn">get</span>(<span class="nb">109</span>)
+<span class="bi">print</span>(f<span class="s">"{pub.publisher_name} — registered={pub.registered}"</span>)
+
+<span class="cm"># Create a new publisher</span>
+new_pub = client.publishers.<span class="fn">create</span>(name=<span class="s">"aws-us-east-1-publisher"</span>)
+
+<span class="cm"># Update</span>
+client.publishers.<span class="fn">update</span>(new_pub.publisher_id, name=<span class="s">"aws-us-east-1-primary"</span>)
+
+<span class="cm"># Delete</span>
+client.publishers.<span class="fn">delete</span>(new_pub.publisher_id)</code></div>
+
+    <h3 class="font-semibold text-lg mb-3">Publisher Model Fields</h3>
+    <div class="overflow-x-auto"><table class="w-full text-sm border-collapse"><thead><tr class="text-left border-b-2 border-slate-200"><th class="py-2 pr-4 font-semibold">Field</th><th class="py-2 pr-4 font-semibold">Type</th><th class="py-2 font-semibold">Description</th></tr></thead>
+    <tbody class="text-slate-600">
+        <tr class="border-b border-slate-100 param-row"><td class="pr-4"><code>publisher_id</code></td><td class="pr-4"><code>int | None</code></td><td>Numeric identifier</td></tr>
+        <tr class="border-b border-slate-100 param-row"><td class="pr-4"><code>publisher_name</code></td><td class="pr-4"><code>str | None</code></td><td>Human-readable name</td></tr>
+        <tr class="border-b border-slate-100 param-row"><td class="pr-4"><code>status</code></td><td class="pr-4"><code>str | None</code></td><td><code>"connected"</code> or <code>"not_connected"</code></td></tr>
+        <tr class="border-b border-slate-100 param-row"><td class="pr-4"><code>apps_count</code></td><td class="pr-4"><code>int | None</code></td><td>Number of apps assigned to this publisher</td></tr>
+        <tr class="border-b border-slate-100 param-row"><td class="pr-4"><code>registered</code></td><td class="pr-4"><code>bool | None</code></td><td>Registration status</td></tr>
+        <tr class="param-row"><td class="pr-4"><code>sticky_ip_enabled</code></td><td class="pr-4"><code>bool | None</code></td><td>Whether sticky IP is enabled</td></tr>
+    </tbody></table></div>
+</section>
+
+<div class="section-divider max-w-4xl mx-auto"></div>
+
+<!-- ═══════════════════════ PRIVATE APPS ═══════════════════════ -->
+<section id="private-apps" class="max-w-4xl mx-auto px-6 py-16">
+    <h2 class="text-3xl font-bold mb-2">Private Apps (ZTNA)</h2>
+    <p class="text-slate-500 text-sm mb-8"><code>client.private_apps</code> &mdash; Manage zero-trust private applications via <code>/api/v2/steering/apps/private</code></p>
+    <div class="code-block p-5 mb-6">
+<code><span class="cm"># List all private apps</span>
+<span class="kw">for</span> app <span class="kw">in</span> client.private_apps.<span class="fn">list</span>():
+    <span class="bi">print</span>(f<span class="s">"{app.app_name} → {app.host}:{app.port}"</span>)
+<span class="cm"># → [Portal Test] → npaportal.mynetskopedemo.com:443</span>
+<span class="cm"># → [Finance MyNetskopeDemo] → finance.mynetskopedemo.com:443</span>
+
+<span class="cm"># Get by ID</span>
+app = client.private_apps.<span class="fn">get</span>(<span class="nb">110</span>)
+
+<span class="cm"># Create a new private app</span>
+app = client.private_apps.<span class="fn">create</span>(
+    name=<span class="s">"internal-dashboard"</span>,
+    host=<span class="s">"10.0.0.5"</span>,
+    port=<span class="s">"443"</span>,
+    protocols=[<span class="s">"TCP"</span>],
+    publisher_ids=[<span class="nb">109</span>, <span class="nb">126</span>],
+)
+
+<span class="cm"># Update</span>
+client.private_apps.<span class="fn">update</span>(app.app_id, app_name=<span class="s">"internal-dashboard-v2"</span>)
+
+<span class="cm"># Delete</span>
+client.private_apps.<span class="fn">delete</span>(app.app_id)</code></div>
+
+    <h3 class="font-semibold text-lg mb-3">PrivateApp Model Fields</h3>
+    <div class="overflow-x-auto"><table class="w-full text-sm border-collapse"><thead><tr class="text-left border-b-2 border-slate-200"><th class="py-2 pr-4 font-semibold">Field</th><th class="py-2 pr-4 font-semibold">Type</th><th class="py-2 font-semibold">Description</th></tr></thead>
+    <tbody class="text-slate-600">
+        <tr class="border-b border-slate-100 param-row"><td class="pr-4"><code>app_id</code></td><td class="pr-4"><code>int | None</code></td><td>Numeric identifier</td></tr>
+        <tr class="border-b border-slate-100 param-row"><td class="pr-4"><code>app_name</code></td><td class="pr-4"><code>str | None</code></td><td>Application display name</td></tr>
+        <tr class="border-b border-slate-100 param-row"><td class="pr-4"><code>host</code></td><td class="pr-4"><code>str | None</code></td><td>Target host (IP or hostname)</td></tr>
+        <tr class="border-b border-slate-100 param-row"><td class="pr-4"><code>port</code></td><td class="pr-4"><code>str | None</code></td><td>Target port(s)</td></tr>
+        <tr class="border-b border-slate-100 param-row"><td class="pr-4"><code>protocols</code></td><td class="pr-4"><code>list | None</code></td><td>Protocol configuration</td></tr>
+        <tr class="border-b border-slate-100 param-row"><td class="pr-4"><code>publishers</code></td><td class="pr-4"><code>list[dict] | None</code></td><td>Assigned publishers</td></tr>
+        <tr class="border-b border-slate-100 param-row"><td class="pr-4"><code>use_publisher_dns</code></td><td class="pr-4"><code>bool | None</code></td><td>Use publisher DNS resolution</td></tr>
+        <tr class="param-row"><td class="pr-4"><code>clientless_access</code></td><td class="pr-4"><code>bool | None</code></td><td>Browser-based access enabled</td></tr>
+    </tbody></table></div>
+</section>
+
+<div class="section-divider max-w-4xl mx-auto"></div>
+
+<!-- ═══════════════════════ SCIM ═══════════════════════ -->
+<section id="scim" class="max-w-4xl mx-auto px-6 py-16">
+    <h2 class="text-3xl font-bold mb-2">SCIM Users &amp; Groups</h2>
+    <p class="text-slate-500 text-sm mb-8"><code>client.scim</code> &mdash; SCIM 2.0 user and group provisioning via <code>/api/v2/scim/Users</code> and <code>/api/v2/scim/Groups</code></p>
+
+    <h3 class="font-semibold text-xl mb-3">Users &mdash; <code>client.scim.users</code></h3>
+    <div class="code-block p-5 mb-8">
+<code><span class="cm"># List all SCIM users</span>
+<span class="kw">for</span> user <span class="kw">in</span> client.scim.users.<span class="fn">list</span>():
+    <span class="bi">print</span>(f<span class="s">"{user.user_name} active={user.active} display={user.display_name}"</span>)
+
+<span class="cm"># Filter users with SCIM filter syntax</span>
+admins = client.scim.users.<span class="fn">list</span>(
+    filter_expr=<span class="s">'userName co "admin"'</span>,
+).<span class="fn">to_list</span>()
+
+<span class="cm"># Get a specific user</span>
+user = client.scim.users.<span class="fn">get</span>(<span class="s">"user-uuid-here"</span>)
+
+<span class="cm"># Create a new user</span>
+user = client.scim.users.<span class="fn">create</span>(
+    user_name=<span class="s">"alice@company.com"</span>,
+    email=<span class="s">"alice@company.com"</span>,
+    display_name=<span class="s">"Alice Smith"</span>,
+    given_name=<span class="s">"Alice"</span>,
+    family_name=<span class="s">"Smith"</span>,
+    active=<span class="nb">True</span>,
+)
+<span class="bi">print</span>(f<span class="s">"Created user: {user.id}"</span>)
+
+<span class="cm"># Update (PATCH) — only send changed fields</span>
+client.scim.users.<span class="fn">update</span>(user.id, active=<span class="nb">False</span>)
+
+<span class="cm"># Delete</span>
+client.scim.users.<span class="fn">delete</span>(user.id)</code></div>
+
+    <h3 class="font-semibold text-xl mb-3">Groups &mdash; <code>client.scim.groups</code></h3>
+    <div class="code-block p-5 mb-8">
+<code><span class="cm"># List all groups</span>
+<span class="kw">for</span> group <span class="kw">in</span> client.scim.groups.<span class="fn">list</span>():
+    <span class="bi">print</span>(f<span class="s">"{group.display_name}: {len(group.members)} members"</span>)
+
+<span class="cm"># Create a group with members</span>
+group = client.scim.groups.<span class="fn">create</span>(
+    display_name=<span class="s">"Engineering"</span>,
+    member_ids=[<span class="s">"user-id-1"</span>, <span class="s">"user-id-2"</span>],
+)
+
+<span class="cm"># Update group (PUT — full replacement)</span>
+client.scim.groups.<span class="fn">update</span>(group.id, display_name=<span class="s">"Platform Engineering"</span>)
+
+<span class="cm"># Delete</span>
+client.scim.groups.<span class="fn">delete</span>(group.id)</code></div>
+
+    <h3 class="font-semibold text-lg mb-3">ScimUser Model Fields</h3>
+    <div class="overflow-x-auto mb-6"><table class="w-full text-sm border-collapse"><thead><tr class="text-left border-b-2 border-slate-200"><th class="py-2 pr-4 font-semibold">Field</th><th class="py-2 pr-4 font-semibold">Type</th><th class="py-2 font-semibold">Description</th></tr></thead>
+    <tbody class="text-slate-600">
+        <tr class="border-b border-slate-100 param-row"><td class="pr-4"><code>id</code></td><td class="pr-4"><code>str | None</code></td><td>SCIM unique identifier</td></tr>
+        <tr class="border-b border-slate-100 param-row"><td class="pr-4"><code>user_name</code></td><td class="pr-4"><code>str | None</code></td><td>Username (typically email)</td></tr>
+        <tr class="border-b border-slate-100 param-row"><td class="pr-4"><code>display_name</code></td><td class="pr-4"><code>str | None</code></td><td>Display name</td></tr>
+        <tr class="border-b border-slate-100 param-row"><td class="pr-4"><code>active</code></td><td class="pr-4"><code>bool | None</code></td><td>Account status</td></tr>
+        <tr class="border-b border-slate-100 param-row"><td class="pr-4"><code>emails</code></td><td class="pr-4"><code>list[ScimEmail]</code></td><td>Email addresses (each has <code>value</code>, <code>primary</code>, <code>type</code>)</td></tr>
+        <tr class="param-row"><td class="pr-4"><code>groups</code></td><td class="pr-4"><code>list[dict]</code></td><td>Group memberships</td></tr>
+    </tbody></table></div>
+</section>
+
+<div class="section-divider max-w-4xl mx-auto"></div>
+
+<!-- ═══════════════════════ INCIDENTS ═══════════════════════ -->
+<section id="incidents" class="max-w-4xl mx-auto px-6 py-16">
+    <h2 class="text-3xl font-bold mb-2">Incidents</h2>
+    <p class="text-slate-500 text-sm mb-8"><code>client.incidents</code> &mdash; View incidents, update status, get risk scores, DLP forensics, and UBA anomalies</p>
+    <div class="code-block p-5 mb-8">
+<code><span class="cm"># List incidents with JQL filtering</span>
+<span class="kw">for</span> incident <span class="kw">in</span> client.incidents.<span class="fn">list</span>(query=<span class="s">'severity eq "critical"'</span>):
+    <span class="bi">print</span>(f<span class="s">"{incident.incident_id} — {incident.severity} — {incident.status}"</span>)
+
+<span class="cm"># Update an incident (with optimistic locking)</span>
+client.incidents.<span class="fn">update</span>(
+    incident_id=<span class="s">"INC-001"</span>,
+    field=<span class="s">"status"</span>,
+    old_value=<span class="s">"open"</span>,
+    new_value=<span class="s">"in_progress"</span>,
+    user=<span class="s">"analyst@company.com"</span>,
+)
+
+<span class="cm"># Get User Confidence Index (risk score)</span>
+uci = client.incidents.<span class="fn">get_uci</span>(<span class="s">"bob@company.com"</span>)
+<span class="bi">print</span>(f<span class="s">"Risk score: {uci.score}, severity: {uci.severity}"</span>)
+
+<span class="cm"># Get UBA anomalies for specific users</span>
+anomalies = client.incidents.<span class="fn">get_anomalies</span>(
+    users=[<span class="s">"bob@company.com"</span>, <span class="s">"alice@company.com"</span>],
+    timeframe=<span class="nb">30</span>,  <span class="cm"># days</span>
+    severity=<span class="s">"high"</span>,
+)
+<span class="kw">for</span> a <span class="kw">in</span> anomalies:
+    <span class="bi">print</span>(f<span class="s">"{a.user}: {a.anomaly_type} — {a.risk_level}"</span>)
+
+<span class="cm"># Get DLP forensics for an incident</span>
+forensics = client.incidents.<span class="fn">get_forensics</span>(<span class="s">"dlp-incident-id"</span>)</code></div>
+</section>
+
+<div class="section-divider max-w-4xl mx-auto"></div>
+
+<!-- ═══════════════════════ STEERING ═══════════════════════ -->
+<section id="steering" class="max-w-4xl mx-auto px-6 py-16">
+    <h2 class="text-3xl font-bold mb-2">Steering &amp; Infrastructure</h2>
+    <p class="text-slate-500 text-sm mb-8"><code>client.steering</code> &mdash; Steering configuration, PoPs, and IPSec tunnels</p>
+    <div class="code-block p-5 mb-6">
+<code><span class="cm"># Get NPA steering configuration</span>
+config = client.steering.<span class="fn">get_config</span>(<span class="s">"npa"</span>)
+<span class="bi">print</span>(config.data)
+
+<span class="cm"># Update steering configuration</span>
+client.steering.<span class="fn">update_config</span>(<span class="s">"npa"</span>, some_setting=<span class="s">"value"</span>)
+
+<span class="cm"># List Points of Presence (PoPs)</span>
+<span class="kw">for</span> pop <span class="kw">in</span> client.steering.<span class="fn">list_pops</span>():
+    <span class="bi">print</span>(f<span class="s">"{pop.name} — {pop.region} ({pop.country})"</span>)
+
+<span class="cm"># List IPSec tunnels</span>
+<span class="kw">for</span> tunnel <span class="kw">in</span> client.steering.<span class="fn">list_tunnels</span>():
+    <span class="bi">print</span>(f<span class="s">"{tunnel.name}: {tunnel.status}"</span>)
+
+<span class="cm"># Get specific tunnel</span>
+tunnel = client.steering.<span class="fn">get_tunnel</span>(<span class="nb">42</span>)</code></div>
+</section>
+
+<div class="section-divider max-w-4xl mx-auto"></div>
+
+<!-- ═══════════════════════ PAGINATION ═══════════════════════ -->
+<section id="pagination" class="max-w-4xl mx-auto px-6 py-16">
+    <h2 class="text-3xl font-bold mb-2">Pagination</h2>
+    <p class="text-slate-600 mb-8">Every <code>.list()</code> method returns a <code>SyncPaginatedResponse</code> (or <code>AsyncPaginatedResponse</code>) that handles pagination transparently. You never write page loops.</p>
+
+    <h3 class="font-semibold text-lg mb-3">Iterate Items (Lazy)</h3>
+    <p class="text-slate-600 text-sm mb-3">Pages are fetched on demand as you iterate. Memory-efficient for large result sets.</p>
+    <div class="code-block p-5 mb-8">
+<code><span class="cm"># Fetches pages automatically as needed</span>
+<span class="kw">for</span> alert <span class="kw">in</span> client.alerts.<span class="fn">list</span>(page_size=<span class="nb">100</span>):
+    <span class="fn">process</span>(alert)  <span class="cm"># Each alert is a typed Alert object</span></code></div>
+
+    <h3 class="font-semibold text-lg mb-3">Page-Level Access</h3>
+    <p class="text-slate-600 text-sm mb-3">Use <code>.pages()</code> when you need page metadata (total count, page size).</p>
+    <div class="code-block p-5 mb-8">
+<code><span class="kw">for</span> page <span class="kw">in</span> client.alerts.<span class="fn">list</span>(page_size=<span class="nb">50</span>).<span class="fn">pages</span>():
+    <span class="bi">print</span>(f<span class="s">"Page at offset {page.offset}: {len(page.items)} items (total={page.total})"</span>)
+    <span class="kw">for</span> alert <span class="kw">in</span> page.items:
+        <span class="fn">process</span>(alert)</code></div>
+
+    <h3 class="font-semibold text-lg mb-3">Collect All (<code>.to_list()</code>)</h3>
+    <p class="text-slate-600 text-sm mb-3">Fetch everything into a list. Always specify <code>max_items</code> as a safety limit.</p>
+    <div class="code-block p-5 mb-8">
+<code><span class="cm"># Collect up to 5000 alerts</span>
+all_alerts = client.alerts.<span class="fn">list</span>().<span class="fn">to_list</span>(max_items=<span class="nb">5000</span>)
+<span class="bi">print</span>(f<span class="s">"Got {len(all_alerts)} alerts"</span>)</code></div>
+
+    <h3 class="font-semibold text-lg mb-3">Get First (<code>.first()</code>)</h3>
+    <p class="text-slate-600 text-sm mb-3">Fetch just the first result without iterating further. Returns <code>None</code> for empty results.</p>
+    <div class="code-block p-5 mb-8">
+<code>latest = client.alerts.<span class="fn">list</span>(order_by=<span class="s">"timestamp"</span>).<span class="fn">first</span>()
+<span class="kw">if</span> latest:
+    <span class="bi">print</span>(f<span class="s">"Latest: {latest.alert_name}"</span>)
+<span class="kw">else</span>:
+    <span class="bi">print</span>(<span class="s">"No alerts found"</span>)</code></div>
+
+    <h3 class="font-semibold text-lg mb-3">Page Object Fields</h3>
+    <div class="overflow-x-auto"><table class="w-full text-sm border-collapse"><thead><tr class="text-left border-b-2 border-slate-200"><th class="py-2 pr-4 font-semibold">Field</th><th class="py-2 pr-4 font-semibold">Type</th><th class="py-2 font-semibold">Description</th></tr></thead>
+    <tbody class="text-slate-600">
+        <tr class="border-b border-slate-100 param-row"><td class="pr-4"><code>items</code></td><td class="pr-4"><code>list[T]</code></td><td>Model instances on this page</td></tr>
+        <tr class="border-b border-slate-100 param-row"><td class="pr-4"><code>total</code></td><td class="pr-4"><code>int | None</code></td><td>Total items across all pages (if provided by API)</td></tr>
+        <tr class="border-b border-slate-100 param-row"><td class="pr-4"><code>offset</code></td><td class="pr-4"><code>int</code></td><td>Offset used for this page</td></tr>
+        <tr class="param-row"><td class="pr-4"><code>limit</code></td><td class="pr-4"><code>int</code></td><td>Page size</td></tr>
+    </tbody></table></div>
+</section>
+
+<div class="section-divider max-w-4xl mx-auto"></div>
+
+<!-- ═══════════════════════ ERRORS ═══════════════════════ -->
+<section id="errors" class="max-w-4xl mx-auto px-6 py-16">
+    <h2 class="text-3xl font-bold mb-8">Error Handling</h2>
+
+    <h3 class="font-semibold text-lg mb-3">Exception Hierarchy</h3>
+    <div class="code-block p-5 mb-8">
+<code>NetskopeError                  <span class="cm"># Base — catch everything</span>
+├── APIError                   <span class="cm"># Any non-2xx HTTP response</span>
+│   ├── AuthenticationError    <span class="cm"># 401 — invalid or expired token</span>
+│   ├── ForbiddenError        <span class="cm"># 403 — token lacks required scope</span>
+│   ├── NotFoundError          <span class="cm"># 404 — resource does not exist</span>
+│   ├── ConflictError          <span class="cm"># 409 — duplicate resource</span>
+│   ├── RateLimitError         <span class="cm"># 429 — rate limit exceeded (.retry_after available)</span>
+│   └── ServerError            <span class="cm"># 5xx — Netskope server-side failure</span>
+├── ValidationError            <span class="cm"># Bad input caught before sending request</span>
+├── ConnectionError            <span class="cm"># Network-level failure</span>
+└── TimeoutError               <span class="cm"># Request timeout exceeded</span></code></div>
+
+    <h3 class="font-semibold text-lg mb-3">APIError Attributes</h3>
+    <p class="text-slate-600 text-sm mb-4">All API errors carry rich context for debugging and support escalation:</p>
+    <div class="overflow-x-auto mb-6"><table class="w-full text-sm border-collapse"><thead><tr class="text-left border-b-2 border-slate-200"><th class="py-2 pr-4 font-semibold">Attribute</th><th class="py-2 pr-4 font-semibold">Type</th><th class="py-2 font-semibold">Description</th></tr></thead>
+    <tbody class="text-slate-600">
+        <tr class="border-b border-slate-100 param-row"><td class="pr-4"><code>status_code</code></td><td class="pr-4"><code>int</code></td><td>HTTP status code (e.g. 401, 404, 429)</td></tr>
+        <tr class="border-b border-slate-100 param-row"><td class="pr-4"><code>request_id</code></td><td class="pr-4"><code>str | None</code></td><td>Server-assigned request ID &mdash; use this for Netskope support tickets</td></tr>
+        <tr class="border-b border-slate-100 param-row"><td class="pr-4"><code>message</code></td><td class="pr-4"><code>str</code></td><td>Human-readable error message</td></tr>
+        <tr class="border-b border-slate-100 param-row"><td class="pr-4"><code>response</code></td><td class="pr-4"><code>httpx.Response | None</code></td><td>The full underlying HTTP response</td></tr>
+        <tr class="param-row"><td class="pr-4"><code>body</code></td><td class="pr-4"><code>dict | None</code></td><td>Parsed JSON response body</td></tr>
+    </tbody></table></div>
+
+    <h3 class="font-semibold text-lg mb-3">Catching Specific Errors</h3>
+    <div class="code-block p-5 mb-8">
+<code><span class="kw">from</span> netskope.exceptions <span class="kw">import</span> (
+    NetskopeError,
+    AuthenticationError,
+    ForbiddenError,
+    NotFoundError,
+    RateLimitError,
+    ServerError,
+)
+
+<span class="kw">try</span>:
+    alert = client.alerts.<span class="fn">get</span>(<span class="s">"nonexistent-id"</span>)
+<span class="kw">except</span> NotFoundError <span class="kw">as</span> e:
+    <span class="bi">print</span>(f<span class="s">"Not found: {e.message}"</span>)
+    <span class="bi">print</span>(f<span class="s">"Request ID: {e.request_id}"</span>)  <span class="cm"># for support escalation</span>
+<span class="kw">except</span> AuthenticationError:
+    <span class="bi">print</span>(<span class="s">"Token is invalid or expired — check NETSKOPE_API_TOKEN"</span>)
+<span class="kw">except</span> ForbiddenError:
+    <span class="bi">print</span>(<span class="s">"Token lacks the required scope for this endpoint"</span>)
+<span class="kw">except</span> RateLimitError <span class="kw">as</span> e:
+    <span class="bi">print</span>(f<span class="s">"Rate limited — retry after {e.retry_after} seconds"</span>)
+<span class="kw">except</span> ServerError <span class="kw">as</span> e:
+    <span class="bi">print</span>(f<span class="s">"Netskope server error ({e.status_code}): {e.message}"</span>)
+<span class="kw">except</span> NetskopeError <span class="kw">as</span> e:
+    <span class="bi">print</span>(f<span class="s">"SDK error: {e}"</span>)  <span class="cm"># catch-all for any SDK error</span></code></div>
+
+    <h3 class="font-semibold text-lg mb-3">Catching All API Errors</h3>
+    <div class="code-block p-5">
+<code><span class="kw">from</span> netskope.exceptions <span class="kw">import</span> APIError
+
+<span class="kw">try</span>:
+    result = client.publishers.<span class="fn">create</span>(name=<span class="s">"test"</span>)
+<span class="kw">except</span> APIError <span class="kw">as</span> e:
+    <span class="bi">print</span>(f<span class="s">"API returned HTTP {e.status_code}: {e.message}"</span>)
+    <span class="kw">if</span> e.request_id:
+        <span class="bi">print</span>(f<span class="s">"Include this in support tickets: {e.request_id}"</span>)</code></div>
+</section>
+
+<div class="section-divider max-w-4xl mx-auto"></div>
+
+<!-- ═══════════════════════ RETRIES ═══════════════════════ -->
+<section id="retries" class="max-w-4xl mx-auto px-6 py-16">
+    <h2 class="text-3xl font-bold mb-2">Retries &amp; Backoff</h2>
+    <p class="text-slate-600 mb-8">The SDK automatically retries transient failures with exponential backoff and jitter. No configuration required for sensible defaults.</p>
+
+    <h3 class="font-semibold text-lg mb-3">Default Behavior</h3>
+    <ul class="space-y-2 text-sm text-slate-600 mb-6">
+        <li class="flex gap-2"><span class="text-netskope-600 font-bold">&#x2022;</span> Retries on: <code>429</code>, <code>500</code>, <code>502</code>, <code>503</code>, <code>504</code></li>
+        <li class="flex gap-2"><span class="text-netskope-600 font-bold">&#x2022;</span> Max retries: <strong>3</strong></li>
+        <li class="flex gap-2"><span class="text-netskope-600 font-bold">&#x2022;</span> Backoff formula: <code>0.5 * 2^attempt</code> (capped at 60s) + random jitter</li>
+        <li class="flex gap-2"><span class="text-netskope-600 font-bold">&#x2022;</span> Respects <code>Retry-After</code> headers from the server</li>
+        <li class="flex gap-2"><span class="text-netskope-600 font-bold">&#x2022;</span> Connection errors and timeouts are also retried</li>
+    </ul>
+
+    <h3 class="font-semibold text-lg mb-3">Custom Configuration</h3>
+    <div class="code-block p-5">
+<code><span class="cm"># Aggressive retry for batch jobs</span>
+client = NetskopeClient(
+    tenant=<span class="s">"mycompany.goskope.com"</span>,
+    api_token=<span class="s">"..."</span>,
+    max_retries=<span class="nb">5</span>,
+    backoff_factor=<span class="nb">1.0</span>,     <span class="cm"># longer waits: 1s, 2s, 4s, 8s, 16s</span>
+    timeout=<span class="nb">60.0</span>,            <span class="cm"># longer timeout for slow queries</span>
+)
+
+<span class="cm"># No retries (fail fast)</span>
+client = NetskopeClient(
+    tenant=<span class="s">"mycompany.goskope.com"</span>,
+    api_token=<span class="s">"..."</span>,
+    max_retries=<span class="nb">0</span>,
+)</code></div>
+</section>
+
+<div class="section-divider max-w-4xl mx-auto"></div>
+
+<!-- ═══════════════════════ LOGGING ═══════════════════════ -->
+<section id="logging" class="max-w-4xl mx-auto px-6 py-16">
+    <h2 class="text-3xl font-bold mb-2">Logging</h2>
+    <p class="text-slate-600 mb-6">The SDK uses Python's standard <code>logging</code> module under the <code>"netskope"</code> logger. Tokens are never logged.</p>
+    <div class="code-block p-5 mb-6">
+<code><span class="kw">import</span> logging
+
+<span class="cm"># See request/response at INFO level</span>
+logging.<span class="fn">getLogger</span>(<span class="s">"netskope"</span>).<span class="fn">setLevel</span>(logging.INFO)
+<span class="cm"># → ← GET https://mycompany.goskope.com/api/v2/events/datasearch/alert → 200 (request_id=abc123)</span>
+
+<span class="cm"># Full debug output (request URLs, retry decisions)</span>
+logging.<span class="fn">getLogger</span>(<span class="s">"netskope"</span>).<span class="fn">setLevel</span>(logging.DEBUG)
+<span class="cm"># → → GET /api/v2/events/datasearch/alert</span>
+<span class="cm"># → Netskope API returned 429, retrying in 1.2s (attempt 1/3)</span>
+
+<span class="cm"># Silence the SDK entirely</span>
+logging.<span class="fn">getLogger</span>(<span class="s">"netskope"</span>).<span class="fn">setLevel</span>(logging.CRITICAL)</code></div>
+</section>
+
+<div class="section-divider max-w-4xl mx-auto"></div>
+
+<!-- ═══════════════════════ JQL ═══════════════════════ -->
+<section id="jql" class="max-w-4xl mx-auto px-6 py-16">
+    <h2 class="text-3xl font-bold mb-2">JQL Query Syntax</h2>
+    <p class="text-slate-600 mb-8">Netskope's JSON Query Language (JQL) is used in <code>alerts.list(query=...)</code>, <code>events.list(query=...)</code>, and <code>incidents.list(query=...)</code> to filter results server-side.</p>
+
+    <h3 class="font-semibold text-lg mb-3">Operators</h3>
+    <div class="overflow-x-auto mb-6"><table class="w-full text-sm border-collapse"><thead><tr class="text-left border-b-2 border-slate-200"><th class="py-2 pr-4 font-semibold">Operator</th><th class="py-2 pr-4 font-semibold">Meaning</th><th class="py-2 font-semibold">Example</th></tr></thead>
+    <tbody class="text-slate-600">
+        <tr class="border-b border-slate-100 param-row"><td class="pr-4"><code>eq</code></td><td class="pr-4">Equals</td><td><code>severity eq "high"</code></td></tr>
+        <tr class="border-b border-slate-100 param-row"><td class="pr-4"><code>ne</code></td><td class="pr-4">Not equals</td><td><code>alert_type ne "policy"</code></td></tr>
+        <tr class="border-b border-slate-100 param-row"><td class="pr-4"><code>gt</code> / <code>lt</code></td><td class="pr-4">Greater/less than</td><td><code>timestamp gt 1709913600</code></td></tr>
+        <tr class="border-b border-slate-100 param-row"><td class="pr-4"><code>ge</code> / <code>le</code></td><td class="pr-4">Greater/less or equal</td><td><code>cci ge 50</code></td></tr>
+        <tr class="border-b border-slate-100 param-row"><td class="pr-4"><code>in</code></td><td class="pr-4">In list</td><td><code>activity in ("Upload", "Download")</code></td></tr>
+        <tr class="border-b border-slate-100 param-row"><td class="pr-4"><code>contains</code></td><td class="pr-4">Substring match</td><td><code>alert_name contains "DLP"</code></td></tr>
+        <tr class="param-row"><td class="pr-4"><code>AND</code> / <code>OR</code></td><td class="pr-4">Logical operators</td><td><code>severity eq "high" AND app eq "Slack"</code></td></tr>
+    </tbody></table></div>
+
+    <h3 class="font-semibold text-lg mb-3">Examples</h3>
+    <div class="code-block p-5">
+<code><span class="cm"># Simple equality</span>
+client.alerts.<span class="fn">list</span>(query=<span class="s">'alert_type eq "DLP"'</span>)
+
+<span class="cm"># Compound query</span>
+client.alerts.<span class="fn">list</span>(query=<span class="s">'severity eq "high" AND app eq "Slack"'</span>)
+
+<span class="cm"># User-specific events</span>
+client.events.<span class="fn">list</span>(<span class="s">"application"</span>, query=<span class="s">'user eq "alice@company.com"'</span>)
+
+<span class="cm"># Activity filter</span>
+client.events.<span class="fn">list</span>(<span class="s">"application"</span>, query=<span class="s">'activity in ("Upload", "Download", "Delete")'</span>)</code></div>
+</section>
+
+<div class="section-divider max-w-4xl mx-auto"></div>
+
+<!-- ═══════════════════════ MODELS ═══════════════════════ -->
+<section id="models" class="max-w-4xl mx-auto px-6 py-16">
+    <h2 class="text-3xl font-bold mb-2">Model Serialization</h2>
+    <p class="text-slate-600 mb-8">All response models are Pydantic v2 objects with full serialization support. They are frozen (immutable) and forward-compatible (unknown API fields are preserved).</p>
+    <div class="code-block p-5 mb-8">
+<code>alert = client.alerts.<span class="fn">list</span>().<span class="fn">first</span>()
+
+<span class="cm"># Access fields with dot notation</span>
+alert.alert_name   <span class="cm"># "Sensitive data should be masked in output"</span>
+alert.app          <span class="cm"># "Workday"</span>
+alert.alert_type   <span class="cm"># "Security Assessment"</span>
+
+<span class="cm"># Serialize to dict</span>
+d = alert.<span class="fn">model_dump</span>()
+<span class="cm"># → {'id': '44d8af1b...', 'alert_name': 'Sensitive data...', 'app': 'Workday', ...}</span>
+
+<span class="cm"># Serialize to JSON string</span>
+json_str = alert.<span class="fn">model_dump_json</span>()
+<span class="cm"># → '{"id": "44d8af1b...", "alert_name": "Sensitive data...", ...}'</span>
+
+<span class="cm"># Exclude None fields</span>
+clean = alert.<span class="fn">model_dump</span>(exclude_none=<span class="nb">True</span>)
+
+<span class="cm"># Import models directly for type annotations</span>
+<span class="kw">from</span> netskope.models <span class="kw">import</span> Alert, Publisher, UrlList, ScimUser
+
+<span class="kw">def</span> <span class="fn">process_alert</span>(alert: Alert) -> <span class="nb">None</span>:
+    <span class="bi">print</span>(f<span class="s">"{alert.alert_name} — {alert.severity}"</span>)</code></div>
+
+    <h3 class="font-semibold text-lg mb-3">All Available Models</h3>
+    <div class="grid md:grid-cols-2 gap-4 mb-6">
+        <div class="p-4 bg-slate-50 rounded-xl"><h4 class="font-semibold mb-2 text-sm">Security</h4><ul class="text-sm text-slate-600 space-y-1"><li><code>Alert</code> — Security alerts</li><li><code>Event</code> — Generic events</li><li><code>NetworkEvent</code> — Network-layer events</li><li><code>PageEvent</code> — Web page events</li><li><code>AuditEvent</code> — Audit trail events</li><li><code>Incident</code> — Security incidents</li><li><code>Anomaly</code> — UBA anomalies</li><li><code>UserConfidenceIndex</code> — UCI risk scores</li></ul></div>
+        <div class="p-4 bg-slate-50 rounded-xl"><h4 class="font-semibold mb-2 text-sm">Infrastructure &amp; Identity</h4><ul class="text-sm text-slate-600 space-y-1"><li><code>Publisher</code> — Private access publishers</li><li><code>PrivateApp</code> — ZTNA applications</li><li><code>UrlList</code> — URL allow/block lists</li><li><code>ScimUser</code> — SCIM users</li><li><code>ScimGroup</code> — SCIM groups</li><li><code>Pop</code> — Points of Presence</li><li><code>IPSecTunnel</code> — VPN tunnels</li><li><code>SteeringConfig</code> — Steering config</li></ul></div>
+    </div>
+    <h3 class="font-semibold text-lg mb-3">Enums</h3>
+    <div class="code-block p-5">
+<code><span class="kw">from</span> netskope.models.alerts <span class="kw">import</span> AlertSeverity, AlertType
+<span class="kw">from</span> netskope.models.events <span class="kw">import</span> EventType
+<span class="kw">from</span> netskope.models.incidents <span class="kw">import</span> IncidentStatus
+<span class="kw">from</span> netskope.models.publishers <span class="kw">import</span> PublisherStatus
+<span class="kw">from</span> netskope.models.url_lists <span class="kw">import</span> UrlListType
+
+AlertSeverity.CRITICAL  <span class="cm"># "critical"</span>
+AlertSeverity.HIGH      <span class="cm"># "high"</span>
+EventType.NETWORK       <span class="cm"># "network"</span>
+EventType.APPLICATION   <span class="cm"># "application"</span>
+IncidentStatus.OPEN     <span class="cm"># "open"</span>
+PublisherStatus.CONNECTED  <span class="cm"># "connected"</span>
+UrlListType.EXACT       <span class="cm"># "exact"</span>
+UrlListType.REGEX       <span class="cm"># "regex"</span></code></div>
+</section>
+
+<div class="section-divider max-w-4xl mx-auto"></div>
+
+<!-- ═══════════════════════ REAL-WORLD EXAMPLES ═══════════════════════ -->
+<section id="examples-section" class="max-w-4xl mx-auto px-6 py-16">
+    <h2 class="text-3xl font-bold mb-8">Real-World Examples</h2>
+
+    <div class="space-y-8">
+        <div>
+            <h3 class="font-semibold text-lg mb-3">SIEM Integration &mdash; Ship Events to Splunk/Sentinel</h3>
+            <div class="code-block p-5">
+<code><span class="kw">from</span> netskope <span class="kw">import</span> NetskopeClient
+<span class="kw">from</span> datetime <span class="kw">import</span> datetime, timedelta
+
+client = NetskopeClient()
+end = datetime.<span class="fn">now</span>()
+start = end - timedelta(hours=<span class="nb">1</span>)
+
+<span class="cm"># Stream all event types from the last hour</span>
+<span class="kw">for</span> event_type <span class="kw">in</span> [<span class="s">"application"</span>, <span class="s">"network"</span>, <span class="s">"page"</span>, <span class="s">"alert"</span>]:
+    <span class="kw">for</span> event <span class="kw">in</span> client.events.<span class="fn">list</span>(event_type, start_time=start, end_time=end):
+        <span class="fn">send_to_siem</span>(event.<span class="fn">model_dump</span>(exclude_none=<span class="nb">True</span>))
+
+client.<span class="fn">close</span>()</code></div>
+        </div>
+
+        <div>
+            <h3 class="font-semibold text-lg mb-3">Automated Threat Response &mdash; Block IOCs from Feed</h3>
+            <div class="code-block p-5">
+<code><span class="kw">from</span> netskope <span class="kw">import</span> NetskopeClient
+
+client = NetskopeClient()
+
+<span class="cm"># Get IOCs from your threat intel feed</span>
+malicious_urls = <span class="fn">fetch_threat_intel</span>()  <span class="cm"># → ["malware.com", "phish.org", ...]</span>
+
+<span class="cm"># Create or update the blocklist</span>
+<span class="kw">try</span>:
+    blocklist = client.url_lists.<span class="fn">create</span>(
+        name=<span class="s">"auto-threat-intel"</span>,
+        urls=malicious_urls,
+        list_type=<span class="s">"exact"</span>,
+    )
+<span class="kw">except</span> Exception:
+    <span class="cm"># List already exists — find and update it</span>
+    <span class="kw">for</span> ul <span class="kw">in</span> client.url_lists.<span class="fn">list</span>():
+        <span class="kw">if</span> ul.name == <span class="s">"auto-threat-intel"</span>:
+            client.url_lists.<span class="fn">update</span>(ul.id, urls=malicious_urls)
+            <span class="kw">break</span>
+
+<span class="cm"># Deploy immediately</span>
+client.url_lists.<span class="fn">deploy</span>()
+<span class="bi">print</span>(f<span class="s">"Blocked {len(malicious_urls)} malicious URLs"</span>)</code></div>
+        </div>
+
+        <div>
+            <h3 class="font-semibold text-lg mb-3">Infrastructure Health Check</h3>
+            <div class="code-block p-5">
+<code><span class="kw">from</span> netskope <span class="kw">import</span> NetskopeClient
+
+<span class="kw">with</span> NetskopeClient() <span class="kw">as</span> client:
+    publishers = client.publishers.<span class="fn">list</span>().<span class="fn">to_list</span>()
+    connected = [p <span class="kw">for</span> p <span class="kw">in</span> publishers <span class="kw">if</span> p.status == <span class="s">"connected"</span>]
+    down = [p <span class="kw">for</span> p <span class="kw">in</span> publishers <span class="kw">if</span> p.status != <span class="s">"connected"</span>]
+
+    <span class="bi">print</span>(f<span class="s">"Publishers: {len(connected)} connected, {len(down)} down"</span>)
+    <span class="kw">for</span> p <span class="kw">in</span> down:
+        <span class="bi">print</span>(f<span class="s">"  ⚠ {p.publisher_name} is {p.status}"</span>)
+
+    apps = client.private_apps.<span class="fn">list</span>().<span class="fn">to_list</span>()
+    <span class="bi">print</span>(f<span class="s">"Private apps: {len(apps)}"</span>)</code></div>
+        </div>
+
+        <div>
+            <h3 class="font-semibold text-lg mb-3">User Lifecycle Automation</h3>
+            <div class="code-block p-5">
+<code><span class="kw">from</span> netskope <span class="kw">import</span> NetskopeClient
+
+client = NetskopeClient()
+
+<span class="cm"># Onboard new employees from HR system</span>
+new_hires = [
+    {<span class="s">"email"</span>: <span class="s">"alice@company.com"</span>, <span class="s">"name"</span>: <span class="s">"Alice Smith"</span>},
+    {<span class="s">"email"</span>: <span class="s">"bob@company.com"</span>, <span class="s">"name"</span>: <span class="s">"Bob Jones"</span>},
+]
+
+<span class="kw">for</span> hire <span class="kw">in</span> new_hires:
+    user = client.scim.users.<span class="fn">create</span>(
+        user_name=hire[<span class="s">"email"</span>],
+        email=hire[<span class="s">"email"</span>],
+        display_name=hire[<span class="s">"name"</span>],
+    )
+    <span class="bi">print</span>(f<span class="s">"Provisioned {user.user_name} (id={user.id})"</span>)
+
+<span class="cm"># Offboard departing employees</span>
+<span class="kw">for</span> email <span class="kw">in</span> departing_employees:
+    users = client.scim.users.<span class="fn">list</span>(
+        filter_expr=f<span class="s">'userName eq "{email}"'</span>
+    ).<span class="fn">to_list</span>()
+    <span class="kw">for</span> user <span class="kw">in</span> users:
+        client.scim.users.<span class="fn">update</span>(user.id, active=<span class="nb">False</span>)
+        <span class="bi">print</span>(f<span class="s">"Deactivated {user.user_name}"</span>)</code></div>
+        </div>
+
+        <div>
+            <h3 class="font-semibold text-lg mb-3">High-Throughput Async Processing</h3>
+            <div class="code-block p-5">
+<code><span class="kw">import</span> asyncio
+<span class="kw">from</span> netskope <span class="kw">import</span> AsyncNetskopeClient
+
+<span class="kw">async def</span> <span class="fn">monitor_all_event_types</span>():
+    <span class="kw">async with</span> AsyncNetskopeClient() <span class="kw">as</span> client:
+        event_types = [<span class="s">"application"</span>, <span class="s">"network"</span>, <span class="s">"page"</span>, <span class="s">"alert"</span>]
+
+        <span class="cm"># Fetch all event types concurrently</span>
+        tasks = [
+            client.events.<span class="fn">list</span>(et, page_size=<span class="nb">100</span>).<span class="fn">to_list</span>(max_items=<span class="nb">500</span>)
+            <span class="kw">for</span> et <span class="kw">in</span> event_types
+        ]
+        results = <span class="kw">await</span> asyncio.<span class="fn">gather</span>(*tasks)
+
+        <span class="kw">for</span> et, events <span class="kw">in</span> <span class="bi">zip</span>(event_types, results):
+            <span class="bi">print</span>(f<span class="s">"{et}: {len(events)} events"</span>)
+
+asyncio.<span class="fn">run</span>(monitor_all_event_types())</code></div>
+        </div>
+    </div>
+</section>
+
+<div class="section-divider max-w-4xl mx-auto"></div>
+
+<!-- ═══════════════════════ RESOURCE OVERVIEW ═══════════════════════ -->
+<section class="max-w-4xl mx-auto px-6 py-16">
+    <h2 class="text-3xl font-bold mb-8">Complete API Map</h2>
+    <p class="text-slate-600 mb-6">Every resource namespace and its methods at a glance:</p>
+    <div class="overflow-x-auto"><table class="w-full text-sm border-collapse"><thead><tr class="text-left border-b-2 border-slate-200"><th class="py-2 pr-4 font-semibold">Namespace</th><th class="py-2 pr-4 font-semibold">Methods</th><th class="py-2 font-semibold">API Endpoint</th></tr></thead>
+    <tbody class="text-slate-600">
+        <tr class="border-b border-slate-100 param-row"><td class="pr-4 font-mono"><code>client.alerts</code></td><td class="pr-4"><code>list()</code>, <code>get(id)</code></td><td><code>/api/v2/events/datasearch/alert</code></td></tr>
+        <tr class="border-b border-slate-100 param-row"><td class="pr-4 font-mono"><code>client.events</code></td><td class="pr-4"><code>list(type)</code></td><td><code>/api/v2/events/datasearch/{type}</code></td></tr>
+        <tr class="border-b border-slate-100 param-row"><td class="pr-4 font-mono"><code>client.url_lists</code></td><td class="pr-4"><code>list()</code>, <code>get()</code>, <code>create()</code>, <code>update()</code>, <code>delete()</code>, <code>deploy()</code></td><td><code>/api/v2/policy/urllist</code></td></tr>
+        <tr class="border-b border-slate-100 param-row"><td class="pr-4 font-mono"><code>client.publishers</code></td><td class="pr-4"><code>list()</code>, <code>get()</code>, <code>create()</code>, <code>update()</code>, <code>delete()</code></td><td><code>/api/v2/infrastructure/publishers</code></td></tr>
+        <tr class="border-b border-slate-100 param-row"><td class="pr-4 font-mono"><code>client.private_apps</code></td><td class="pr-4"><code>list()</code>, <code>get()</code>, <code>create()</code>, <code>update()</code>, <code>delete()</code></td><td><code>/api/v2/steering/apps/private</code></td></tr>
+        <tr class="border-b border-slate-100 param-row"><td class="pr-4 font-mono"><code>client.scim.users</code></td><td class="pr-4"><code>list()</code>, <code>get()</code>, <code>create()</code>, <code>update()</code>, <code>delete()</code></td><td><code>/api/v2/scim/Users</code></td></tr>
+        <tr class="border-b border-slate-100 param-row"><td class="pr-4 font-mono"><code>client.scim.groups</code></td><td class="pr-4"><code>list()</code>, <code>get()</code>, <code>create()</code>, <code>update()</code>, <code>delete()</code></td><td><code>/api/v2/scim/Groups</code></td></tr>
+        <tr class="border-b border-slate-100 param-row"><td class="pr-4 font-mono"><code>client.incidents</code></td><td class="pr-4"><code>list()</code>, <code>update()</code>, <code>get_uci()</code>, <code>get_anomalies()</code>, <code>get_forensics()</code></td><td><code>/api/v2/events/datasearch/incident</code></td></tr>
+        <tr class="param-row"><td class="pr-4 font-mono"><code>client.steering</code></td><td class="pr-4"><code>get_config()</code>, <code>update_config()</code>, <code>list_pops()</code>, <code>list_tunnels()</code>, <code>get_tunnel()</code></td><td><code>/api/v2/steering/*</code></td></tr>
+    </tbody></table></div>
+</section>
+
+<!-- ═══════════════════════ FOOTER ═══════════════════════ -->
+<footer class="border-t border-slate-200 bg-slate-50">
+    <div class="max-w-7xl mx-auto px-6 py-12">
+        <div class="flex flex-col md:flex-row items-center justify-between gap-4">
+            <div class="flex items-center gap-2">
+                <div class="w-6 h-6 bg-netskope-600 rounded flex items-center justify-center"><span class="text-white font-bold text-xs">N</span></div>
+                <span class="text-sm text-slate-600">netskope-py-sdk v1.0.0</span>
+            </div>
+            <div class="flex items-center gap-6 text-sm text-slate-500">
+                <a href="https://pypi.org/project/netskope-py-sdk/" class="hover:text-netskope-600">PyPI</a>
+                <a href="https://github.com/netSkopeoss/netskope-py-sdk" class="hover:text-netskope-600">GitHub</a>
+                <a href="https://www.netskope.com" class="hover:text-netskope-600">Netskope</a>
+            </div>
+        </div>
+    </div>
+</footer>
+
+</body>
+</html>
