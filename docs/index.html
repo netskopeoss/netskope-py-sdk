@@ -805,7 +805,6 @@ all_alerts = client.alerts.<span class="fn">list</span>().<span class="fn">to_li
         <tr class="border-b border-slate-100 param-row"><td class="pr-4"><code>status_code</code></td><td class="pr-4"><code>int</code></td><td>HTTP status code (e.g. 401, 404, 429)</td></tr>
         <tr class="border-b border-slate-100 param-row"><td class="pr-4"><code>request_id</code></td><td class="pr-4"><code>str | None</code></td><td>Server-assigned request ID &mdash; use this for Netskope support tickets</td></tr>
         <tr class="border-b border-slate-100 param-row"><td class="pr-4"><code>message</code></td><td class="pr-4"><code>str</code></td><td>Human-readable error message</td></tr>
-        <tr class="border-b border-slate-100 param-row"><td class="pr-4"><code>response</code></td><td class="pr-4"><code>httpx.Response | None</code></td><td>The full underlying HTTP response</td></tr>
         <tr class="param-row"><td class="pr-4"><code>body</code></td><td class="pr-4"><code>dict | None</code></td><td>Parsed JSON response body</td></tr>
     </tbody></table></div>
 
@@ -944,7 +943,7 @@ client.events.<span class="fn">list</span>(<span class="s">"application"</span>,
 <!-- ═══════════════════════ MODELS ═══════════════════════ -->
 <section id="models" class="max-w-4xl mx-auto px-6 py-16">
     <h2 class="text-3xl font-bold mb-2">Model Serialization</h2>
-    <p class="text-slate-600 mb-8">All response models are Pydantic v2 objects with full serialization support. They are frozen (immutable) and forward-compatible (unknown API fields are preserved).</p>
+    <p class="text-slate-600 mb-8">All response models are Pydantic v2 objects with full serialization support. They are frozen (immutable) and forward-compatible (unknown API fields are silently ignored, so new fields added by the API won't break existing code).</p>
     <div class="code-block p-5 mb-8">
 <code>alert = client.alerts.<span class="fn">list</span>().<span class="fn">first</span>()
 
