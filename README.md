@@ -5,6 +5,7 @@ The official Netskope Python SDK — a modern, typed, and intuitive interface to
 [![PyPI](https://img.shields.io/pypi/v/netskope_py_sdk)](https://pypi.org/project/netskope-py-sdk/)
 [![Python](https://img.shields.io/pypi/pyversions/netskope_py_sdk)](https://pypi.org/project/netskope-py-sdk/)
 [![License](https://img.shields.io/pypi/l/netskope_py_sdk)](https://github.com/netSkopeoss/netskope-py-sdk/blob/main/LICENSE)
+[![Docs](https://img.shields.io/badge/docs-latest-blue)](https://netskopeoss.github.io/netskope-py-sdk/)
 
 ## Why This SDK?
 
