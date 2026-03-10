@@ -66,11 +66,11 @@ class IncidentsResource(SyncResource):
             params["query"] = query
         if fields:
             params["fields"] = ",".join(fields)
-        if start_time:
+        if start_time is not None:
             params["starttime"] = (
                 int(start_time.timestamp()) if isinstance(start_time, datetime) else start_time
             )
-        if end_time:
+        if end_time is not None:
             params["endtime"] = (
                 int(end_time.timestamp()) if isinstance(end_time, datetime) else end_time
             )
@@ -190,11 +190,11 @@ class AsyncIncidentsResource(AsyncResource):
             params["query"] = query
         if fields:
             params["fields"] = ",".join(fields)
-        if start_time:
+        if start_time is not None:
             params["starttime"] = (
                 int(start_time.timestamp()) if isinstance(start_time, datetime) else start_time
             )
-        if end_time:
+        if end_time is not None:
             params["endtime"] = (
                 int(end_time.timestamp()) if isinstance(end_time, datetime) else end_time
             )

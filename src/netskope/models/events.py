@@ -51,7 +51,6 @@ class Event(NetskopeModel, TimestampMixin):
     src_location: str | None = None
     dst_location: str | None = None
     insertion_epoch_timestamp: int | None = None
-    extra: dict[str, Any] = Field(default_factory=dict, exclude=True)
 
 
 class NetworkEvent(Event):

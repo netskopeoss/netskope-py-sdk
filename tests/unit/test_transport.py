@@ -5,6 +5,7 @@ from __future__ import annotations
 import httpx
 import pytest
 import respx
+from pydantic import SecretStr
 
 from netskope._config import NetskopeConfig
 from netskope._transport import SyncTransport
@@ -19,7 +20,7 @@ from netskope.exceptions import (
 def transport_config() -> NetskopeConfig:
     return NetskopeConfig(
         tenant="test.goskope.com",
-        api_token="test-token",
+        api_token=SecretStr("test-token"),
         timeout=5.0,
         max_retries=2,
         backoff_factor=0.01,

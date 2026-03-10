@@ -103,10 +103,16 @@ class SyncPaginatedResponse(Generic[T]):
     def pages(self) -> Iterator[Page[T]]:
         """Yield one :class:`Page` per API call."""
         offset = 0
+        consecutive_empty = 0
         for _ in range(_MAX_PAGES):
             page = self._fetch_page(offset)
             if not page.items:
-                break
+                consecutive_empty += 1
+                if consecutive_empty >= 2:
+                    break
+                offset += self._page_size
+                continue
+            consecutive_empty = 0
             yield page
             if page.total is not None and offset + self._page_size >= page.total:
                 break
@@ -190,10 +196,16 @@ class AsyncPaginatedResponse(Generic[T]):
     async def pages(self) -> AsyncIterator[Page[T]]:
         """Yield one :class:`Page` per API call."""
         offset = 0
+        consecutive_empty = 0
         for _ in range(_MAX_PAGES):
             page = await self._fetch_page(offset)
             if not page.items:
-                break
+                consecutive_empty += 1
+                if consecutive_empty >= 2:
+                    break
+                offset += self._page_size
+                continue
+            consecutive_empty = 0
             yield page
             if page.total is not None and offset + self._page_size >= page.total:
                 break
@@ -216,6 +228,141 @@ class AsyncPaginatedResponse(Generic[T]):
 
     async def first(self) -> T | None:
         """Return the first result, or ``None`` if empty."""
+        async for item in self:
+            return item
+        return None
+
+
+class SyncScimPaginatedResponse(Generic[T]):
+    """SCIM-aware paginator using ``startIndex`` (1-based) and ``count`` per RFC 7644."""
+
+    def __init__(
+        self,
+        transport: SyncTransport,
+        method: str,
+        path: str,
+        params: dict[str, Any],
+        model: type[T],
+        page_size: int,
+        extract: Callable[[dict[str, Any]], list[dict[str, Any]]] | None = None,
+    ) -> None:
+        self._transport = transport
+        self._method = method
+        self._path = path
+        self._params = dict(params)
+        self._model = model
+        self._page_size = page_size
+        self._extract = extract
+
+    def _fetch_page(self, start_index: int) -> Page[T]:
+        params = {**self._params, "count": self._page_size, "startIndex": start_index}
+        response = self._transport.request(self._method, self._path, params=params)
+        body = response.json()
+
+        if self._extract is not None:
+            raw_items = self._extract(body)
+        else:
+            raw_items = body.get("Resources", [])
+            if not isinstance(raw_items, list):
+                raw_items = []
+
+        items = [self._model.model_validate(item) for item in raw_items]
+        total = body.get("totalResults") if isinstance(body, dict) else None
+
+        return Page(items=items, total=total, offset=start_index, limit=self._page_size)
+
+    def pages(self) -> Iterator[Page[T]]:
+        start_index = 1
+        for _ in range(_MAX_PAGES):
+            page = self._fetch_page(start_index)
+            if not page.items:
+                break
+            yield page
+            if page.total is not None and start_index + self._page_size > page.total:
+                break
+            start_index += self._page_size
+
+    def __iter__(self) -> Iterator[T]:
+        for page in self.pages():
+            yield from page.items
+
+    def to_list(self, max_items: int = 10_000) -> list[T]:
+        results: list[T] = []
+        for item in self:
+            results.append(item)
+            if len(results) >= max_items:
+                break
+        return results
+
+    def first(self) -> T | None:
+        for item in self:
+            return item
+        return None
+
+
+class AsyncScimPaginatedResponse(Generic[T]):
+    """Async SCIM-aware paginator using ``startIndex`` (1-based) and ``count`` per RFC 7644."""
+
+    def __init__(
+        self,
+        transport: AsyncTransport,
+        method: str,
+        path: str,
+        params: dict[str, Any],
+        model: type[T],
+        page_size: int,
+        extract: Callable[[dict[str, Any]], list[dict[str, Any]]] | None = None,
+    ) -> None:
+        self._transport = transport
+        self._method = method
+        self._path = path
+        self._params = dict(params)
+        self._model = model
+        self._page_size = page_size
+        self._extract = extract
+
+    async def _fetch_page(self, start_index: int) -> Page[T]:
+        params = {**self._params, "count": self._page_size, "startIndex": start_index}
+        response = await self._transport.request(self._method, self._path, params=params)
+        body = response.json()
+
+        if self._extract is not None:
+            raw_items = self._extract(body)
+        else:
+            raw_items = body.get("Resources", [])
+            if not isinstance(raw_items, list):
+                raw_items = []
+
+        items = [self._model.model_validate(item) for item in raw_items]
+        total = body.get("totalResults") if isinstance(body, dict) else None
+
+        return Page(items=items, total=total, offset=start_index, limit=self._page_size)
+
+    async def pages(self) -> AsyncIterator[Page[T]]:
+        start_index = 1
+        for _ in range(_MAX_PAGES):
+            page = await self._fetch_page(start_index)
+            if not page.items:
+                break
+            yield page
+            if page.total is not None and start_index + self._page_size > page.total:
+                break
+            start_index += self._page_size
+
+    async def __aiter__(self) -> AsyncIterator[T]:
+        async for page in self.pages():
+            for item in page.items:
+                yield item
+
+    async def to_list(self, max_items: int = 10_000) -> list[T]:
+        results: list[T] = []
+        async for item in self:
+            results.append(item)
+            if len(results) >= max_items:
+                break
+        return results
+
+    async def first(self) -> T | None:
         async for item in self:
             return item
         return None

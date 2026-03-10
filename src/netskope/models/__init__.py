@@ -26,7 +26,6 @@ __all__ = [
     "AlertSeverity",
     "AlertType",
     "Anomaly",
-    "AnomalyType",
     "AuditEvent",
     "Event",
     "EventType",

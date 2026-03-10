@@ -24,7 +24,10 @@ import functools
 import re
 from typing import Any
 
-from netskope._pagination import AsyncPaginatedResponse, SyncPaginatedResponse
+from netskope._pagination import (
+    AsyncScimPaginatedResponse,
+    SyncScimPaginatedResponse,
+)
 from netskope.models.scim import ScimGroup, ScimUser
 from netskope.resources._base import AsyncResource, SyncResource
 
@@ -60,7 +63,7 @@ class ScimUsersResource(SyncResource):
         *,
         filter_expr: str | None = None,
         page_size: int = 100,
-    ) -> SyncPaginatedResponse[ScimUser]:
+    ) -> SyncScimPaginatedResponse[ScimUser]:
         """List SCIM users.
 
         Args:
@@ -70,7 +73,7 @@ class ScimUsersResource(SyncResource):
         params: dict[str, Any] = {}
         if filter_expr:
             params["filter"] = filter_expr
-        return SyncPaginatedResponse(
+        return SyncScimPaginatedResponse(
             transport=self._transport,
             method="GET",
             path=_USERS_PATH,
@@ -153,12 +156,12 @@ class ScimGroupsResource(SyncResource):
         *,
         filter_expr: str | None = None,
         page_size: int = 100,
-    ) -> SyncPaginatedResponse[ScimGroup]:
+    ) -> SyncScimPaginatedResponse[ScimGroup]:
         """List SCIM groups."""
         params: dict[str, Any] = {}
         if filter_expr:
             params["filter"] = filter_expr
-        return SyncPaginatedResponse(
+        return SyncScimPaginatedResponse(
             transport=self._transport,
             method="GET",
             path=_GROUPS_PATH,
@@ -247,11 +250,11 @@ class AsyncScimUsersResource(AsyncResource):
 
     def list(
         self, *, filter_expr: str | None = None, page_size: int = 100
-    ) -> AsyncPaginatedResponse[ScimUser]:
+    ) -> AsyncScimPaginatedResponse[ScimUser]:
         params: dict[str, Any] = {}
         if filter_expr:
             params["filter"] = filter_expr
-        return AsyncPaginatedResponse(
+        return AsyncScimPaginatedResponse(
             transport=self._transport,
             method="GET",
             path=_USERS_PATH,
@@ -313,11 +316,11 @@ class AsyncScimGroupsResource(AsyncResource):
 
     def list(
         self, *, filter_expr: str | None = None, page_size: int = 100
-    ) -> AsyncPaginatedResponse[ScimGroup]:
+    ) -> AsyncScimPaginatedResponse[ScimGroup]:
         params: dict[str, Any] = {}
         if filter_expr:
             params["filter"] = filter_expr
-        return AsyncPaginatedResponse(
+        return AsyncScimPaginatedResponse(
             transport=self._transport,
             method="GET",
             path=_GROUPS_PATH,

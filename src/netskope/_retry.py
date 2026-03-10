@@ -47,6 +47,16 @@ def _get_retry_after(response: httpx.Response) -> float | None:
         return None
 
 
+def _copy_request(request: httpx.Request) -> httpx.Request:
+    """Create a fresh copy of a request so the stream can be re-read."""
+    return httpx.Request(
+        method=request.method,
+        url=request.url,
+        headers=request.headers,
+        content=request.content,
+    )
+
+
 def send_with_retries(
     client: httpx.Client,
     request: httpx.Request,
@@ -56,7 +66,7 @@ def send_with_retries(
     last_response: httpx.Response | None = None
     for attempt in range(config.max_retries + 1):
         try:
-            response = client.send(request)
+            response = client.send(_copy_request(request))
         except (httpx.ConnectError, httpx.ReadTimeout, httpx.WriteTimeout) as exc:
             if attempt >= config.max_retries:
                 from netskope.exceptions import ConnectionError, TimeoutError
@@ -105,7 +115,7 @@ async def async_send_with_retries(
     last_response: httpx.Response | None = None
     for attempt in range(config.max_retries + 1):
         try:
-            response = await client.send(request)
+            response = await client.send(_copy_request(request))
         except (httpx.ConnectError, httpx.ReadTimeout, httpx.WriteTimeout) as exc:
             if attempt >= config.max_retries:
                 from netskope.exceptions import ConnectionError, TimeoutError

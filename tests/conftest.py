@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import pytest
+from pydantic import SecretStr
 
 from netskope._config import NetskopeConfig
 
@@ -12,7 +13,7 @@ def config() -> NetskopeConfig:
     """A test configuration with dummy credentials."""
     return NetskopeConfig(
         tenant="test.goskope.com",
-        api_token="test-token-abc123",
+        api_token=SecretStr("test-token-abc123"),
         timeout=5.0,
         max_retries=1,
         backoff_factor=0.01,

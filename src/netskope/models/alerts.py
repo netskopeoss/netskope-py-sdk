@@ -73,6 +73,3 @@ class Alert(NetskopeModel, TimestampMixin):
     count: int | None = None
     other_categories: list[str] | None = None
     insertion_epoch_timestamp: int | None = None
-
-    # Allow any additional fields from the API.
-    extra: dict[str, Any] = Field(default_factory=dict, exclude=True)

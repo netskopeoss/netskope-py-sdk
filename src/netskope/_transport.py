@@ -24,7 +24,7 @@ _USER_AGENT = f"netskope-python-sdk/{__version__}"
 
 def _build_headers(config: NetskopeConfig) -> dict[str, str]:
     return {
-        "Netskope-Api-Token": config.api_token,
+        "Netskope-Api-Token": config.api_token.get_secret_value(),
         "User-Agent": _USER_AGENT,
         "Accept": "application/json",
     }
@@ -36,7 +36,7 @@ def _log_request(request: httpx.Request) -> None:
 
 def _log_response(response: httpx.Response) -> None:
     request_id = response.headers.get("x-request-id", "-")
-    logger.info(
+    logger.debug(
         "← %s %s → %d (request_id=%s)",
         response.request.method,
         response.request.url.path,
