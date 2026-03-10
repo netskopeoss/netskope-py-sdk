@@ -105,7 +105,9 @@ class NetskopeConfig:
             )
 
         # Normalize: strip whitespace, protocol prefix, and trailing slashes.
-        resolved_tenant = resolved_tenant.strip().removeprefix("https://").removeprefix("http://").rstrip("/")
+        resolved_tenant = (
+            resolved_tenant.strip().removeprefix("https://").removeprefix("http://").rstrip("/")
+        )
         host = resolved_tenant
 
         # Block IP addresses (prevents SSRF to metadata services, RFC 1918, etc.)
@@ -119,18 +121,15 @@ class NetskopeConfig:
                     raise ValidationError(
                         f"Tenant must be a hostname, not a private/link-local IP address: {host!r}"
                     )
-                raise ValidationError(
-                    f"Tenant must be a hostname, not an IP address: {host!r}"
-                )
+                raise ValidationError(f"Tenant must be a hostname, not an IP address: {host!r}")
 
         # Require a recognized Netskope domain unless explicitly opted out.
-        if not allow_custom_tenant:
-            if not any(host.endswith(d) for d in _VALID_TENANT_DOMAINS):
-                raise ValidationError(
-                    f"Tenant {resolved_tenant!r} is not a recognized Netskope domain "
-                    f"(expected a hostname ending in {', '.join(_VALID_TENANT_DOMAINS)}). "
-                    "If this is intentional, pass allow_custom_tenant=True."
-                )
+        if not allow_custom_tenant and not any(host.endswith(d) for d in _VALID_TENANT_DOMAINS):
+            raise ValidationError(
+                f"Tenant {resolved_tenant!r} is not a recognized Netskope domain "
+                f"(expected a hostname ending in {', '.join(_VALID_TENANT_DOMAINS)}). "
+                "If this is intentional, pass allow_custom_tenant=True."
+            )
 
         return cls(
             tenant=resolved_tenant,

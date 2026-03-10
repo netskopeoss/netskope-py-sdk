@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "netskope-py-sdk"
-version = "1.0.0"
+version = "1.0.1"
 description = "The official Netskope Python SDK — a modern, typed, and intuitive interface to the Netskope REST API v2."
 readme = "README.md"
 license = "MIT"

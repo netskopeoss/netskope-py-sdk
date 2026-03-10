@@ -28,8 +28,8 @@ def main() -> None:
     )
 
     # Compare alert counts
-    prod_alerts = prod.alerts.list(page_size=1).to_list(max_items=1)
-    staging_alerts = staging.alerts.list(page_size=1).to_list(max_items=1)
+    prod.alerts.list(page_size=1).to_list(max_items=1)
+    staging.alerts.list(page_size=1).to_list(max_items=1)
 
     print(f"Production ({prod.tenant}): alerts available")
     print(f"Staging ({staging.tenant}): alerts available")

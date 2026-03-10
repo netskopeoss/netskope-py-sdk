@@ -5,6 +5,18 @@ All notable changes to the Netskope Python SDK will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.0.1] - 2026-03-10
+
+### Fixed
+
+- Fix pagination offset calculation that skipped items when iterating large result sets
+- Fix falsy timestamp handling — epoch `0` is now correctly treated as a valid value
+- Fix SCIM pagination parameters (`startIndex`/`count`) not being passed correctly
+- Fix retry logic for streamed responses — request body is now rebuilt before each retry
+- Fix tenant domain validation to properly reject IP addresses (SSRF prevention)
+- Fix `_build_params()` helpers to omit `None` values instead of sending them as query params
+- Fix response envelope extraction for endpoints with non-standard `data_key` paths
+
 ## [1.0.0] - 2026-03-10
 
 ### Added
