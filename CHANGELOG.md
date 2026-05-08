@@ -15,6 +15,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `url_lists.update()` raises `ValueError` when called with no fields to change (previously sent an empty body).
 - Verified against `nskp-io.goskope.com`: list, create (`type=regex`), update with urls only (preserves `name` and `type`), update with name only (preserves `urls` and `type`), update with all fields, delete.
 - Parallel to [netskopeoss/netskope-cli#10](https://github.com/netskopeoss/netskope-cli/pull/10) and [netSkope/mcp-server-pilot#19](https://github.com/netSkope/mcp-server-pilot/pull/19), which fix the same class of bug on the CLI's PUT and the MCP server's PATCH respectively.
+- Fix `raise_for_status()` rendering the API's list-shaped `message` field as a stringified Python list. The Netskope API returns multi-error validation responses as `"message": ["...", "..."]`; these are now joined with `; ` so the resulting `APIError` message is human-readable.
+- Resolve a `mypy --strict` error in `exceptions.py` by typing the parsed error payload explicitly.
 
 ## [1.0.3] - 2026-03-10
 

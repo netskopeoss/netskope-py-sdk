@@ -134,3 +134,22 @@ class TestRaiseForStatus:
         with pytest.raises(APIError) as exc_info:
             raise_for_status(resp)
         assert "Nested error" in str(exc_info.value)
+
+    def test_list_message_is_joined(self) -> None:
+        """The Netskope API returns ``message`` as a list for some validation errors."""
+        resp = self._make_response(
+            400,
+            {
+                "message": [
+                    "property urls should not exist",
+                    "data should not be null or undefined",
+                ],
+                "error": "Bad Request",
+                "statusCode": 400,
+            },
+        )
+        with pytest.raises(APIError) as exc_info:
+            raise_for_status(resp)
+        rendered = str(exc_info.value)
+        assert "property urls should not exist" in rendered
+        assert "data should not be null or undefined" in rendered

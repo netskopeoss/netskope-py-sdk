@@ -143,9 +143,15 @@ def raise_for_status(response: httpx.Response) -> None:
 
     message = ""
     if body and isinstance(body, dict):
-        message = body.get("message", body.get("error", ""))
-        if isinstance(message, dict):
-            message = message.get("message", str(message))
+        raw: Any = body.get("message")
+        if raw is None:
+            raw = body.get("error")
+        if isinstance(raw, list):
+            message = "; ".join(str(item) for item in raw)
+        elif isinstance(raw, dict):
+            message = str(raw.get("message", raw))
+        elif raw is not None:
+            message = str(raw)
     if not message:
         message = response.reason_phrase or "Unknown error"
 
