@@ -142,7 +142,12 @@ for event in client.events.list(
 ```python
 # CRUD operations
 url_list = client.url_lists.create("blocklist", ["bad.com", "evil.org"])
+
+# Partial updates are merged over the current list — pass only what you want to change.
+# (The Netskope API requires the full payload on every PUT, so update() GETs first
+# and preserves the fields you don't supply.)
 url_list = client.url_lists.update(url_list.id, urls=["bad.com", "evil.org", "new.bad.com"])
+
 client.url_lists.delete(url_list.id)
 
 # Deploy all pending changes

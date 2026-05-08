@@ -55,6 +55,27 @@ def _extract(body: Any) -> list[dict[str, Any]]:
     return [_flatten_url_list(item) for item in items if isinstance(item, dict)]
 
 
+def _extract_one(body: Any) -> dict[str, Any]:
+    """Extract a single URL list item from any of the response shapes the API returns.
+
+    POST returns ``[{...}]`` while GET/PUT return ``{...}``. The item itself wraps
+    ``urls``/``type`` under a nested ``data`` key, which :func:`_flatten_url_list`
+    merges into the top level so the model receives the fields it expects.
+    """
+    if isinstance(body, list):
+        item = body[0] if body and isinstance(body[0], dict) else {}
+    elif isinstance(body, dict):
+        item = body
+    else:
+        item = {}
+    return _flatten_url_list(item)
+
+
+def _build_payload(name: str, urls: builtins.list[str], list_type: str) -> dict[str, Any]:
+    """Build the request body the API requires: name at top, urls/type wrapped in ``data``."""
+    return {"name": name, "data": {"urls": urls, "type": list_type}}
+
+
 class UrlListsResource(SyncResource):
     """Synchronous interface to ``/api/v2/policy/urllist``."""
 
@@ -84,8 +105,7 @@ class UrlListsResource(SyncResource):
             A :class:`~netskope.models.url_lists.UrlList` instance.
         """
         body = self._get(f"{_PATH}/{list_id}")
-        data = body.get("data", body)
-        return UrlList.model_validate(data)
+        return UrlList.model_validate(_extract_one(body))
 
     def create(
         self,
@@ -104,10 +124,8 @@ class UrlListsResource(SyncResource):
         Returns:
             The newly created :class:`~netskope.models.url_lists.UrlList`.
         """
-        payload = {"name": name, "urls": urls, "type": list_type}
-        body = self._post(_PATH, json=payload)
-        data = body.get("data", body)
-        return UrlList.model_validate(data)
+        body = self._post(_PATH, json=_build_payload(name, urls, list_type))
+        return UrlList.model_validate(_extract_one(body))
 
     def update(
         self,
@@ -119,7 +137,10 @@ class UrlListsResource(SyncResource):
     ) -> UrlList:
         """Update an existing URL list.
 
-        Only the provided fields are updated; others remain unchanged.
+        The Netskope API requires ``name``, ``data.urls``, and ``data.type`` on every
+        PUT request, so this method GETs the current list first and merges the provided
+        fields over the existing values. Callers only need to supply what they want to
+        change. At least one of ``name``, ``urls``, or ``list_type`` must be provided.
 
         Args:
             list_id: The URL list identifier.
@@ -130,16 +151,17 @@ class UrlListsResource(SyncResource):
         Returns:
             The updated :class:`~netskope.models.url_lists.UrlList`.
         """
-        payload: dict[str, Any] = {}
-        if name is not None:
-            payload["name"] = name
-        if urls is not None:
-            payload["urls"] = urls
-        if list_type is not None:
-            payload["type"] = list_type
-        body = self._put(f"{_PATH}/{list_id}", json=payload)
-        data = body.get("data", body)
-        return UrlList.model_validate(data)
+        if name is None and urls is None and list_type is None:
+            raise ValueError("update() requires at least one of name, urls, or list_type")
+        current = self.get(list_id)
+        merged_name = name if name is not None else (current.name or "")
+        merged_urls = urls if urls is not None else list(current.urls)
+        merged_type = list_type if list_type is not None else (current.type or "exact")
+        body = self._put(
+            f"{_PATH}/{list_id}",
+            json=_build_payload(merged_name, merged_urls, merged_type),
+        )
+        return UrlList.model_validate(_extract_one(body))
 
     def delete(self, list_id: int) -> None:
         """Delete a URL list.
@@ -176,8 +198,7 @@ class AsyncUrlListsResource(AsyncResource):
     async def get(self, list_id: int) -> UrlList:
         """Get a URL list by ID."""
         body = await self._get(f"{_PATH}/{list_id}")
-        data = body.get("data", body)
-        return UrlList.model_validate(data)
+        return UrlList.model_validate(_extract_one(body))
 
     async def create(
         self,
@@ -187,10 +208,8 @@ class AsyncUrlListsResource(AsyncResource):
         list_type: str = "exact",
     ) -> UrlList:
         """Create a new URL list."""
-        payload = {"name": name, "urls": urls, "type": list_type}
-        body = await self._post(_PATH, json=payload)
-        data = body.get("data", body)
-        return UrlList.model_validate(data)
+        body = await self._post(_PATH, json=_build_payload(name, urls, list_type))
+        return UrlList.model_validate(_extract_one(body))
 
     async def update(
         self,
@@ -200,17 +219,24 @@ class AsyncUrlListsResource(AsyncResource):
         urls: builtins.list[str] | None = None,
         list_type: str | None = None,
     ) -> UrlList:
-        """Update an existing URL list."""
-        payload: dict[str, Any] = {}
-        if name is not None:
-            payload["name"] = name
-        if urls is not None:
-            payload["urls"] = urls
-        if list_type is not None:
-            payload["type"] = list_type
-        body = await self._put(f"{_PATH}/{list_id}", json=payload)
-        data = body.get("data", body)
-        return UrlList.model_validate(data)
+        """Update an existing URL list.
+
+        The API requires ``name``, ``data.urls``, and ``data.type`` on every PUT, so
+        this method GETs the current list first and merges the provided fields over
+        the existing values. At least one of ``name``, ``urls``, or ``list_type`` must
+        be provided.
+        """
+        if name is None and urls is None and list_type is None:
+            raise ValueError("update() requires at least one of name, urls, or list_type")
+        current = await self.get(list_id)
+        merged_name = name if name is not None else (current.name or "")
+        merged_urls = urls if urls is not None else list(current.urls)
+        merged_type = list_type if list_type is not None else (current.type or "exact")
+        body = await self._put(
+            f"{_PATH}/{list_id}",
+            json=_build_payload(merged_name, merged_urls, merged_type),
+        )
+        return UrlList.model_validate(_extract_one(body))
 
     async def delete(self, list_id: int) -> None:
         """Delete a URL list."""
