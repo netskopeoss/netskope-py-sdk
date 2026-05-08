@@ -139,19 +139,73 @@ class TestUrlListsResource:
         client.close()
 
     @respx.mock
-    def test_create(self) -> None:
-        respx.post("https://t.goskope.com/api/v2/policy/urllist").mock(
+    def test_create_sends_wrapped_body_and_handles_list_response(self) -> None:
+        """create() must wrap urls/type under ``data`` and accept the API's list response."""
+        import json as _json
+
+        route = respx.post("https://t.goskope.com/api/v2/policy/urllist").mock(
+            return_value=httpx.Response(
+                201,
+                json=[
+                    {
+                        "id": 42,
+                        "name": "NewList",
+                        "data": {"urls": ["new.com"], "type": "exact"},
+                    }
+                ],
+            )
+        )
+        client = NetskopeClient(tenant="t.goskope.com", api_token="tok")
+        result = client.url_lists.create("NewList", ["new.com"], list_type="regex")
+
+        sent = _json.loads(route.calls.last.request.content)
+        assert sent == {"name": "NewList", "data": {"urls": ["new.com"], "type": "regex"}}
+        assert result.id == 42
+        assert result.name == "NewList"
+        assert result.urls == ["new.com"]
+        assert result.type == "exact"
+        client.close()
+
+    @respx.mock
+    def test_update_preserves_name_and_type_when_only_urls_given(self) -> None:
+        """update() must GET the list and merge user changes over current values."""
+        import json as _json
+
+        respx.get("https://t.goskope.com/api/v2/policy/urllist/42").mock(
             return_value=httpx.Response(
                 200,
                 json={
-                    "data": {"id": 42, "name": "NewList", "urls": ["new.com"]},
+                    "id": 42,
+                    "name": "ExistingList",
+                    "data": {"urls": ["old.com"], "type": "regex"},
+                },
+            )
+        )
+        put_route = respx.put("https://t.goskope.com/api/v2/policy/urllist/42").mock(
+            return_value=httpx.Response(
+                200,
+                json={
+                    "id": 42,
+                    "name": "ExistingList",
+                    "data": {"urls": ["new.com"], "type": "regex"},
                 },
             )
         )
         client = NetskopeClient(tenant="t.goskope.com", api_token="tok")
-        result = client.url_lists.create("NewList", ["new.com"])
-        assert result.id == 42
-        assert result.name == "NewList"
+        result = client.url_lists.update(42, urls=["new.com"])
+
+        sent = _json.loads(put_route.calls.last.request.content)
+        assert sent == {
+            "name": "ExistingList",
+            "data": {"urls": ["new.com"], "type": "regex"},
+        }
+        assert result.urls == ["new.com"]
+        client.close()
+
+    def test_update_raises_when_no_fields_provided(self) -> None:
+        client = NetskopeClient(tenant="t.goskope.com", api_token="tok")
+        with pytest.raises(ValueError):
+            client.url_lists.update(42)
         client.close()
 
     @respx.mock

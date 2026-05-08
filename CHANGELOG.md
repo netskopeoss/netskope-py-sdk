@@ -5,6 +5,17 @@ All notable changes to the Netskope Python SDK will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.0.4] - 2026-05-08
+
+### Fixed
+
+- Fix `url_lists.create()` and `url_lists.update()` returning HTTP 400 from the Netskope API. The endpoint requires `name` at the top level and `urls`/`type` wrapped under a `data` key — the SDK was sending a flat body that the API rejected with `property urls should not exist, ... data should not be null or undefined`.
+- `url_lists.update()` now GETs the existing list and merges the provided fields over the current values before sending the PUT, so callers only need to specify what they want to change. The Netskope API requires `name`, `data.urls`, and `data.type` on every PUT, so previously calling `update(list_id, urls=[...])` would fail with `name required`.
+- `url_lists.create()` now correctly handles the API's list-shaped POST response (`[{...}]`) instead of crashing on `body.get(...)`.
+- `url_lists.update()` raises `ValueError` when called with no fields to change (previously sent an empty body).
+- Verified against `nskp-io.goskope.com`: list, create (`type=regex`), update with urls only (preserves `name` and `type`), update with name only (preserves `urls` and `type`), update with all fields, delete.
+- Parallel to [netskopeoss/netskope-cli#10](https://github.com/netskopeoss/netskope-cli/pull/10) and [netSkope/mcp-server-pilot#19](https://github.com/netSkope/mcp-server-pilot/pull/19), which fix the same class of bug on the CLI's PUT and the MCP server's PATCH respectively.
+
 ## [1.0.3] - 2026-03-10
 
 ### Fixed
