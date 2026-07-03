@@ -29,8 +29,8 @@ class SyncResource:
         resp = self._transport.request("PATCH", path, json=json)
         return cast(dict[str, Any], resp.json())
 
-    def _delete(self, path: str) -> dict[str, Any]:
-        resp = self._transport.request("DELETE", path)
+    def _delete(self, path: str, *, json: Any | None = None) -> dict[str, Any]:
+        resp = self._transport.request("DELETE", path, json=json)
         try:
             return cast(dict[str, Any], resp.json())
         except (ValueError, UnicodeDecodeError):
@@ -59,8 +59,8 @@ class AsyncResource:
         resp = await self._transport.request("PATCH", path, json=json)
         return cast(dict[str, Any], resp.json())
 
-    async def _delete(self, path: str) -> dict[str, Any]:
-        resp = await self._transport.request("DELETE", path)
+    async def _delete(self, path: str, *, json: Any | None = None) -> dict[str, Any]:
+        resp = await self._transport.request("DELETE", path, json=json)
         try:
             return cast(dict[str, Any], resp.json())
         except (ValueError, UnicodeDecodeError):

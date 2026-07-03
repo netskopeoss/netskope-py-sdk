@@ -49,6 +49,20 @@ class Anomaly(NetskopeModel, TimestampMixin):
     app: str | None = None
 
 
+class IncidentNote(NetskopeModel):
+    """A free-text note attached to a DLP incident.
+
+    Notes record investigation findings, handoff context, or remediation
+    steps.  Each incident can hold at most 25 notes, and each note must be
+    under 512 characters.
+    """
+
+    note_id: str | None = None
+    user: str | None = None
+    timestamp: int | None = None
+    content: str | None = None
+
+
 class UserConfidenceIndex(NetskopeModel):
     """User Confidence Index (UCI) risk score.
 

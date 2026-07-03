@@ -5,6 +5,81 @@ All notable changes to the Netskope Python SDK will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.1.0] - 2026-07-03
+
+Major expansion of API coverage — from 8 to 24 resource namespaces. Every new
+namespace is available on both `NetskopeClient` and `AsyncNetskopeClient`. The
+SDK was validated against live tenants, and endpoint shapes were verified
+against the Netskope API gateway OpenAPI specs, which corrected several
+assumptions previously derived from the Netskope CLI.
+
+### Added
+
+- **DEM / ADEM** (`client.dem`) — Digital Experience Monitoring: synthetic and
+  network probes, alert rules, alerts, the query API, apps, and per-user ADEM
+  experience data (`users.info`, `users.applications`, `users.diagnose`, and more).
+- **RBAC** (`client.rbac`) — roles (`roles`) and admin users (`admins`).
+- **User Management** (`client.users`) — read-only User Management query API with
+  per-account group membership (`list`, `get`, `groups.list`, `groups.members`),
+  complementing the SCIM provisioning API.
+- **API tokens** (`client.tokens`) — REST API v2 token CRUD, including `reissue`
+  to rotate a token secret.
+- **Notifications** (`client.notifications`) — user notification templates
+  (`block` and `useralert`) and delivery settings.
+- **IPS** (`client.ips`) — Intrusion Prevention status, allowlists, signatures,
+  signature overrides, alert-only mode, and threat-hunting config.
+- **ATP** (`client.atp`) — Advanced Threat Protection file and URL scanning with
+  report retrieval.
+- **NSIQ** (`client.nsiq`) — URL categorization/recategorization, IOC lookups,
+  and false-positive reporting.
+- **RBI** (`client.rbi`) — Remote Browser Isolation templates, CDR, and cloud
+  storage configuration.
+- **DSPM** (`client.dspm`) — Data Security Posture Management resource inventory,
+  analytics, and datastore connect/scan.
+- **SPM** (`client.spm`) — SaaS Security Posture Management app inventory, posture
+  score, and policy rules.
+- **DNS profiles** (`client.dns`) — DNS Security profiles and domain inheritance
+  groups (`inheritance_groups`), plus tunnels, domain categories, and record types.
+- **CCI** (`client.cci`) — Cloud Confidence Index app lookup, custom tags
+  (`tags`), and rules.
+- **Devices** (`client.devices`) — managed device listing, supported OS, and
+  device tags (`tags`).
+- **Enrollment** (`client.enrollment`) — client enrollment token-set management.
+- **NPA policy & infrastructure** (`client.npa`) — access policy rules
+  (`policy.rules`) and groups (`policy.groups`), publisher upgrade profiles
+  (`upgrade_profiles`), local brokers (`local_brokers`), `validate_name`, and `search`.
+- **Incident notes** — `incidents.list_notes()`, `add_note()`, and `delete_note()`.
+- **Publisher extensions** — registration tokens, per-publisher app listing,
+  bulk upgrade, releases, and alert configuration.
+- **Private-app extensions** — private-app tags (`private_apps.tags`) and
+  publisher-association management (`add_publishers`, `replace_publishers`,
+  `remove_publishers`).
+- **Steering extensions** — IPSec tunnel CRUD (`create_tunnel`, `update_tunnel`,
+  `delete_tunnel`, `get_tunnel`, `list_tunnels`).
+- **CA-bundle / TLS verification support** — new `verify` client option
+  (`True` | `False` | path to a CA bundle) and `NETSKOPE_CA_BUNDLE` env var.
+  The new `find_netskope_ca_cert()` helper resolves a CA bundle from
+  `NETSKOPE_CA_BUNDLE`, `REQUESTS_CA_BUNDLE`, `SSL_CERT_FILE`, or
+  `CURL_CA_BUNDLE`, in that order.
+
+### Fixed
+
+- `incidents.update()` now sends the `{"payload": [...]}` wrapper the API
+  requires (previously a flat body that the API rejected).
+- `incidents.get_uci()` now sends the correct `{"user", "fromTime"}` body.
+- `incidents.get_anomalies()` now sends `severity_filter` as the API expects.
+- `publishers.create()` and `publishers.update()` now send `name` (previously
+  `publisher_name`, which the API rejected).
+- Steering publishers-scope path corrected to
+  `/steering/globalconfig/publishers`.
+- `private_apps.update()` now uses PATCH instead of PUT.
+- `raise_for_status()` now raises on HTTP-200 responses carrying a
+  `{"status": "error"}` body (previously treated as success).
+- `events.list()` now routes `audit`, `infrastructure`, and `transaction` to
+  their correct endpoints, and events gained a `get()` method for single-event
+  lookup by ID.
+- `Event.severity` now accepts an integer (audit events report severity as an int).
+
 ## [1.0.4] - 2026-05-08
 
 ### Fixed

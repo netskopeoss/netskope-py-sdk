@@ -31,6 +31,7 @@ For async usage::
 """
 
 from netskope._client import AsyncNetskopeClient, NetskopeClient
+from netskope._config import find_netskope_ca_cert
 from netskope._version import __version__
 from netskope.exceptions import (
     APIError,
@@ -52,6 +53,8 @@ __all__ = [
     "AsyncNetskopeClient",
     # Version
     "__version__",
+    # Helpers
+    "find_netskope_ca_cert",
     # Exceptions
     "NetskopeError",
     "APIError",

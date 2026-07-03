@@ -41,7 +41,7 @@ class Event(NetskopeModel, TimestampMixin):
     action: str | None = None
     site: str | None = None
     category: str | None = None
-    severity: str | None = Field(None, alias="severity_level")
+    severity: str | int | None = Field(None, alias="severity_level")
     object_name: str | None = Field(None, alias="object")
     policy_name: str | None = None
     traffic_type: str | None = None

@@ -23,6 +23,45 @@ _DEFAULT_RETRY_STATUSES = frozenset({429, 500, 502, 503, 504})
 _VALID_TENANT_DOMAINS = (".goskope.com", ".netskope.com", ".boomskope.com")
 _IP_RE = re.compile(r"^\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}$")
 
+# Environment variables checked (in order) for a CA bundle path.
+_CA_BUNDLE_ENV_VARS = (
+    "NETSKOPE_CA_BUNDLE",
+    "REQUESTS_CA_BUNDLE",
+    "SSL_CERT_FILE",
+    "CURL_CA_BUNDLE",
+)
+
+# Well-known locations where the Netskope client installs its CA certificate.
+_NETSKOPE_CA_CERT_PATHS = (
+    "/Library/Application Support/Netskope/STAgent/data/nscacert.pem",
+    "/Library/Application Support/Netskope/STAgent/data/nscacert_combined.pem",
+    "/opt/netskope/stagent/nsca/nscacert.pem",
+    "/opt/netskope/stagent/nsca/nscacert_combined.pem",
+    r"C:\ProgramData\Netskope\STAgent\data\nscacert.pem",
+    r"C:\ProgramData\Netskope\STAgent\data\nscacert_combined.pem",
+)
+
+
+def find_netskope_ca_cert() -> str | None:
+    """Locate the Netskope client CA certificate on this machine, if present.
+
+    Checks the well-known install locations used by the Netskope steering
+    agent on macOS, Linux, and Windows. Useful when your traffic passes
+    through Netskope SSL inspection and you need a CA bundle that trusts
+    the re-signed certificates::
+
+        from netskope import NetskopeClient, find_netskope_ca_cert
+
+        client = NetskopeClient(verify=find_netskope_ca_cert() or True)
+
+    Returns:
+        The first existing certificate path, or ``None`` if none exist.
+    """
+    for path in _NETSKOPE_CA_CERT_PATHS:
+        if os.path.isfile(path):
+            return path
+    return None
+
 
 @dataclass(frozen=True, slots=True)
 class NetskopeConfig:
@@ -37,6 +76,12 @@ class NetskopeConfig:
         max_retries: Maximum number of automatic retries for transient errors.
         backoff_factor: Base multiplier for exponential backoff between retries.
         retry_on_status: HTTP status codes that trigger an automatic retry.
+        verify: TLS verification setting. ``True`` (default) verifies against
+            the system trust store, ``False`` disables verification, and a
+            string is treated as the path to a custom CA bundle file (e.g. the
+            Netskope client certificate — see :func:`find_netskope_ca_cert`).
+            Falls back to the ``NETSKOPE_CA_BUNDLE``, ``REQUESTS_CA_BUNDLE``,
+            ``SSL_CERT_FILE``, or ``CURL_CA_BUNDLE`` environment variables.
 
     Raises:
         netskope.exceptions.ValidationError: If *tenant* or *api_token*
@@ -49,6 +94,7 @@ class NetskopeConfig:
     max_retries: int = _DEFAULT_MAX_RETRIES
     backoff_factor: float = _DEFAULT_BACKOFF_FACTOR
     retry_on_status: frozenset[int] = field(default=_DEFAULT_RETRY_STATUSES)
+    verify: bool | str = True
 
     def __repr__(self) -> str:
         return (
@@ -75,6 +121,7 @@ class NetskopeConfig:
         backoff_factor: float = _DEFAULT_BACKOFF_FACTOR,
         retry_on_status: frozenset[int] | None = None,
         allow_custom_tenant: bool = False,
+        verify: bool | str = True,
     ) -> NetskopeConfig:
         """Build a config by merging explicit values with environment fallbacks.
 
@@ -82,6 +129,11 @@ class NetskopeConfig:
             allow_custom_tenant: If ``True``, skip domain validation for the
                 tenant hostname.  Use this only when connecting to a known
                 non-standard Netskope endpoint.
+            verify: TLS verification: ``True``, ``False``, or a CA bundle
+                path.  An explicit non-default value wins; otherwise the
+                ``NETSKOPE_CA_BUNDLE``, ``REQUESTS_CA_BUNDLE``,
+                ``SSL_CERT_FILE``, and ``CURL_CA_BUNDLE`` environment
+                variables are consulted (first non-empty wins).
 
         Raises:
             netskope.exceptions.ValidationError: If a required value is
@@ -131,6 +183,24 @@ class NetskopeConfig:
                 "If this is intentional, pass allow_custom_tenant=True."
             )
 
+        # Resolve TLS verification: explicit non-default value wins, then the
+        # CA-bundle environment variable chain, then the default (True).
+        resolved_verify: bool | str = verify
+        if resolved_verify is True:
+            for env_var in _CA_BUNDLE_ENV_VARS:
+                env_value = os.environ.get(env_var)
+                if env_value:
+                    resolved_verify = env_value
+                    break
+
+        if isinstance(resolved_verify, str) and not os.path.isfile(resolved_verify):
+            raise ValidationError(
+                f"CA bundle file not found: {resolved_verify!r}. "
+                "Pass verify=<path> with a valid certificate bundle, or use "
+                "netskope.find_netskope_ca_cert() to locate the Netskope client "
+                "certificate if your traffic passes through Netskope SSL inspection."
+            )
+
         return cls(
             tenant=resolved_tenant,
             api_token=SecretStr(resolved_token),
@@ -138,4 +208,5 @@ class NetskopeConfig:
             max_retries=max_retries,
             backoff_factor=backoff_factor,
             retry_on_status=retry_on_status or _DEFAULT_RETRY_STATUSES,
+            verify=resolved_verify,
         )
