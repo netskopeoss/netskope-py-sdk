@@ -8,6 +8,7 @@ retries, token injection, request logging, and error mapping.
 from __future__ import annotations
 
 import logging
+import ssl
 from typing import Any
 
 import httpx
@@ -28,6 +29,17 @@ def _build_headers(config: NetskopeConfig) -> dict[str, str]:
         "User-Agent": _USER_AGENT,
         "Accept": "application/json",
     }
+
+
+def _resolve_verify(config: NetskopeConfig) -> bool | ssl.SSLContext:
+    """Translate ``config.verify`` into a value httpx accepts.
+
+    A CA bundle path is turned into an :class:`ssl.SSLContext` so it is
+    loaded once and shared by the connection pool.
+    """
+    if isinstance(config.verify, str):
+        return ssl.create_default_context(cafile=config.verify)
+    return config.verify
 
 
 def _log_request(request: httpx.Request) -> None:
@@ -55,6 +67,7 @@ class SyncTransport:
             headers=_build_headers(config),
             timeout=httpx.Timeout(config.timeout),
             follow_redirects=False,
+            verify=_resolve_verify(config),
         )
 
     def request(
@@ -103,6 +116,7 @@ class AsyncTransport:
             headers=_build_headers(config),
             timeout=httpx.Timeout(config.timeout),
             follow_redirects=False,
+            verify=_resolve_verify(config),
         )
 
     async def request(

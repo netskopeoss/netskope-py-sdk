@@ -53,6 +53,18 @@ class TestNetskopeClient:
         with pytest.raises(ValidationError):
             NetskopeClient()
 
+    def test_verify_false_reflected_in_config(self) -> None:
+        client = NetskopeClient(tenant="t.goskope.com", api_token="tok", verify=False)
+        assert client._config.verify is False
+        client.close()
+
+    def test_verify_defaults_to_true(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        for var in ("NETSKOPE_CA_BUNDLE", "REQUESTS_CA_BUNDLE", "SSL_CERT_FILE", "CURL_CA_BUNDLE"):
+            monkeypatch.delenv(var, raising=False)
+        client = NetskopeClient(tenant="t.goskope.com", api_token="tok")
+        assert client._config.verify is True
+        client.close()
+
 
 class TestAsyncNetskopeClient:
     """Tests for the async client."""
@@ -65,3 +77,7 @@ class TestAsyncNetskopeClient:
     def test_repr(self) -> None:
         client = AsyncNetskopeClient(tenant="t.goskope.com", api_token="tok")
         assert "AsyncNetskopeClient" in repr(client)
+
+    def test_verify_false_reflected_in_config(self) -> None:
+        client = AsyncNetskopeClient(tenant="t.goskope.com", api_token="tok", verify=False)
+        assert client._config.verify is False

@@ -17,6 +17,16 @@ class PublisherStatus(StrEnum):
     NOT_CONNECTED = "not_connected"
 
 
+class PublisherAlertEventType(StrEnum):
+    """Event types that can trigger publisher alert notifications."""
+
+    UPGRADE_WILL_START = "UPGRADE_WILL_START"
+    UPGRADE_STARTED = "UPGRADE_STARTED"
+    UPGRADE_SUCCEEDED = "UPGRADE_SUCCEEDED"
+    UPGRADE_FAILED = "UPGRADE_FAILED"
+    CONNECTION_FAILED = "CONNECTION_FAILED"
+
+
 class Publisher(NetskopeModel):
     """A Netskope Publisher (private-access gateway).
 
@@ -37,3 +47,29 @@ class Publisher(NetskopeModel):
     assessment: dict[str, Any] | None = None
     sticky_ip_enabled: bool | None = None
     tags: list[dict[str, Any]] = Field(default_factory=list)
+
+
+class PublisherRelease(NetskopeModel):
+    """An available publisher software release.
+
+    Example::
+
+        for release in client.publishers.list_releases():
+            print(f"{release.version} ({release.release_type})")
+    """
+
+    version: str | None = None
+    docker_tag: str | None = None
+    release_type: str | None = Field(None, alias="name")
+    is_recommended: bool | None = None
+
+
+class PublisherAlertsConfiguration(NetskopeModel):
+    """Alert notification configuration for publishers.
+
+    The API uses camelCase keys (``adminUsers``, ``eventTypes``); this model
+    exposes them under Pythonic names via field aliases.
+    """
+
+    admin_users: list[str] = Field(default_factory=list, alias="adminUsers")
+    event_types: list[str] = Field(default_factory=list, alias="eventTypes")

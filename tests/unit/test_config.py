@@ -3,12 +3,28 @@
 from __future__ import annotations
 
 import dataclasses
+import itertools
+from pathlib import Path
 
 import pytest
 from pydantic import SecretStr
 
-from netskope._config import NetskopeConfig
+from netskope._config import NetskopeConfig, find_netskope_ca_cert
 from netskope.exceptions import ValidationError
+
+_CA_BUNDLE_ENV_VARS = (
+    "NETSKOPE_CA_BUNDLE",
+    "REQUESTS_CA_BUNDLE",
+    "SSL_CERT_FILE",
+    "CURL_CA_BUNDLE",
+)
+
+
+@pytest.fixture
+def no_ca_env(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Clear all CA-bundle environment variables."""
+    for var in _CA_BUNDLE_ENV_VARS:
+        monkeypatch.delenv(var, raising=False)
 
 
 class TestNetskopeConfig:
@@ -130,3 +146,98 @@ class TestNetskopeConfig:
         config = NetskopeConfig(tenant="t", api_token=SecretStr("tok"))
         with pytest.raises(AttributeError):
             config.tenant = "new"  # type: ignore[misc]
+
+
+@pytest.mark.usefixtures("no_ca_env")
+class TestVerifyResolution:
+    """Tests for SSL verify / CA-bundle resolution in NetskopeConfig.resolve()."""
+
+    @staticmethod
+    def _make_cert(tmp_path: Path, name: str) -> str:
+        cert = tmp_path / name
+        cert.write_text("dummy cert\n")
+        return str(cert)
+
+    def test_default_is_true(self) -> None:
+        config = NetskopeConfig.resolve(tenant="t.goskope.com", api_token="tok")
+        assert config.verify is True
+
+    def test_explicit_false(self) -> None:
+        config = NetskopeConfig.resolve(tenant="t.goskope.com", api_token="tok", verify=False)
+        assert config.verify is False
+
+    def test_explicit_path(self, tmp_path: Path) -> None:
+        cert = self._make_cert(tmp_path, "explicit.pem")
+        config = NetskopeConfig.resolve(tenant="t.goskope.com", api_token="tok", verify=cert)
+        assert config.verify == cert
+
+    def test_explicit_path_beats_env(self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+        explicit = self._make_cert(tmp_path, "explicit.pem")
+        env_cert = self._make_cert(tmp_path, "env.pem")
+        monkeypatch.setenv("NETSKOPE_CA_BUNDLE", env_cert)
+        config = NetskopeConfig.resolve(tenant="t.goskope.com", api_token="tok", verify=explicit)
+        assert config.verify == explicit
+
+    def test_explicit_false_beats_env(
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    ) -> None:
+        monkeypatch.setenv("NETSKOPE_CA_BUNDLE", self._make_cert(tmp_path, "env.pem"))
+        config = NetskopeConfig.resolve(tenant="t.goskope.com", api_token="tok", verify=False)
+        assert config.verify is False
+
+    def test_env_netskope_ca_bundle(self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+        cert = self._make_cert(tmp_path, "ns.pem")
+        monkeypatch.setenv("NETSKOPE_CA_BUNDLE", cert)
+        config = NetskopeConfig.resolve(tenant="t.goskope.com", api_token="tok")
+        assert config.verify == cert
+
+    def test_env_chain_precedence(self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+        certs = {
+            var: self._make_cert(tmp_path, f"{var.lower()}.pem") for var in _CA_BUNDLE_ENV_VARS
+        }
+        for var, path in certs.items():
+            monkeypatch.setenv(var, path)
+        # NETSKOPE_CA_BUNDLE beats all others.
+        config = NetskopeConfig.resolve(tenant="t.goskope.com", api_token="tok")
+        assert config.verify == certs["NETSKOPE_CA_BUNDLE"]
+        # Then REQUESTS_CA_BUNDLE, SSL_CERT_FILE, CURL_CA_BUNDLE in order.
+        for var, next_var in itertools.pairwise(_CA_BUNDLE_ENV_VARS):
+            monkeypatch.delenv(var)
+            config = NetskopeConfig.resolve(tenant="t.goskope.com", api_token="tok")
+            assert config.verify == certs[next_var]
+
+    def test_empty_env_value_skipped(self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+        cert = self._make_cert(tmp_path, "requests.pem")
+        monkeypatch.setenv("NETSKOPE_CA_BUNDLE", "")
+        monkeypatch.setenv("REQUESTS_CA_BUNDLE", cert)
+        config = NetskopeConfig.resolve(tenant="t.goskope.com", api_token="tok")
+        assert config.verify == cert
+
+    def test_missing_file_raises(self, tmp_path: Path) -> None:
+        missing = str(tmp_path / "nope.pem")
+        with pytest.raises(ValidationError, match="CA bundle file not found"):
+            NetskopeConfig.resolve(tenant="t.goskope.com", api_token="tok", verify=missing)
+
+    def test_missing_file_error_mentions_helper(self, tmp_path: Path) -> None:
+        with pytest.raises(ValidationError, match="find_netskope_ca_cert"):
+            NetskopeConfig.resolve(
+                tenant="t.goskope.com", api_token="tok", verify=str(tmp_path / "nope.pem")
+            )
+
+    def test_missing_env_file_raises(self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+        monkeypatch.setenv("NETSKOPE_CA_BUNDLE", str(tmp_path / "nope.pem"))
+        with pytest.raises(ValidationError, match="CA bundle file not found"):
+            NetskopeConfig.resolve(tenant="t.goskope.com", api_token="tok")
+
+
+class TestFindNetskopeCaCert:
+    """Tests for find_netskope_ca_cert()."""
+
+    def test_returns_none_when_no_paths_exist(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.setattr("netskope._config.os.path.isfile", lambda _path: False)
+        assert find_netskope_ca_cert() is None
+
+    def test_returns_first_existing_path(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        target = "/opt/netskope/stagent/nsca/nscacert.pem"
+        monkeypatch.setattr("netskope._config.os.path.isfile", lambda path: path == target)
+        assert find_netskope_ca_cert() == target

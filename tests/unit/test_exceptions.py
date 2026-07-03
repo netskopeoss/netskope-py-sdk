@@ -135,6 +135,49 @@ class TestRaiseForStatus:
             raise_for_status(resp)
         assert "Nested error" in str(exc_info.value)
 
+    def test_200_with_error_status_raises_api_error(self) -> None:
+        """Some endpoints return HTTP 200 with {"status": "error", ...} bodies."""
+        resp = self._make_response(
+            200, {"status": "error", "message": "Missing required grouporder parameter"}
+        )
+        with pytest.raises(APIError) as exc_info:
+            raise_for_status(resp)
+        assert "Missing required grouporder parameter" in str(exc_info.value)
+        assert exc_info.value.status_code == 200
+
+    def test_200_with_not_found_error_raises_not_found(self) -> None:
+        resp = self._make_response(200, {"status": "error", "message": "resource not found"})
+        with pytest.raises(NotFoundError):
+            raise_for_status(resp)
+
+    def test_200_with_error_status_uses_body_status_code(self) -> None:
+        resp = self._make_response(
+            200, {"status": "error", "message": "bad input", "status_code": 400}
+        )
+        with pytest.raises(APIError) as exc_info:
+            raise_for_status(resp)
+        assert exc_info.value.status_code == 400
+
+    def test_200_with_success_status_does_not_raise(self) -> None:
+        resp = self._make_response(200, {"status": "Success", "data": {"tags": []}})
+        raise_for_status(resp)  # Should not raise
+
+    def test_200_with_non_dict_body_does_not_raise(self) -> None:
+        resp = httpx.Response(
+            200,
+            json=[{"status": "error"}],
+            request=httpx.Request("GET", "https://test.goskope.com/api/v2/test"),
+        )
+        raise_for_status(resp)  # Should not raise
+
+    def test_400_error_path_unchanged_by_error_body_handling(self) -> None:
+        """Non-2xx handling is unaffected by the 200-with-error-body logic."""
+        resp = self._make_response(400, {"status": "error", "message": "bad request"})
+        with pytest.raises(APIError) as exc_info:
+            raise_for_status(resp)
+        assert exc_info.value.status_code == 400
+        assert "bad request" in str(exc_info.value)
+
     def test_list_message_is_joined(self) -> None:
         """The Netskope API returns ``message`` as a list for some validation errors."""
         resp = self._make_response(

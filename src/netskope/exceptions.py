@@ -126,13 +126,53 @@ _STATUS_MAP: dict[int, type[APIError]] = {
 }
 
 
+def _extract_message(body: dict[str, Any]) -> str:
+    """Pull the most specific error message out of a Netskope error body."""
+    raw: Any = body.get("status")
+    raw = raw.get("message") if isinstance(raw, dict) else None
+    if raw is None:
+        raw = body.get("message")
+    if raw is None:
+        raw = body.get("error")
+    if isinstance(raw, list):
+        return "; ".join(str(item) for item in raw)
+    if isinstance(raw, dict):
+        return str(raw.get("message", raw))
+    if raw is not None:
+        return str(raw)
+    return ""
+
+
 def raise_for_status(response: httpx.Response) -> None:
     """Inspect *response* and raise the appropriate :class:`APIError` subclass.
 
     This is called automatically by the transport layer; SDK users should
     never need to call it directly.
+
+    Some Netskope endpoints return HTTP 200 with an error payload such as
+    ``{"status": "error", "message": ...}`` — those are raised as errors too.
     """
     if response.is_success:
+        try:
+            body = response.json()
+        except (ValueError, UnicodeDecodeError):
+            return
+        if isinstance(body, dict) and body.get("status") == "error":
+            message = _extract_message(body) or "Unknown error"
+            raw_status = body.get("status_code")
+            status_code = raw_status if isinstance(raw_status, int) else response.status_code
+            request_id = response.headers.get("x-request-id")
+            lowered = message.lower()
+            if (
+                "not found" in lowered
+                or "doesn't exist" in lowered
+                or "does not exist" in lowered
+                or ("no " in lowered and " found" in lowered)
+            ):
+                raise NotFoundError(
+                    message, status_code=status_code, request_id=request_id, body=body
+                )
+            raise APIError(message, status_code=status_code, request_id=request_id, body=body)
         return
 
     request_id = response.headers.get("x-request-id")
@@ -141,17 +181,7 @@ def raise_for_status(response: httpx.Response) -> None:
     except (ValueError, UnicodeDecodeError):
         body = None
 
-    message = ""
-    if body and isinstance(body, dict):
-        raw: Any = body.get("message")
-        if raw is None:
-            raw = body.get("error")
-        if isinstance(raw, list):
-            message = "; ".join(str(item) for item in raw)
-        elif isinstance(raw, dict):
-            message = str(raw.get("message", raw))
-        elif raw is not None:
-            message = str(raw)
+    message = _extract_message(body) if isinstance(body, dict) else ""
     if not message:
         message = response.reason_phrase or "Unknown error"
 

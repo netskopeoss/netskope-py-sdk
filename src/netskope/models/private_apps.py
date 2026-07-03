@@ -18,6 +18,19 @@ class PrivateAppProtocol(StrEnum):
     TCP_UDP = "TCP/UDP"
 
 
+class PrivateAppTag(NetskopeModel):
+    """A tag attached to one or more private applications.
+
+    Example::
+
+        for tag in client.private_apps.tags.list():
+            print(f"{tag.tag_id}: {tag.tag_name}")
+    """
+
+    tag_id: int | None = None
+    tag_name: str | None = None
+
+
 class PrivateApp(NetskopeModel):
     """A Netskope Private Application (ZTNA).
 

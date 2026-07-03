@@ -20,7 +20,8 @@ from netskope._pagination import AsyncPaginatedResponse, SyncPaginatedResponse
 from netskope.models.alerts import Alert
 from netskope.resources._base import AsyncResource, SyncResource
 
-_SAFE_ID_RE = re.compile(r"^[a-zA-Z0-9_\-]+$")
+# Alert ids (the ``_id`` field) are hex strings.
+_HEX_ID_RE = re.compile(r"^[a-fA-F0-9]+$")
 
 _PATH = "/api/v2/events/datasearch/alert"
 
@@ -30,7 +31,7 @@ def _build_params(
     fields: list[str] | None = None,
     start_time: datetime | int | None = None,
     end_time: datetime | int | None = None,
-    group_by: str | None = None,
+    group_by: str | list[str] | None = None,
     order_by: str | None = None,
     descending: bool = True,
 ) -> dict[str, Any]:
@@ -48,10 +49,9 @@ def _build_params(
             int(end_time.timestamp()) if isinstance(end_time, datetime) else end_time
         )
     if group_by:
-        params["groupby"] = group_by
+        params["groupbys"] = group_by if isinstance(group_by, str) else ",".join(group_by)
     if order_by:
-        params["sortby"] = order_by
-        params["sortorder"] = "desc" if descending else "asc"
+        params["sortby"] = f"{order_by} {'DESC' if descending else 'ASC'}"
     return params
 
 
@@ -76,7 +76,7 @@ class AlertsResource(SyncResource):
         fields: list[str] | None = None,
         start_time: datetime | int | None = None,
         end_time: datetime | int | None = None,
-        group_by: str | None = None,
+        group_by: str | list[str] | None = None,
         order_by: str | None = None,
         descending: bool = True,
         page_size: int = 100,
@@ -122,8 +122,8 @@ class AlertsResource(SyncResource):
         """
         from netskope.exceptions import NotFoundError, ValidationError
 
-        if not _SAFE_ID_RE.match(alert_id):
-            raise ValidationError(f"Invalid alert_id format: {alert_id!r}")
+        if not _HEX_ID_RE.match(alert_id):
+            raise ValidationError(f"Invalid alert_id format: {alert_id!r}. Expected a hex string.")
         body = self._get(_PATH, query=f'_id eq "{alert_id}"')
         items = _extract_alerts(body)
         if not items:
@@ -144,7 +144,7 @@ class AsyncAlertsResource(AsyncResource):
         fields: list[str] | None = None,
         start_time: datetime | int | None = None,
         end_time: datetime | int | None = None,
-        group_by: str | None = None,
+        group_by: str | list[str] | None = None,
         order_by: str | None = None,
         descending: bool = True,
         page_size: int = 100,
@@ -165,8 +165,8 @@ class AsyncAlertsResource(AsyncResource):
         """Get a single alert by ID."""
         from netskope.exceptions import NotFoundError, ValidationError
 
-        if not _SAFE_ID_RE.match(alert_id):
-            raise ValidationError(f"Invalid alert_id format: {alert_id!r}")
+        if not _HEX_ID_RE.match(alert_id):
+            raise ValidationError(f"Invalid alert_id format: {alert_id!r}. Expected a hex string.")
         body = await self._get(_PATH, query=f'_id eq "{alert_id}"')
         items = _extract_alerts(body)
         if not items:
