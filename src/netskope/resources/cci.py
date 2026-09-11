@@ -7,8 +7,9 @@ the tags used to categorize apps for policy targeting.
 Tags are identified by their NAME string — they have no numeric IDs.  (The
 ``ids`` parameters below refer to *application* IDs, never tag IDs.)
 
-Responses are returned as plain ``dict`` objects because CCI schemas vary by
-tenant license.
+Legacy methods retain their original dictionary results. The public
+``with_response`` accessors expose typed records with future response fields
+preserved, plus the completed response when original wire values are needed.
 
 Example::
 
@@ -28,10 +29,18 @@ import builtins
 import functools
 import re
 import urllib.parse
-from typing import Any, cast
+from typing import TYPE_CHECKING, Any, cast
 
 from netskope.exceptions import ValidationError
 from netskope.resources._base import AsyncResource, SyncResource
+
+if TYPE_CHECKING:
+    from netskope.resources._cci_response import (
+        AsyncCciResponses,
+        AsyncCciTagResponses,
+        CciResponses,
+        CciTagResponses,
+    )
 
 _APP_PATH = "/api/v2/services/cci/app"
 _TAGS_PATH = "/api/v2/services/cci/tags"
@@ -167,6 +176,12 @@ class CciTagsResource(SyncResource):
 
     CCI tags have no numeric IDs — the identifier is the tag name string.
     """
+
+    @functools.cached_property
+    def with_response(self) -> CciTagResponses:
+        from netskope.resources._cci_response import CciTagResponses
+
+        return CciTagResponses(self._transport)
 
     def list(
         self,
@@ -314,6 +329,12 @@ class CciTagsResource(SyncResource):
 class CciResource(SyncResource):
     """Synchronous interface to the Cloud Confidence Index (CCI) API."""
 
+    @functools.cached_property
+    def with_response(self) -> CciResponses:
+        from netskope.resources._cci_response import CciResponses
+
+        return CciResponses(self._transport)
+
     def lookup_app(
         self,
         app_name: str,
@@ -360,6 +381,12 @@ class AsyncCciTagsResource(AsyncResource):
 
     CCI tags have no numeric IDs — the identifier is the tag name string.
     """
+
+    @functools.cached_property
+    def with_response(self) -> AsyncCciTagResponses:
+        from netskope.resources._cci_response import AsyncCciTagResponses
+
+        return AsyncCciTagResponses(self._transport)
 
     async def list(
         self,
@@ -435,6 +462,12 @@ class AsyncCciTagsResource(AsyncResource):
 
 class AsyncCciResource(AsyncResource):
     """Asynchronous interface to the Cloud Confidence Index (CCI) API."""
+
+    @functools.cached_property
+    def with_response(self) -> AsyncCciResponses:
+        from netskope.resources._cci_response import AsyncCciResponses
+
+        return AsyncCciResponses(self._transport)
 
     async def lookup_app(
         self,

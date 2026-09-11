@@ -58,7 +58,7 @@ class TestNetskopeConfig:
 
     def test_missing_token_raises(self, monkeypatch: pytest.MonkeyPatch) -> None:
         monkeypatch.delenv("NETSKOPE_API_TOKEN", raising=False)
-        with pytest.raises(ValidationError, match="API token is required"):
+        with pytest.raises(ValidationError, match="API token or ci_session is required"):
             NetskopeConfig.resolve(tenant="test.goskope.com")
 
     def test_base_url_with_https_prefix(self) -> None:
@@ -146,6 +146,60 @@ class TestNetskopeConfig:
         config = NetskopeConfig(tenant="t", api_token=SecretStr("tok"))
         with pytest.raises(AttributeError):
             config.tenant = "new"  # type: ignore[misc]
+
+    def test_session_cookie_overrides_environment_token(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.setenv("NETSKOPE_API_TOKEN", "ambient-token")
+        config = NetskopeConfig.resolve(tenant="test.goskope.com", ci_session="session-secret")
+        assert config.api_token is None
+        assert config.ci_session is not None
+        assert config.ci_session.get_secret_value() == "session-secret"
+        assert "session-secret" not in repr(config)
+        assert "session-secret" not in repr(dataclasses.asdict(config))
+
+    @pytest.mark.parametrize("token, cookie", [("token", "cookie"), ("", "cookie"), ("token", "")])
+    def test_explicit_credentials_are_mutually_exclusive(self, token: str, cookie: str) -> None:
+        with pytest.raises(ValidationError, match="mutually exclusive"):
+            NetskopeConfig.resolve(tenant="test.goskope.com", api_token=token, ci_session=cookie)
+
+    def test_empty_cookie_does_not_select_environment_token(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.setenv("NETSKOPE_API_TOKEN", "ambient-token")
+        with pytest.raises(ValidationError, match="API token or ci_session is required"):
+            NetskopeConfig.resolve(tenant="test.goskope.com", ci_session="")
+
+    def test_direct_config_rejects_conflicting_credentials(self) -> None:
+        with pytest.raises(ValidationError, match="mutually exclusive"):
+            NetskopeConfig(
+                tenant="test.goskope.com",
+                api_token=SecretStr("token"),
+                ci_session=SecretStr("cookie"),
+            )
+
+    def test_empty_retry_statuses_are_respected(self) -> None:
+        config = NetskopeConfig.resolve(
+            tenant="test.goskope.com", api_token="token", retry_on_status=frozenset()
+        )
+        assert config.retry_on_status == frozenset()
+
+    def test_negative_retry_budget_is_rejected(self) -> None:
+        with pytest.raises(ValidationError, match="max_retries"):
+            NetskopeConfig.resolve(tenant="test.goskope.com", api_token="token", max_retries=-1)
+
+    @pytest.mark.parametrize(
+        "tenant",
+        [
+            "other.example/path/test.goskope.com",
+            "user@test.goskope.com",
+            "test.goskope.com?redirect=other.goskope.com",
+            "other.example\\test.goskope.com",
+        ],
+    )
+    def test_tenant_must_be_a_hostname(self, tenant: str) -> None:
+        with pytest.raises(ValidationError, match="hostname without credentials"):
+            NetskopeConfig.resolve(tenant=tenant, api_token="token")
 
 
 @pytest.mark.usefixtures("no_ca_env")

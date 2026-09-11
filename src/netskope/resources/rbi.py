@@ -27,10 +27,14 @@ Example::
 from __future__ import annotations
 
 import builtins
-from typing import Any
+import functools
+from typing import TYPE_CHECKING, Any
 
 from netskope.resources._base import AsyncResource, SyncResource
 from netskope.resources._extract import validate_id
+
+if TYPE_CHECKING:
+    from netskope.resources._rbi_response import AsyncRbiResponses, RbiResponses
 
 _RBI_PATH = "/api/v2/rbi"
 _APPLICATIONS_PATH = f"{_RBI_PATH}/applications"
@@ -50,7 +54,7 @@ _CDR_VENDORS_PATH = f"{_CDR_PATH}/vendors"
 _CDR_TESTCONFIG_PATH = f"{_CDR_PATH}/testconfig"
 
 
-def _template_path(template_id: str) -> str:
+def _template_path(template_id: int | str) -> str:
     return f"{_TEMPLATES_PATH}/{validate_id(template_id, 'template_id')}"
 
 
@@ -100,6 +104,12 @@ def _build_deploy_body(
 
 class RbiResource(SyncResource):
     """Synchronous interface to the Remote Browser Isolation API."""
+
+    @functools.cached_property
+    def with_response(self) -> RbiResponses:
+        from netskope.resources._rbi_response import RbiResponses
+
+        return RbiResponses(self._transport)
 
     # -- Reference data ----------------------------------------------------
 
@@ -156,7 +166,7 @@ class RbiResource(SyncResource):
         params = _build_templates_params(name, limit, offset, sort_by, sort_order, status, fields)
         return self._get(_TEMPLATES_PATH, **params)
 
-    def get_template(self, template_id: str) -> dict[str, Any]:
+    def get_template(self, template_id: int | str) -> dict[str, Any]:
         """Get a single isolation template by id.
 
         Maps to ``GET /api/v2/rbi/templates/{id}``.  The id is a UUID string.
@@ -177,7 +187,7 @@ class RbiResource(SyncResource):
         """
         return self._get(_TEMPLATES_DIFFS_PATH)
 
-    def get_template_diffs(self, template_id: str) -> dict[str, Any]:
+    def get_template_diffs(self, template_id: int | str) -> dict[str, Any]:
         """Get pending changes (diffs) for a single template.
 
         Maps to ``GET /api/v2/rbi/templates/{id}/diffs``.
@@ -196,7 +206,9 @@ class RbiResource(SyncResource):
         """
         return self._post(_TEMPLATES_PATH, json=template_data)
 
-    def update_template(self, template_id: str, template_data: dict[str, Any]) -> dict[str, Any]:
+    def update_template(
+        self, template_id: int | str, template_data: dict[str, Any]
+    ) -> dict[str, Any]:
         """Update an existing template (pending deploy).
 
         Maps to ``PATCH /api/v2/rbi/templates/{id}``.  Accepts a partial
@@ -204,14 +216,14 @@ class RbiResource(SyncResource):
         """
         return self._patch(_template_path(template_id), json=template_data)
 
-    def delete_template(self, template_id: str) -> dict[str, Any]:
+    def delete_template(self, template_id: int | str) -> dict[str, Any]:
         """Delete a template (pending deploy).
 
         Maps to ``DELETE /api/v2/rbi/templates/{id}``.
         """
         return self._delete(_template_path(template_id))
 
-    def restore_template(self, template_id: str) -> dict[str, Any]:
+    def restore_template(self, template_id: int | str) -> dict[str, Any]:
         """Restore a template to the default template values (pending deploy).
 
         Maps to ``POST /api/v2/rbi/templates/{id}/default``.
@@ -320,6 +332,12 @@ class RbiResource(SyncResource):
 class AsyncRbiResource(AsyncResource):
     """Asynchronous interface to the Remote Browser Isolation API."""
 
+    @functools.cached_property
+    def with_response(self) -> AsyncRbiResponses:
+        from netskope.resources._rbi_response import AsyncRbiResponses
+
+        return AsyncRbiResponses(self._transport)
+
     # -- Reference data ----------------------------------------------------
 
     async def list_applications(self) -> dict[str, Any]:
@@ -357,7 +375,7 @@ class AsyncRbiResource(AsyncResource):
         params = _build_templates_params(name, limit, offset, sort_by, sort_order, status, fields)
         return await self._get(_TEMPLATES_PATH, **params)
 
-    async def get_template(self, template_id: str) -> dict[str, Any]:
+    async def get_template(self, template_id: int | str) -> dict[str, Any]:
         """Get a single isolation template by id."""
         return await self._get(_template_path(template_id))
 
@@ -369,7 +387,7 @@ class AsyncRbiResource(AsyncResource):
         """Get pending changes (diffs) for all templates."""
         return await self._get(_TEMPLATES_DIFFS_PATH)
 
-    async def get_template_diffs(self, template_id: str) -> dict[str, Any]:
+    async def get_template_diffs(self, template_id: int | str) -> dict[str, Any]:
         """Get pending changes (diffs) for a single template."""
         return await self._get(f"{_template_path(template_id)}/diffs")
 
@@ -380,16 +398,16 @@ class AsyncRbiResource(AsyncResource):
         return await self._post(_TEMPLATES_PATH, json=template_data)
 
     async def update_template(
-        self, template_id: str, template_data: dict[str, Any]
+        self, template_id: int | str, template_data: dict[str, Any]
     ) -> dict[str, Any]:
         """Update an existing template (pending deploy)."""
         return await self._patch(_template_path(template_id), json=template_data)
 
-    async def delete_template(self, template_id: str) -> dict[str, Any]:
+    async def delete_template(self, template_id: int | str) -> dict[str, Any]:
         """Delete a template (pending deploy)."""
         return await self._delete(_template_path(template_id))
 
-    async def restore_template(self, template_id: str) -> dict[str, Any]:
+    async def restore_template(self, template_id: int | str) -> dict[str, Any]:
         """Restore a template to the default template values (pending deploy)."""
         return await self._post(f"{_template_path(template_id)}/default")
 

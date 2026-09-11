@@ -3,10 +3,32 @@
 from __future__ import annotations
 
 from enum import StrEnum
+from typing import Literal
 
 from pydantic import Field
 
+from netskope.models.administration import AdminRequest
 from netskope.models.common import NetskopeModel
+
+
+class ApiTokenGrant(AdminRequest):
+    """An endpoint permission, explicitly read-only or read/write."""
+
+    endpoint: str = Field(min_length=1)
+    permissions: Literal["r", "rw"]
+
+
+class ApiTokenWrite(AdminRequest):
+    """Complete token metadata required for create and ordinary PATCH.
+
+    Expiration is explicit Unix-epoch seconds. Grants replace the complete
+    scope list; partial metadata updates and empty grant clearing are not
+    inferred by this contract.
+    """
+
+    name: str = Field(min_length=1)
+    expires: int = Field(ge=0)
+    endpoints: list[ApiTokenGrant] = Field(min_length=1)
 
 
 class TokenPermission(StrEnum):

@@ -2,7 +2,67 @@
 
 from __future__ import annotations
 
+from typing import Annotated, Literal, Self
+
+from pydantic import Field, model_validator
+
+from netskope.models.administration import AdminRequest
 from netskope.models.common import NetskopeModel
+
+
+class DnsProfileCreate(AdminRequest):
+    """Create a DNS profile with the gateway's string-valued logging mode."""
+
+    name: str = Field(min_length=1)
+    description: str | None = None
+    log_traffic: Literal["Blocked DNS", "All DNS"] | None = None
+
+
+class DnsProfilePatch(AdminRequest):
+    """Change only supplied profile fields. Empty description clears it."""
+
+    name: str | None = Field(None, min_length=1)
+    description: str | None = None
+    log_traffic: Literal["Blocked DNS", "All DNS"] | None = None
+
+    @model_validator(mode="after")
+    def _require_changes(self) -> Self:
+        if not self.model_fields_set:
+            raise ValueError("Supply at least one profile field.")
+        return self
+
+
+class DnsInheritanceGroupCreate(AdminRequest):
+    name: str = Field(min_length=1)
+    description: str | None = None
+
+
+class DnsInheritanceGroupPatch(AdminRequest):
+    name: str | None = Field(None, min_length=1)
+    description: str | None = None
+
+    @model_validator(mode="after")
+    def _require_changes(self) -> Self:
+        if not self.model_fields_set:
+            raise ValueError("Supply at least one inheritance-group field.")
+        return self
+
+
+class DnsDeployment(AdminRequest):
+    ids: list[Annotated[str, Field(min_length=1)]] = Field(min_length=1)
+    change_note: str
+
+
+class DnsInheritanceGroupDeployment(AdminRequest):
+    ids: list[Annotated[str, Field(min_length=1)]] = Field(min_length=1)
+    change_note: str | None = None
+
+
+class DnsReference(NetskopeModel):
+    """An identifier/name entry from a DNS reference collection."""
+
+    id: str | int
+    name: str
 
 
 class DnsProfile(NetskopeModel):

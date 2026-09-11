@@ -36,6 +36,12 @@ from typing import Any, Literal
 
 from netskope.models.users import UmGroup, UmUser
 from netskope.resources._base import AsyncResource, SyncResource
+from netskope.resources._users_response import (
+    AsyncUserGroupsResponses,
+    AsyncUsersResponses,
+    UserGroupsResponses,
+    UsersResponses,
+)
 
 _GET_USERS_PATH = "/api/v2/users/getusers"
 _GET_GROUPS_PATH = "/api/v2/users/getgroups"
@@ -91,6 +97,10 @@ class UserGroupsResource(SyncResource):
     :class:`netskope.resources.scim.ScimGroupsResource`.
     """
 
+    @functools.cached_property
+    def with_response(self) -> UserGroupsResponses:
+        return UserGroupsResponses(self._transport)
+
     def list(
         self,
         *,
@@ -108,7 +118,9 @@ class UserGroupsResource(SyncResource):
             limit: Maximum records to return (max 1000).
             offset: 0-based pagination offset.
         """
-        body = self._post(_GET_GROUPS_PATH, json=_build_query_body(filter, limit, offset))
+        body = self._post(
+            _GET_GROUPS_PATH, json=_build_query_body(filter, limit, offset), retry_safe=True
+        )
         return [UmGroup.model_validate(item) for item in _extract_records(body)]
 
     def get(self, name: str) -> UmGroup | None:
@@ -122,7 +134,7 @@ class UserGroupsResource(SyncResource):
             ``None`` when no group matches.
         """
         filter: dict[str, Any] = {"displayName": {"eq": name}}
-        body = self._post(_GET_GROUPS_PATH, json=_build_query_body(filter, 1, 0))
+        body = self._post(_GET_GROUPS_PATH, json=_build_query_body(filter, 1, 0), retry_safe=True)
         records = _extract_records(body)
         return UmGroup.model_validate(records[0]) if records else None
 
@@ -143,7 +155,9 @@ class UserGroupsResource(SyncResource):
             offset: 0-based pagination offset.
         """
         filter: dict[str, Any] = {"accounts.parentGroups": {"in": [group_name]}}
-        body = self._post(_GET_USERS_PATH, json=_build_query_body(filter, limit, offset))
+        body = self._post(
+            _GET_USERS_PATH, json=_build_query_body(filter, limit, offset), retry_safe=True
+        )
         return [UmUser.model_validate(item) for item in _extract_records(body)]
 
 
@@ -154,6 +168,10 @@ class UsersResource(SyncResource):
     For user provisioning CRUD, use ``client.scim.users`` — see
     :class:`netskope.resources.scim.ScimUsersResource`.
     """
+
+    @functools.cached_property
+    def with_response(self) -> UsersResponses:
+        return UsersResponses(self._transport)
 
     def list(
         self,
@@ -173,7 +191,9 @@ class UsersResource(SyncResource):
             limit: Maximum records to return (max 1000).
             offset: 0-based pagination offset.
         """
-        body = self._post(_GET_USERS_PATH, json=_build_query_body(filter, limit, offset))
+        body = self._post(
+            _GET_USERS_PATH, json=_build_query_body(filter, limit, offset), retry_safe=True
+        )
         return [UmUser.model_validate(item) for item in _extract_records(body)]
 
     def get(
@@ -195,7 +215,7 @@ class UsersResource(SyncResource):
             ``None`` when no user matches.
         """
         filter = _user_lookup_filter(identifier, by)
-        body = self._post(_GET_USERS_PATH, json=_build_query_body(filter, 1, 0))
+        body = self._post(_GET_USERS_PATH, json=_build_query_body(filter, 1, 0), retry_safe=True)
         records = _extract_records(body)
         return UmUser.model_validate(records[0]) if records else None
 
@@ -214,6 +234,10 @@ class AsyncUserGroupsResource(AsyncResource):
     For group provisioning CRUD, use ``client.scim.groups``.
     """
 
+    @functools.cached_property
+    def with_response(self) -> AsyncUserGroupsResponses:
+        return AsyncUserGroupsResponses(self._transport)
+
     async def list(
         self,
         *,
@@ -222,13 +246,17 @@ class AsyncUserGroupsResource(AsyncResource):
         offset: int = 0,
     ) -> builtins.list[UmGroup]:
         """List groups.  See :meth:`UserGroupsResource.list`."""
-        body = await self._post(_GET_GROUPS_PATH, json=_build_query_body(filter, limit, offset))
+        body = await self._post(
+            _GET_GROUPS_PATH, json=_build_query_body(filter, limit, offset), retry_safe=True
+        )
         return [UmGroup.model_validate(item) for item in _extract_records(body)]
 
     async def get(self, name: str) -> UmGroup | None:
         """Look up a group by display name.  See :meth:`UserGroupsResource.get`."""
         filter: dict[str, Any] = {"displayName": {"eq": name}}
-        body = await self._post(_GET_GROUPS_PATH, json=_build_query_body(filter, 1, 0))
+        body = await self._post(
+            _GET_GROUPS_PATH, json=_build_query_body(filter, 1, 0), retry_safe=True
+        )
         records = _extract_records(body)
         return UmGroup.model_validate(records[0]) if records else None
 
@@ -241,7 +269,9 @@ class AsyncUserGroupsResource(AsyncResource):
     ) -> builtins.list[UmUser]:
         """List group members.  See :meth:`UserGroupsResource.members`."""
         filter: dict[str, Any] = {"accounts.parentGroups": {"in": [group_name]}}
-        body = await self._post(_GET_USERS_PATH, json=_build_query_body(filter, limit, offset))
+        body = await self._post(
+            _GET_USERS_PATH, json=_build_query_body(filter, limit, offset), retry_safe=True
+        )
         return [UmUser.model_validate(item) for item in _extract_records(body)]
 
 
@@ -251,6 +281,10 @@ class AsyncUsersResource(AsyncResource):
     For user provisioning CRUD, use ``client.scim.users``.
     """
 
+    @functools.cached_property
+    def with_response(self) -> AsyncUsersResponses:
+        return AsyncUsersResponses(self._transport)
+
     async def list(
         self,
         *,
@@ -259,7 +293,9 @@ class AsyncUsersResource(AsyncResource):
         offset: int = 0,
     ) -> builtins.list[UmUser]:
         """List users.  See :meth:`UsersResource.list`."""
-        body = await self._post(_GET_USERS_PATH, json=_build_query_body(filter, limit, offset))
+        body = await self._post(
+            _GET_USERS_PATH, json=_build_query_body(filter, limit, offset), retry_safe=True
+        )
         return [UmUser.model_validate(item) for item in _extract_records(body)]
 
     async def get(
@@ -270,7 +306,9 @@ class AsyncUsersResource(AsyncResource):
     ) -> UmUser | None:
         """Look up a single user.  See :meth:`UsersResource.get`."""
         filter = _user_lookup_filter(identifier, by)
-        body = await self._post(_GET_USERS_PATH, json=_build_query_body(filter, 1, 0))
+        body = await self._post(
+            _GET_USERS_PATH, json=_build_query_body(filter, 1, 0), retry_safe=True
+        )
         records = _extract_records(body)
         return UmUser.model_validate(records[0]) if records else None
 

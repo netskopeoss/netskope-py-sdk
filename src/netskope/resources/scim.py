@@ -21,7 +21,6 @@ from __future__ import annotations
 
 import builtins
 import functools
-import re
 from typing import Any
 
 from netskope._pagination import (
@@ -29,17 +28,16 @@ from netskope._pagination import (
     SyncScimPaginatedResponse,
 )
 from netskope.models.scim import ScimGroup, ScimUser
+from netskope.pagination import Page
 from netskope.resources._base import AsyncResource, SyncResource
-
-_SAFE_ID_RE = re.compile(r"^[a-zA-Z0-9_\-]+$")
-
-
-def _validate_id(value: str, name: str) -> None:
-    if not _SAFE_ID_RE.match(value):
-        from netskope.exceptions import ValidationError
-
-        raise ValidationError(f"Invalid {name} format: {value!r}")
-
+from netskope.resources._extract import quote_id
+from netskope.resources._scim_response import (
+    AsyncScimGroupsResponses,
+    AsyncScimUsersResponses,
+    ScimGroupsResponses,
+    ScimUsersResponses,
+    validate_page_size,
+)
 
 _USERS_PATH = "/api/v2/scim/Users"
 _GROUPS_PATH = "/api/v2/scim/Groups"
@@ -59,6 +57,20 @@ def _extract_scim(body: dict[str, Any]) -> list[dict[str, Any]]:
 class ScimUsersResource(SyncResource):
     """Synchronous interface to ``/api/v2/scim/Users``."""
 
+    @functools.cached_property
+    def with_response(self) -> ScimUsersResponses:
+        """Opt into typed SCIM user responses, which percent-encode the id in the path."""
+        return ScimUsersResponses(self._transport)
+
+    def list_page(
+        self, *, filter_expr: str | None = None, count: int = 100, start_index: int = 1
+    ) -> Page[ScimUser]:
+        """Fetch one SCIM page. Missing totalResults does not establish completeness."""
+        response = self.with_response.list_page(
+            filter_expr=filter_expr, count=count, start_index=start_index
+        )
+        return response.parse()
+
     def list(
         self,
         *,
@@ -69,7 +81,7 @@ class ScimUsersResource(SyncResource):
 
         Args:
             filter_expr: SCIM filter (e.g. ``'userName eq "alice@example.com"'``).
-            page_size: Results per page.
+            page_size: Results per page (1-1000).
         """
         params: dict[str, Any] = {}
         if filter_expr:
@@ -80,14 +92,13 @@ class ScimUsersResource(SyncResource):
             path=_USERS_PATH,
             params=params,
             model=ScimUser,
-            page_size=page_size,
+            page_size=validate_page_size(page_size),
             extract=_extract_scim,
         )
 
     def get(self, user_id: str) -> ScimUser:
         """Get a SCIM user by ID."""
-        _validate_id(user_id, "user_id")
-        body = self._get(f"{_USERS_PATH}/{user_id}")
+        body = self._get(f"{_USERS_PATH}/{quote_id(user_id)}")
         return ScimUser.model_validate(body)
 
     def create(
@@ -139,18 +150,30 @@ class ScimUsersResource(SyncResource):
             "schemas": ["urn:ietf:params:scim:api:messages:2.0:PatchOp"],
             "Operations": operations,
         }
-        _validate_id(user_id, "user_id")
-        body = self._patch(f"{_USERS_PATH}/{user_id}", json=payload)
+        body = self._patch(f"{_USERS_PATH}/{quote_id(user_id)}", json=payload)
         return ScimUser.model_validate(body)
 
     def delete(self, user_id: str) -> None:
         """Delete a SCIM user."""
-        _validate_id(user_id, "user_id")
-        self._delete(f"{_USERS_PATH}/{user_id}")
+        self._delete(f"{_USERS_PATH}/{quote_id(user_id)}")
 
 
 class ScimGroupsResource(SyncResource):
     """Synchronous interface to ``/api/v2/scim/Groups``."""
+
+    @functools.cached_property
+    def with_response(self) -> ScimGroupsResponses:
+        """Opt into typed SCIM group responses, which percent-encode the id in the path."""
+        return ScimGroupsResponses(self._transport)
+
+    def list_page(
+        self, *, filter_expr: str | None = None, count: int = 100, start_index: int = 1
+    ) -> Page[ScimGroup]:
+        """Fetch one SCIM page. Missing totalResults does not establish completeness."""
+        response = self.with_response.list_page(
+            filter_expr=filter_expr, count=count, start_index=start_index
+        )
+        return response.parse()
 
     def list(
         self,
@@ -168,14 +191,13 @@ class ScimGroupsResource(SyncResource):
             path=_GROUPS_PATH,
             params=params,
             model=ScimGroup,
-            page_size=page_size,
+            page_size=validate_page_size(page_size),
             extract=_extract_scim,
         )
 
     def get(self, group_id: str) -> ScimGroup:
         """Get a SCIM group by ID."""
-        _validate_id(group_id, "group_id")
-        body = self._get(f"{_GROUPS_PATH}/{group_id}")
+        body = self._get(f"{_GROUPS_PATH}/{quote_id(group_id)}")
         return ScimGroup.model_validate(body)
 
     def create(
@@ -219,14 +241,12 @@ class ScimGroupsResource(SyncResource):
         }
         if member_ids is not None:
             payload["members"] = [{"value": mid} for mid in member_ids]
-        _validate_id(group_id, "group_id")
-        body = self._put(f"{_GROUPS_PATH}/{group_id}", json=payload)
+        body = self._put(f"{_GROUPS_PATH}/{quote_id(group_id)}", json=payload)
         return ScimGroup.model_validate(body)
 
     def delete(self, group_id: str) -> None:
         """Delete a SCIM group."""
-        _validate_id(group_id, "group_id")
-        self._delete(f"{_GROUPS_PATH}/{group_id}")
+        self._delete(f"{_GROUPS_PATH}/{quote_id(group_id)}")
 
 
 class ScimResource(SyncResource):
@@ -249,9 +269,29 @@ class ScimResource(SyncResource):
 class AsyncScimUsersResource(AsyncResource):
     """Async SCIM Users."""
 
+    @functools.cached_property
+    def with_response(self) -> AsyncScimUsersResponses:
+        """Opt into typed SCIM user responses, which percent-encode the id in the path."""
+        return AsyncScimUsersResponses(self._transport)
+
+    async def list_page(
+        self, *, filter_expr: str | None = None, count: int = 100, start_index: int = 1
+    ) -> Page[ScimUser]:
+        """Fetch one SCIM page. Missing totalResults does not establish completeness."""
+        response = await self.with_response.list_page(
+            filter_expr=filter_expr, count=count, start_index=start_index
+        )
+        return response.parse()
+
     def list(
         self, *, filter_expr: str | None = None, page_size: int = 100
     ) -> AsyncScimPaginatedResponse[ScimUser]:
+        """Iterate SCIM users lazily; *page_size* must be between 1 and 1000.
+
+        Args:
+            filter_expr: SCIM filter (e.g. ``'userName eq "alice@example.com"'``).
+            page_size: Results per page (1-1000).
+        """
         params: dict[str, Any] = {}
         if filter_expr:
             params["filter"] = filter_expr
@@ -261,13 +301,13 @@ class AsyncScimUsersResource(AsyncResource):
             path=_USERS_PATH,
             params=params,
             model=ScimUser,
-            page_size=page_size,
+            page_size=validate_page_size(page_size),
             extract=_extract_scim,
         )
 
     async def get(self, user_id: str) -> ScimUser:
-        _validate_id(user_id, "user_id")
-        body = await self._get(f"{_USERS_PATH}/{user_id}")
+        """Get a SCIM user by ID."""
+        body = await self._get(f"{_USERS_PATH}/{quote_id(user_id)}")
         return ScimUser.model_validate(body)
 
     async def create(
@@ -280,6 +320,7 @@ class AsyncScimUsersResource(AsyncResource):
         given_name: str | None = None,
         family_name: str | None = None,
     ) -> ScimUser:
+        """Provision a new SCIM user.  See :meth:`ScimUsersResource.create`."""
         payload: dict[str, Any] = {
             "userName": user_name,
             "active": active,
@@ -298,26 +339,41 @@ class AsyncScimUsersResource(AsyncResource):
         return ScimUser.model_validate(body)
 
     async def update(self, user_id: str, fields: dict[str, Any]) -> ScimUser:
-        _validate_id(user_id, "user_id")
+        """Partial-update a SCIM user (PATCH) from *fields*, returning the updated user."""
         operations = [{"op": "replace", "value": fields}]
         payload = {
             "schemas": ["urn:ietf:params:scim:api:messages:2.0:PatchOp"],
             "Operations": operations,
         }
-        body = await self._patch(f"{_USERS_PATH}/{user_id}", json=payload)
+        body = await self._patch(f"{_USERS_PATH}/{quote_id(user_id)}", json=payload)
         return ScimUser.model_validate(body)
 
     async def delete(self, user_id: str) -> None:
-        _validate_id(user_id, "user_id")
-        await self._delete(f"{_USERS_PATH}/{user_id}")
+        """Delete a SCIM user."""
+        await self._delete(f"{_USERS_PATH}/{quote_id(user_id)}")
 
 
 class AsyncScimGroupsResource(AsyncResource):
     """Async SCIM Groups."""
 
+    @functools.cached_property
+    def with_response(self) -> AsyncScimGroupsResponses:
+        """Opt into typed SCIM group responses, which percent-encode the id in the path."""
+        return AsyncScimGroupsResponses(self._transport)
+
+    async def list_page(
+        self, *, filter_expr: str | None = None, count: int = 100, start_index: int = 1
+    ) -> Page[ScimGroup]:
+        """Fetch one SCIM page. Missing totalResults does not establish completeness."""
+        response = await self.with_response.list_page(
+            filter_expr=filter_expr, count=count, start_index=start_index
+        )
+        return response.parse()
+
     def list(
         self, *, filter_expr: str | None = None, page_size: int = 100
     ) -> AsyncScimPaginatedResponse[ScimGroup]:
+        """Iterate SCIM groups lazily; *page_size* must be between 1 and 1000."""
         params: dict[str, Any] = {}
         if filter_expr:
             params["filter"] = filter_expr
@@ -327,18 +383,19 @@ class AsyncScimGroupsResource(AsyncResource):
             path=_GROUPS_PATH,
             params=params,
             model=ScimGroup,
-            page_size=page_size,
+            page_size=validate_page_size(page_size),
             extract=_extract_scim,
         )
 
     async def get(self, group_id: str) -> ScimGroup:
-        _validate_id(group_id, "group_id")
-        body = await self._get(f"{_GROUPS_PATH}/{group_id}")
+        """Get a SCIM group by ID."""
+        body = await self._get(f"{_GROUPS_PATH}/{quote_id(group_id)}")
         return ScimGroup.model_validate(body)
 
     async def create(
         self, display_name: str, *, member_ids: builtins.list[str] | None = None
     ) -> ScimGroup:
+        """Create a SCIM group.  See :meth:`ScimGroupsResource.create`."""
         payload: dict[str, Any] = {
             "displayName": display_name,
             "schemas": ["urn:ietf:params:scim:schemas:core:2.0:Group"],
@@ -355,19 +412,19 @@ class AsyncScimGroupsResource(AsyncResource):
         display_name: str,
         member_ids: builtins.list[str] | None = None,
     ) -> ScimGroup:
-        _validate_id(group_id, "group_id")
+        """Replace a SCIM group (PUT).  See :meth:`ScimGroupsResource.update`."""
         payload: dict[str, Any] = {
             "displayName": display_name,
             "schemas": ["urn:ietf:params:scim:schemas:core:2.0:Group"],
         }
         if member_ids is not None:
             payload["members"] = [{"value": mid} for mid in member_ids]
-        body = await self._put(f"{_GROUPS_PATH}/{group_id}", json=payload)
+        body = await self._put(f"{_GROUPS_PATH}/{quote_id(group_id)}", json=payload)
         return ScimGroup.model_validate(body)
 
     async def delete(self, group_id: str) -> None:
-        _validate_id(group_id, "group_id")
-        await self._delete(f"{_GROUPS_PATH}/{group_id}")
+        """Delete a SCIM group."""
+        await self._delete(f"{_GROUPS_PATH}/{quote_id(group_id)}")
 
 
 class AsyncScimResource(AsyncResource):
@@ -375,8 +432,10 @@ class AsyncScimResource(AsyncResource):
 
     @functools.cached_property
     def users(self) -> AsyncScimUsersResource:
+        """Access the SCIM Users API."""
         return AsyncScimUsersResource(self._transport)
 
     @functools.cached_property
     def groups(self) -> AsyncScimGroupsResource:
+        """Access the SCIM Groups API."""
         return AsyncScimGroupsResource(self._transport)

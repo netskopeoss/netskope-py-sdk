@@ -50,14 +50,16 @@ class Alert(NetskopeModel, TimestampMixin):
     id: str | None = Field(None, alias="_id")
     alert_name: str | None = None
     alert_type: str | None = None
-    severity: str | None = Field(None, alias="severity_level")
+    # severity_level, ccl, and site arrive as numbers on some tenants; the
+    # datasearch Event model accepts both shapes and so must this one.
+    severity: str | int | None = Field(None, alias="severity_level")
     user: str | None = None
     app: str | None = None
     activity: str | None = None
     object_name: str | None = Field(None, alias="object")
     policy_name: str | None = None
     action: str | None = None
-    site: str | None = None
+    site: str | int | None = None
     category: str | None = None
     cci: int | None = None
 
@@ -68,9 +70,28 @@ class Alert(NetskopeModel, TimestampMixin):
             return None
         return int(v)
 
-    ccl: str | None = None
+    ccl: str | int | None = None
     access_method: str | None = None
     traffic_type: str | None = None
     count: int | None = None
     other_categories: list[str] | None = None
     insertion_epoch_timestamp: int | None = None
+
+    @field_validator("other_categories", mode="before")
+    @classmethod
+    def _wrap_single_category(cls, v: Any) -> Any:
+        """A row with one secondary category sends a bare string, not a list."""
+        if isinstance(v, str):
+            return [v] if v else None
+        return v
+
+
+class DatasearchBucket(NetskopeModel):
+    """One grouped datasearch result, distinct from an individual alert.
+
+    Dimension names are selected by the query. Either dimensions or count may
+    be omitted by a projection; unknown aggregation fields remain available.
+    """
+
+    dimensions: dict[str, Any] | None = Field(None, alias="_id")
+    count: int | None = None

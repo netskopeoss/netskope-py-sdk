@@ -3,11 +3,32 @@
 from __future__ import annotations
 
 from enum import StrEnum
-from typing import Any
+from typing import Any, Literal, Self
 
-from pydantic import Field
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
+from netskope.models._npa_requests import NpaRequest
 from netskope.models.common import NetskopeModel
+
+
+class PublisherCreate(BaseModel):
+    """The modeled settings accepted when creating a publisher.
+
+    Resource methods accept additional settings through ``extra_fields``.
+    """
+
+    model_config = ConfigDict(extra="forbid", strict=True, frozen=True)
+
+    name: str
+    lbroker_connect: bool = False
+
+
+class PublisherUpdate(BaseModel):
+    """A partial publisher update; omitted fields are not sent."""
+
+    model_config = ConfigDict(extra="forbid", strict=True, frozen=True)
+
+    name: str | None = None
 
 
 class PublisherStatus(StrEnum):
@@ -49,6 +70,22 @@ class Publisher(NetskopeModel):
     tags: list[dict[str, Any]] = Field(default_factory=list)
 
 
+class PublisherApp(NetskopeModel):
+    """A private application associated with a publisher."""
+
+    app_id: int | None = None
+    app_name: str | None = None
+    host: str | None = None
+    protocol: str | None = None
+
+
+class PublisherActionResult(NetskopeModel):
+    """The acknowledgment returned by a bulk publisher action."""
+
+    status: str | None = None
+    message: str | None = None
+
+
 class PublisherRelease(NetskopeModel):
     """An available publisher software release.
 
@@ -62,6 +99,30 @@ class PublisherRelease(NetskopeModel):
     docker_tag: str | None = None
     release_type: str | None = Field(None, alias="name")
     is_recommended: bool | None = None
+
+
+class PublisherAlertsConfigurationPatch(NpaRequest):
+    """Explicit alert configuration changes; omitted fields are not sent."""
+
+    admin_users: list[str] | None = Field(None, alias="adminUsers")
+    event_types: (
+        list[
+            Literal[
+                "UPGRADE_WILL_START",
+                "UPGRADE_STARTED",
+                "UPGRADE_SUCCEEDED",
+                "UPGRADE_FAILED",
+                "CONNECTION_FAILED",
+            ]
+        ]
+        | None
+    ) = Field(None, alias="eventTypes")
+
+    @model_validator(mode="after")
+    def require_changes(self) -> Self:
+        if not self.model_fields_set:
+            raise ValueError("At least one alert configuration field is required.")
+        return self
 
 
 class PublisherAlertsConfiguration(NetskopeModel):

@@ -1,100 +1,55 @@
-"""Alerts resource — query and manage security alerts.
-
-Example::
-
-    # List all high-severity alerts from the last 24 hours
-    for alert in client.alerts.list(query='severity eq "high"'):
-        print(f"{alert.alert_name} — {alert.user}")
-
-    # Get aggregate summary
-    summary = client.alerts.summary(group_by="alert_type")
-"""
+"""Typed alert records, grouped results, and explicit datasearch scans."""
 
 from __future__ import annotations
 
-import re
+import builtins
 from datetime import datetime
-from typing import Any
+from functools import cached_property
 
 from netskope._pagination import AsyncPaginatedResponse, SyncPaginatedResponse
-from netskope.models.alerts import Alert
+from netskope.datasearch import (
+    DATASEARCH_PAGE_CAP,
+    AsyncScanIterator,
+    DatasearchWindow,
+    ScanIterator,
+)
+from netskope.models.alerts import Alert, DatasearchBucket
+from netskope.pagination import Page
+from netskope.resources._alert_query import _PATH, _build_params, _extract_alerts
+from netskope.resources._alert_response import (
+    AlertResponses,
+    AsyncAlertResponses,
+    _scan_alerts,
+    _scan_alerts_async,
+)
 from netskope.resources._base import AsyncResource, SyncResource
-
-# Alert ids (the ``_id`` field) are hex strings.
-_HEX_ID_RE = re.compile(r"^[a-fA-F0-9]+$")
-
-_PATH = "/api/v2/events/datasearch/alert"
-
-
-def _build_params(
-    query: str | None = None,
-    fields: list[str] | None = None,
-    start_time: datetime | int | None = None,
-    end_time: datetime | int | None = None,
-    group_by: str | list[str] | None = None,
-    order_by: str | None = None,
-    descending: bool = True,
-) -> dict[str, Any]:
-    params: dict[str, Any] = {}
-    if query:
-        params["query"] = query
-    if fields:
-        params["fields"] = ",".join(fields)
-    if start_time is not None:
-        params["starttime"] = (
-            int(start_time.timestamp()) if isinstance(start_time, datetime) else start_time
-        )
-    if end_time is not None:
-        params["endtime"] = (
-            int(end_time.timestamp()) if isinstance(end_time, datetime) else end_time
-        )
-    if group_by:
-        params["groupbys"] = group_by if isinstance(group_by, str) else ",".join(group_by)
-    if order_by:
-        params["sortby"] = f"{order_by} {'DESC' if descending else 'ASC'}"
-    return params
-
-
-def _extract_alerts(body: dict[str, Any]) -> list[dict[str, Any]]:
-    """Extract alert items from the datasearch response envelope."""
-    result = body.get("result", [])
-    if isinstance(result, list):
-        return result
-    data = body.get("data", [])
-    if isinstance(data, list):
-        return data
-    return []
 
 
 class AlertsResource(SyncResource):
-    """Synchronous interface to ``/api/v2/events/datasearch/alert``."""
+    """Synchronous interface to /api/v2/events/datasearch/alert."""
+
+    @cached_property
+    def with_response(self) -> AlertResponses:
+        """Opt into the original response alongside typed parsing."""
+        return AlertResponses(self._transport)
 
     def list(
         self,
         *,
         query: str | None = None,
-        fields: list[str] | None = None,
+        fields: builtins.list[str] | None = None,
         start_time: datetime | int | None = None,
         end_time: datetime | int | None = None,
-        group_by: str | list[str] | None = None,
+        group_by: str | builtins.list[str] | None = None,
         order_by: str | None = None,
         descending: bool = True,
         page_size: int = 100,
     ) -> SyncPaginatedResponse[Alert]:
-        """List alerts with optional JQL filtering and pagination.
+        """Lazily list alert records with the legacy pagination contract.
 
-        Args:
-            query: A JQL filter expression (e.g. ``'severity eq "high"'``).
-            fields: Specific fields to return.
-            start_time: Start of the time range (datetime or epoch int).
-            end_time: End of the time range.
-            group_by: Field to aggregate results by.
-            order_by: Field to sort by.
-            descending: Sort direction (default descending).
-            page_size: Number of results per API call.
-
-        Returns:
-            A lazy paginated iterator of :class:`~netskope.models.alerts.Alert`.
+        group_by remains accepted for compatibility, but object-valued
+        grouped IDs do not fit Alert. Use aggregate_page for typed grouped
+        results. Use scan_pages when completion evidence matters.
         """
         params = _build_params(query, fields, start_time, end_time, group_by, order_by, descending)
         return SyncPaginatedResponse(
@@ -107,49 +62,115 @@ class AlertsResource(SyncResource):
             extract=_extract_alerts,
         )
 
-    def get(self, alert_id: str) -> Alert:
-        """Get a single alert by ID.
+    def list_page(
+        self,
+        *,
+        query: str | None = None,
+        fields: builtins.list[str] | None = None,
+        start_time: datetime | int | None = None,
+        end_time: datetime | int | None = None,
+        order_by: str | None = None,
+        descending: bool | None = None,
+        offset: int | None = None,
+        limit: int | None = None,
+    ) -> Page[Alert]:
+        """Fetch exactly one typed page, retaining envelope metadata.
 
-        Args:
-            alert_id: The ``_id`` of the alert.
-
-        Returns:
-            An :class:`~netskope.models.alerts.Alert` instance.
-
-        Raises:
-            netskope.exceptions.NotFoundError: If the alert does not exist.
-            netskope.exceptions.ValidationError: If the alert_id format is invalid.
+        Omitted parameters stay omitted. order_by uses the endpoint's
+        orderbys parameter; an omitted direction does not append DESC.
         """
-        from netskope.exceptions import NotFoundError, ValidationError
+        return self.with_response.list_page(
+            query=query,
+            fields=fields,
+            start_time=start_time,
+            end_time=end_time,
+            order_by=order_by,
+            descending=descending,
+            offset=offset,
+            limit=limit,
+        ).parse()
 
-        if not _HEX_ID_RE.match(alert_id):
-            raise ValidationError(f"Invalid alert_id format: {alert_id!r}. Expected a hex string.")
-        body = self._get(_PATH, query=f'_id eq "{alert_id}"')
-        items = _extract_alerts(body)
-        if not items:
-            raise NotFoundError(
-                f"Alert {alert_id!r} not found",
-                status_code=404,
-            )
-        return Alert.model_validate(items[0])
+    def aggregate_page(
+        self,
+        *,
+        group_by: str | builtins.list[str],
+        query: str | None = None,
+        fields: builtins.list[str] | None = None,
+        start_time: datetime | int | None = None,
+        end_time: datetime | int | None = None,
+        order_by: str | None = None,
+        descending: bool | None = None,
+        limit: int | None = None,
+    ) -> Page[DatasearchBucket]:
+        """Fetch one grouped page, without asserting source-event completeness."""
+        return self.with_response.aggregate_page(
+            group_by=group_by,
+            query=query,
+            fields=fields,
+            start_time=start_time,
+            end_time=end_time,
+            order_by=order_by,
+            descending=descending,
+            limit=limit,
+        ).parse()
+
+    def get(self, alert_id: str) -> Alert:
+        """Get an alert by its hex ID, or raise NotFoundError."""
+        return self.with_response.get(alert_id).parse()
+
+    def scan_pages(
+        self,
+        *,
+        window: DatasearchWindow,
+        query: str | None = None,
+        fields: builtins.list[str] | None = None,
+        order_by: str | None = None,
+        descending: bool | None = None,
+        page_size: int = DATASEARCH_PAGE_CAP,
+        max_records: int | None = None,
+        max_pages: int = 1_000,
+    ) -> ScanIterator[Page[Alert]]:
+        """Lazily scan a fixed interval with explicit termination evidence.
+
+        A narrowed projection includes _id for no-progress checks. Every
+        response is validated before yielding, including identity checks.
+        Exhaustion does not imply snapshot consistency under concurrent writes.
+        """
+        return _scan_alerts(
+            self._transport,
+            lambda response: response.parse(),
+            window=window,
+            query=query,
+            fields=fields,
+            order_by=order_by,
+            descending=descending,
+            page_size=page_size,
+            max_records=max_records,
+            max_pages=max_pages,
+        )
 
 
 class AsyncAlertsResource(AsyncResource):
-    """Asynchronous interface to ``/api/v2/events/datasearch/alert``."""
+    """Asynchronous interface to /api/v2/events/datasearch/alert."""
+
+    @cached_property
+    def with_response(self) -> AsyncAlertResponses:
+        """Opt into the original response alongside typed parsing."""
+        return AsyncAlertResponses(self._transport)
 
     def list(
         self,
         *,
         query: str | None = None,
-        fields: list[str] | None = None,
+        fields: builtins.list[str] | None = None,
         start_time: datetime | int | None = None,
         end_time: datetime | int | None = None,
-        group_by: str | list[str] | None = None,
+        group_by: str | builtins.list[str] | None = None,
         order_by: str | None = None,
         descending: bool = True,
         page_size: int = 100,
     ) -> AsyncPaginatedResponse[Alert]:
-        """List alerts with optional JQL filtering and pagination."""
+        """Lazily list records. Use aggregate_page for object-valued grouped IDs."""
         params = _build_params(query, fields, start_time, end_time, group_by, order_by, descending)
         return AsyncPaginatedResponse(
             transport=self._transport,
@@ -161,17 +182,83 @@ class AsyncAlertsResource(AsyncResource):
             extract=_extract_alerts,
         )
 
-    async def get(self, alert_id: str) -> Alert:
-        """Get a single alert by ID."""
-        from netskope.exceptions import NotFoundError, ValidationError
+    async def list_page(
+        self,
+        *,
+        query: str | None = None,
+        fields: builtins.list[str] | None = None,
+        start_time: datetime | int | None = None,
+        end_time: datetime | int | None = None,
+        order_by: str | None = None,
+        descending: bool | None = None,
+        offset: int | None = None,
+        limit: int | None = None,
+    ) -> Page[Alert]:
+        """Fetch one typed page using the endpoint's orderbys parameter."""
+        response = await self.with_response.list_page(
+            query=query,
+            fields=fields,
+            start_time=start_time,
+            end_time=end_time,
+            order_by=order_by,
+            descending=descending,
+            offset=offset,
+            limit=limit,
+        )
+        return response.parse()
 
-        if not _HEX_ID_RE.match(alert_id):
-            raise ValidationError(f"Invalid alert_id format: {alert_id!r}. Expected a hex string.")
-        body = await self._get(_PATH, query=f'_id eq "{alert_id}"')
-        items = _extract_alerts(body)
-        if not items:
-            raise NotFoundError(
-                f"Alert {alert_id!r} not found",
-                status_code=404,
-            )
-        return Alert.model_validate(items[0])
+    async def aggregate_page(
+        self,
+        *,
+        group_by: str | builtins.list[str],
+        query: str | None = None,
+        fields: builtins.list[str] | None = None,
+        start_time: datetime | int | None = None,
+        end_time: datetime | int | None = None,
+        order_by: str | None = None,
+        descending: bool | None = None,
+        limit: int | None = None,
+    ) -> Page[DatasearchBucket]:
+        """Fetch one grouped page, without asserting source-event completeness."""
+        response = await self.with_response.aggregate_page(
+            group_by=group_by,
+            query=query,
+            fields=fields,
+            start_time=start_time,
+            end_time=end_time,
+            order_by=order_by,
+            descending=descending,
+            limit=limit,
+        )
+        return response.parse()
+
+    async def get(self, alert_id: str) -> Alert:
+        """Get an alert by its hex ID, or raise NotFoundError."""
+        response = await self.with_response.get(alert_id)
+        return response.parse()
+
+    def scan_pages(
+        self,
+        *,
+        window: DatasearchWindow,
+        query: str | None = None,
+        fields: builtins.list[str] | None = None,
+        order_by: str | None = None,
+        descending: bool | None = None,
+        page_size: int = DATASEARCH_PAGE_CAP,
+        max_records: int | None = None,
+        max_pages: int = 1_000,
+    ) -> AsyncScanIterator[Page[Alert]]:
+        """Create a lazy async scan with the same evidence as the synchronous API."""
+        return _scan_alerts_async(
+            self._transport,
+            lambda response: response.parse(),
+            window=window,
+            query=query,
+            fields=fields,
+            order_by=order_by,
+            descending=descending,
+            page_size=page_size,
+            max_records=max_records,
+            max_pages=max_pages,
+        )

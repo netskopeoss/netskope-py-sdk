@@ -13,11 +13,14 @@ instantiate the resource classes directly against the client's transport.
 
 from __future__ import annotations
 
+from collections.abc import AsyncIterator, Iterator
+
 import httpx
 import pytest
 import respx
 
 from netskope import AsyncNetskopeClient, NetskopeClient
+from netskope.exceptions import RateLimitError
 from netskope.resources.nsiq import AsyncNsiqResource, NsiqResource
 from tests.unit.resources.conftest import sent_json
 
@@ -334,3 +337,87 @@ def test_fp_paths_exist(verb: str) -> None:
 
     path = getattr(nsiq, f"_FP_{verb.upper()}_PATH")
     assert path == f"/api/v2/nsiq/falsepositives/{verb}"
+
+
+@pytest.fixture
+def retry_client() -> Iterator[NetskopeClient]:
+    with NetskopeClient(
+        tenant="t.goskope.com", api_token="tok", max_retries=2, backoff_factor=0
+    ) as c:
+        yield c
+
+
+@pytest.fixture
+async def async_retry_client() -> AsyncIterator[AsyncNetskopeClient]:
+    async with AsyncNetskopeClient(
+        tenant="t.goskope.com", api_token="tok", max_retries=2, backoff_factor=0
+    ) as c:
+        yield c
+
+
+class TestReadOnlyPostsRetry:
+    """URL lookup and RetroHunt IOC lookup read through POST, so a 429 is retried."""
+
+    @respx.mock
+    def test_url_lookup_retries_after_a_429(self, retry_client: NetskopeClient) -> None:
+        payload = {"query": {"urls": ["http://x.test"]}, "result": [{"url": "http://x.test"}]}
+        route = respx.post(_URLLOOKUP_URL).mock(
+            side_effect=[
+                httpx.Response(429, json={"message": "slow down"}),
+                httpx.Response(200, json=payload),
+            ]
+        )
+
+        assert _nsiq(retry_client).url_lookup("http://x.test") == payload
+        assert route.call_count == 2
+
+    @respx.mock
+    def test_lookup_iocs_retries_after_a_429(self, retry_client: NetskopeClient) -> None:
+        payload = {"status": "success", "result": {"abc": {"verdict": "clean"}}}
+        route = respx.post(_GETINFO_URL).mock(
+            side_effect=[
+                httpx.Response(429, json={"message": "slow down"}),
+                httpx.Response(200, json=payload),
+            ]
+        )
+
+        assert _nsiq(retry_client).lookup_iocs("abc") == payload
+        assert route.call_count == 2
+
+    @respx.mock
+    async def test_async_url_lookup_retries_after_a_429(
+        self, async_retry_client: AsyncNetskopeClient
+    ) -> None:
+        payload = {"query": {"urls": ["http://x.test"]}, "result": [{"url": "http://x.test"}]}
+        route = respx.post(_URLLOOKUP_URL).mock(
+            side_effect=[
+                httpx.Response(429, json={"message": "slow down"}),
+                httpx.Response(200, json=payload),
+            ]
+        )
+
+        assert await _ansiq(async_retry_client).url_lookup("http://x.test") == payload
+        assert route.call_count == 2
+
+    @respx.mock
+    async def test_async_lookup_iocs_retries_after_a_429(
+        self, async_retry_client: AsyncNetskopeClient
+    ) -> None:
+        payload = {"status": "success", "result": {"abc": {"verdict": "clean"}}}
+        route = respx.post(_GETINFO_URL).mock(
+            side_effect=[
+                httpx.Response(429, json={"message": "slow down"}),
+                httpx.Response(200, json=payload),
+            ]
+        )
+
+        assert await _ansiq(async_retry_client).lookup_iocs("abc") == payload
+        assert route.call_count == 2
+
+    @respx.mock
+    def test_recategorize_is_a_write_and_is_not_retried(self, retry_client: NetskopeClient) -> None:
+        route = respx.post(_RECAT_URL).mock(return_value=httpx.Response(429, json={"m": "no"}))
+
+        with pytest.raises(RateLimitError):
+            _nsiq(retry_client).recategorize("http://x.test", ["Shopping"])
+        assert route.call_count == 1

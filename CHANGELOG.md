@@ -5,6 +5,320 @@ All notable changes to the Netskope Python SDK will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+The next published release is `1.2.0`. The development version is `1.2.0.dev0`,
+which has not been published.
+
+The behaviors listed first change for code written against `1.1.0`, most of
+them by raising where the SDK used to return a value. `1.1.0` was itself never
+published: PyPI serves `1.0.3` as the latest version, and the repository carries
+no `v1.1.0` tag or GitHub release. Anyone upgrading from the last published
+version therefore gets the 1.1.0 entry below in the same step, including its
+expansion from 8 to 24 resource namespaces.
+
+### Behavior changes
+
+- A string `timestamp` on `Alert`, `Event`, `Incident`, and `Anomaly` (and their
+  subclasses) decoded to `None` in 1.1.0, which read epoch numbers and nothing
+  else. It now decodes to a timezone-aware `datetime`; a string carrying no UTC
+  offset is read as UTC, which is what the API reports. A value that cannot be
+  read at all is still `None`, so one unreadable row does not reject the page it
+  arrived in. Booleans are among those unreadable values: 1.1.0 turned `True`
+  into `1970-01-01T00:00:01Z` through `bool`'s integer behavior.
+- The legacy `list()` iterators yielded every record a page returned in 1.1.0,
+  including records past the total the envelope had already reported. They now
+  stop at that page and log the stop at `WARNING` on the `netskope` logger; the
+  records on that page are not yielded.
+- `retry_on_status=frozenset()` fell back to the default `{429, 500, 502, 503,
+  504}` in 1.1.0. An empty set now means what it says and disables status-based
+  retries. Pass `max_retries=0` for the same effect on connection errors too.
+- An HTTP 2xx response whose body reports failure now raises `APIError` instead
+  of being returned as a `dict`. Three envelopes are recognized: `ok: 0` (which
+  also matches `ok: false`), `success: false`, and datasearch's
+  `execution: "FAILED"`, at the top level or nested under `status`. Callers that
+  inspected the returned body for these flags will see the exception first.
+- `url_lists.update()` with no fields to change raised a bare `ValueError` in
+  1.1.0. It now raises `netskope.exceptions.ValidationError`, which is not a
+  `ValueError` subclass, so `except ValueError` around it stops catching.
+- `private_apps.create()` sent whatever it was given in 1.1.0, including a body
+  with no `protocols` and a top-level `port` that the API gateway rejected. It
+  now requires `protocols` and raises `ValidationError` before the request is
+  built. The port rides inside each protocol entry
+  (`{"type": "tcp", "port": "443"}`).
+- `incidents.get_anomalies(severity=...)` sent the value as `severity_filter` in
+  1.1.0. The endpoint has no server-side severity filter, so the argument is now
+  rejected with `ValidationError`. Filter the returned `Anomaly` records instead.
+- `scim.users.list()`, `scim.groups.list()`, and `rbac.admins.list()` passed any
+  `page_size` straight through in 1.1.0, including values above the SCIM maximum.
+  A `page_size` outside 1 through 1000 now raises `ValidationError`. `count=0`
+  remains the RFC 7644 totals-only probe.
+- A page longer than the requested limit returned its records in 1.1.0. It now
+  raises `PaginationError`, as do a reported `offset` that does not identify the
+  requested page and a total contradicted by the records already returned.
+- A response that fails model validation raises
+  `netskope.exceptions.ResponseValidationError` rather than letting
+  `pydantic.ValidationError` escape the SDK's error hierarchy. Code catching
+  `pydantic.ValidationError` around SDK calls no longer matches.
+- `steering.create_tunnel()` and `update_tunnel()` send the API's `enable` key.
+  1.1.0 sent `enabled`, which the endpoint ignored.
+
+### Added
+
+- Typed sync/async response access across event, incident, DEM/ADEM,
+  administrative, NPA, steering, CCI, ATP/NSIQ, RBI, DSPM, and SPM operations.
+  Operation-specific request models validate supported writes before HTTP;
+  legacy raw-returning SDK methods remain available for compatibility.
+- `client.aicc` inventory, entity detail, analytics, and data-protection
+  resources with typed queries and responses. SDK-owned pagination retains
+  totals and rejects ignored offsets, repeated rows, contradictory totals,
+  and incomplete safety-limit stops. Explicit prefixes support bounded reports.
+- Public model exports support offline JSON Schema discovery in the CLI.
+  New canonical DSPM reads cover 16 resource names and single-datastore scan
+  submissions expose a typed HTTP 202 acknowledgment.
+- Strict `RoleCreate`/`RolePatch` requests with typed API-group grants and
+  nested settings, plus single-write `create_receipt()`/`update_receipt()`
+  methods. Sync/async response accessors preserve the receipt without a detail
+  GET; legacy convenience methods retain their existing follow-up behavior.
+- `DeviceTagCreate`/`DeviceTagPatch` validate tag names and descriptions,
+  preserving omitted patch fields. Sync/async tag write response accessors
+  retain the original response and verify the returned tag identity.
+- Operation-specific RBAC summary/detail models and bounded role/admin reads;
+  alert record/aggregate pages and fixed-window scan summaries; device-tag
+  body-pagination iterators. New reads have sync/async response accessors.
+- `PaginationError` reports request context for unsafe continuation without
+  exposing record identities. Tag traversal retains totals across pages and
+  rejects ignored offsets, duplicate records, and incomplete page-budget stops.
+- Cookie authentication through `ci_session`, public sync/async `request()`
+  methods, and injected HTTPX clients with explicit borrowed ownership.
+- Public `Page[T]` and one-request `publishers.list_page()`, preserving
+  envelope metadata, server totals, and unknown continuation state.
+- Typed publisher write validation and publisher application/action models.
+- Opt-in `ApiResponse[T]` accessors for publisher operations and related
+  upgrade-profile/local-broker lists. Parsing and inspecting an original
+  response never repeats the request. Response validation errors carry
+  payload-free field locations and request context; API errors now also carry
+  request method/path metadata.
+- `ClientClosedError` for a request made after the client is closed, plus a
+  `closed` property on `NetskopeClient` and `AsyncNetskopeClient`. It is
+  exported from the package root, so `from netskope import ClientClosedError`
+  works alongside `netskope.exceptions.ClientClosedError`.
+- Both clients accept `allow_custom_tenant`, which previously only reached
+  the configuration layer.
+- `IncidentUpdateOutcome.count` reports the entry count an acknowledgment
+  carried, or `None` when the service returned only a message.
+- Typed event pages accept the audit endpoint's `audit_type` filter, which
+  the legacy iterator already supported. Supplying it to a category that
+  supports JQL is rejected, so the two filter mechanisms cannot be mixed.
+
+### Changed
+
+- New alert query methods use canonical `orderbys`; legacy `list()` keeps
+  its existing ordering parameter. Existing one-page tag lists and legacy RBAC
+  return types remain supported.
+- Automatic retries now default to GET, HEAD, and OPTIONS. Explicitly marked
+  read-only POST operations can retry. Mutations and streaming request bodies
+  are sent once unless a buffered operation explicitly opts into safe replay.
+- `retry_on_status=frozenset()` disables status-based retries. It previously
+  fell back to the default `{429, 500, 502, 503, 504}`, so there was no way to
+  turn status retries off without also setting `max_retries=0`. `None` still
+  selects the defaults.
+- `raise_for_status()` rejects an HTTP-success body that reports failure:
+  `ok: 0` (which matches `ok: false` as well), `success: false`, and datasearch's
+  `execution: "FAILED"` at the top level or under `status`. Methods that return a
+  raw `dict`, among them `nsiq.get_ioc()`, raise `APIError` for those bodies
+  instead of handing the envelope back.
+- `incidents.get_anomalies()` sends `limit`, `offset`, `sortby`, and
+  `sortorder` as query parameters and keeps only `users` and `timeframe` in the
+  request body. The `severity` argument is now rejected instead of being sent as
+  `severity_filter`; the endpoint has no server-side severity filter.
+- `private_apps.create()` requires `protocols` and carries the port inside
+  each protocol entry (`{"type": "tcp", "port": "443"}`) instead of a top-level
+  `port`, and sends publisher IDs as strings. `port` may be an integer as well
+  as a string, `"TCP/UDP"` expands into the two entries the API carries, and a
+  ready-made `{"type": ..., "port": ...}` mapping keeps its own port. An
+  unsupported protocol error names the values the SDK accepts.
+- Private-app publisher association, policy-in-use, and bulk delete send
+  string identifiers on both the legacy and typed paths, and reject an empty ID
+  list instead of sending one.
+- Legacy `steering.create_tunnel()` and `update_tunnel()` send the API's
+  `enable` key rather than `enabled`, matching the typed IPsec request models.
+- `events.list("clientstatus")` and `events.list("incident")` decode into
+  `ClientStatusEvent` and `IncidentEvent`. An infrastructure `events.get()` now
+  reads `/api/v2/events/data/infrastructure` instead of the datasearch path.
+- Typed incident and DEM/ADEM helpers no longer mark every request as safe
+  to replay. Read-only POST queries opt in explicitly; everything else follows
+  the GET/HEAD/OPTIONS default and is sent once.
+- One total policy across the decoders. Integers and numeric strings are
+  used; booleans, negatives, floats, and unparsable values mean "no total"
+  rather than an error. CCI pages and DSPM inventory pages now read an unusable
+  `total_query_count`, `tags_count`, or `total` that way instead of failing. A
+  CCI tag catalog contradicted by a usable `tags_count` raises `PaginationError`
+  rather than a decoding error. Device-tag paging keeps its stricter reading,
+  because its schema states `total_count`, `offset`, and `limit` as numbers.
+- The legacy `list()` iterators stop, logging the stop at `WARNING`, when a
+  page reaches past the total the envelope reported, rather than raising after
+  they have already yielded rows. The records on that page are not yielded. A page longer than the requested size still raises
+  `PaginationError`, and bounded page reads still treat an outrun total as an
+  error.
+- RBI template operations (`get_template`, `get_template_diffs`,
+  `update_template`, `delete_template`, `restore_template`) accept an integer or
+  a string `template_id` on both the sync and async resources, matching
+  `rbi.with_response`. A numeric `id` in a template response decodes as text.
+- `client.scim.users.list()`, `client.scim.groups.list()`, and
+  `client.rbac.admins.list()` bound `page_size` to 1 through 1000, the ceiling a
+  single `count` already had. `admins.list_page(count=...)` is capped at 1000,
+  and `count=0` remains the totals-only probe.
+- `url_lists.create()` and `url_lists.update()` raise
+  `netskope.exceptions.ValidationError` for a missing or unusable input.
+  `update()` previously raised a bare `ValueError` when given nothing to change,
+  and `create()` sent an unrecognized `list_type` to the API unchecked.
+- `ClientStatusEvent` and `IncidentEvent` accept integers in the identity,
+  version, status, assignee, and DLP fields that some tenants report as numbers.
+  `EventQueryCapabilities.jql` defaults to `True`, since only the audit category
+  lacks it.
+- `IncidentUpdateResult.accepted` requires a positive reported count. A negative count no longer claims that updates were applied; `accepted_entries` still reports the sum the service returned.
+- Resource identifiers reject negative integers before the request is sent, alongside the existing rejection of booleans and of strings outside `^[a-zA-Z0-9_\-]+$`. `url_lists.get(-3)` raises rather than spending a round trip on `/api/v2/policy/urllist/-3`. Zero remains a usable identifier.
+- The legacy SCIM resources accept the same identifiers as the typed accessors: an id is percent-encoded into the path by the shared `quote_id` rule (non-empty, no whitespace or control characters, not a dot-only segment) instead of being rejected by a `^[a-zA-Z0-9_\-]+$` pattern. `scim.users.get("user@example.com")` now sends `GET /api/v2/scim/Users/user%40example.com`.
+- The legacy SCIM iterators build their pages through the same checks as every other decoder: a page longer than `count`, records past `totalResults`, and a `startIndex` echo naming another page are rejected. `Page.offset` on those pages is the zero-based offset (it was the one-based `startIndex`), matching `rbac.admins.list_page()`.
+- An empty page whose envelope establishes that the collection is complete ends iteration immediately instead of costing one more request.
+- `pages()` documents that a page contradicting its own request raises `PaginationError` mid-iteration, after earlier pages have been yielded.
+- An HTTP 200 response whose body reports `ok: 0` (or `ok: false`, which compares equal), `success: false`, `status: "error"`, or `execution: "FAILED"` raises an API error rather than being returned as data. `success: 0` is not treated as a failure: only the boolean `false` is. The raised error keeps the body's own `status_code` when it states one, and the HTTP status otherwise.
+
+### Fixed
+
+- UCI lookups accept email and domain-qualified usernames on both the plain
+  (`incidents.get_uci()`) and typed entry points, in sync and async clients.
+  Blank and non-string usernames and naive `from_time` datetimes fail before
+  HTTP; valid identities and epoch-zero time bounds are preserved unchanged.
+- HTTP-success failure envelopes and FastAPI validation details produce
+  contextual SDK errors. Validation messages omit echoed request input.
+  New typed accessors reject malformed response fields before presentation.
+- AICC `include_total=false` page counts are not treated as collection
+  totals; an omitted total on a later page cannot discard earlier evidence.
+- Bounded short event/alert record pages expose endpoint-specific
+  exhaustion evidence. Full pages, omitted limits, and aggregates do not
+  inherit that conclusion, and trusted totals remain authoritative.
+- Bounded role reads validate limit/offset before HTTP, and detail reads
+  reject missing, boolean, or unrelated role IDs. Role detail IP restrictions
+  accept the documented timestamped IP objects as well as legacy strings.
+- Alert decoding accepts both `result` and `data` collections and validates
+  non-empty aggregate results.
+- `TimestampMixin` reads datetime strings as well as epoch numbers, so the
+  `timestamp` on `Alert`, `Event`, `Incident`, and `Anomaly` survives a tenant
+  that reports it as text. A string without a UTC offset is read as UTC, so
+  epoch rows and string rows in one page stay comparable. A value that cannot be
+  read is still `None` rather than a decoding failure, because these models
+  decode whole pages and one unreadable row must not reject the rest.
+- HTTP-200 datasearch execution failures raise API errors. Detection now
+  covers a top-level `execution: "FAILED"` field as well as the same field
+  inside the `status` envelope, because the two datasearch endpoint families
+  report execution in different places. Device-tag ID lookups reject unrelated
+  or ambiguous records instead of returning the first.
+- `ApiResponse.parse()` reports the decoder's own diagnostic instead of one
+  generic sentence, and an SDK error raised inside a decoder now reaches the
+  caller with the request method, path, and request ID filled in.
+- A page that cannot be continued safely raises instead of being accepted.
+  One shared page builder applies the checks for every decoder routed through
+  it, which is now the NPA, URL-list, user, publisher, event, alert, incident,
+  device, DNS, SCIM, device-tag, CCI, DSPM, AICC, and RBI pages plus the legacy
+  offset iterators: a page longer than the requested limit, a reported `offset`
+  that does not identify the requested page, and a total contradicted by the
+  records returned raise `PaginationError` with request context and the
+  requested offset. `admins.list_page()` keeps its own `startIndex` check ahead
+  of that builder. A malformed envelope still raises `ResponseValidationError`.
+  The exceptions are the bounded RBAC role page and the datasearch aggregate
+  page, which report no total, and the legacy SCIM iterators, which check
+  neither page size nor `startIndex`.
+- A page envelope that nests `total` and `offset` under `data` beside its
+  records keeps both, so a device page no longer loses the total it was given
+  or skips the offset check.
+- The legacy `list()` iterators report a record that fails model validation
+  or an envelope they cannot decode as `ResponseValidationError`, carrying the
+  request method, path, request ID, and payload-free field locations, instead of
+  letting a Pydantic or `ValueError` escape the SDK's error hierarchy.
+- `publishers.list()` and `publishers.list_page()` raise
+  `ResponseValidationError` for a malformed envelope, so both the iterator and
+  the bounded page report the same error type. `publishers.get()`, `create()`,
+  `update()`, and `create_registration_token()` report a malformed response the
+  same way; they previously raised the bare base `NetskopeError`.
+- The legacy offset paginator no longer raises `TypeError` when the envelope
+  reports `status.total` as a string, and it stops as soon as a page's own
+  totals show there is nothing more to fetch.
+- `extract_response_list()` prefers an operation's declared record key over
+  the generic `result`/`data` envelope and rejects two competing collections as
+  ambiguous, including an empty one beside a populated one. User Management
+  pages select `users` or `groups` according to the operation.
+- URL-list `update()` (legacy and typed, sync and async) recognizes every
+  documented read envelope, and refuses the PUT with `ResponseValidationError`
+  when the read lacks `name`/`urls`/`type` or identifies a different list.
+  Previously an unrecognized envelope merged into a payload that erased the
+  list's URLs.
+- URL-list `get()`, `create()`, and `update()` raise
+  `ResponseValidationError` when no single record can be extracted, rather than
+  validating an empty dict into a blank `UrlList`. A record whose nested `data`
+  came back empty is still recognized by its `id` and `name`, and a `urllists`
+  collection is read at the top level as well as under `data`. `get()`,
+  `update()`, and `delete()` validate the list ID before interpolating it into
+  the request path.
+- `publishers.update()` with no fields to change and
+  `publishers.bulk_upgrade()` with non-integer IDs raise `ValidationError`
+  before the request is built.
+- `Retry-After: 0` falls through to the jittered backoff instead of retrying
+  immediately, and an HTTP-date `Retry-After` is honored by retries and by
+  `RateLimitError.retry_after` (`netskope.exceptions.parse_retry_after`). A
+  `nan` or infinite value now reads as no delay stated, so the jittered backoff
+  applies and `retry_after` is `None`.
+- A response body that is not JSON reports "The API response body is not
+  valid JSON." The message previously quoted the decoder's byte position and the
+  bytes around it. `.content` still carries the original body.
+- SCIM list `count` is bounded to 1000 on `client.scim.users` and
+  `client.scim.groups`; `count=0` remains the RFC 7644 totals-only probe.
+- DSPM errors name `DspmResource.supported_resource_types()` and report the
+  status actually received when a scan submission is not HTTP 202.
+- Typed event queries reject JQL filters and ID lookup for `audit`, which
+  that endpoint does not support, instead of sending a query it ignores.
+- Incident update acknowledgments accept a message or an omitted `result`,
+  so `"Update Successful"` no longer fails decoding. For those acknowledgments
+  `accepted` stays `False`: a success flag carried with a message
+  (`{"ok": 1, "result": "no incident matched"}`) or with no `result` at all
+  states no entry count, so it cannot claim an update was applied.
+- `upgrade_profiles.with_response.assign()` unwraps a `data` envelope.
+  `upgrade_profiles.assign()` and the private-app tag writes reject an empty or
+  unsafe identifier list, and an empty or blank tag name, before the request is
+  built.
+- `incidents.get_anomalies()` validates `users`, `timeframe`, `limit`,
+  `offset`, `sort_by`, and `sort_order` before the request is built rather than
+  letting the API reject them.
+- Legacy `steering.create_tunnel()` and `update_tunnel()` build their bodies
+  through the strict IPsec request models, so an empty `psk` or a non-string
+  `site` fails before HTTP rather than reaching the API.
+- Legacy iterator pages keep the envelope's `status` block as page metadata
+  and compute `has_more` from the total it reports.
+- AICC application `status` accepts an optional start/end window. Its query
+  model declared no window at all and, forbidding extra fields, rejected one.
+  AICC list filters reject empty lists; `stop_after` validation errors name
+  `stop_after`; `risk_level` is documented as the API's `reconciled_risk_level`
+  query parameter.
+- `rbi.with_response.get_template()` accepts integer template IDs.
+- Seven resource classes regained class docstrings that a misplaced string
+  literal had left as unattached expressions. The AICC sub-resources and the
+  `RbiResponses`, `SpmResponses`, and `DspmResponses` accessor classes, sync and
+  async, now carry docstrings as well.
+- Alert and incident records accept the numeric field shapes the datasearch API returns. `Alert.severity`, `Alert.site`, `Alert.ccl`, `Event.site`, `Incident.severity`, `Incident.status`, `Incident.assignee`, `Incident.dlp_profile`, `Incident.dlp_rule` and `Anomaly.severity` take a string or a number, as `Event.severity` already did, and a single `other_categories` value sent as a bare string decodes as a one-element list. A numeric `severity_level` no longer fails every alert read.
+- An unreadable `timestamp` no longer rejects the record that carries it, and with it the rest of the page. Epoch numbers still become UTC-aware datetimes and datetime strings are still parsed; an empty string, an unparsable string, a boolean, a mapping, a list, or an epoch outside the supported range reads as no timestamp rather than raising. A datetime string without a UTC offset is read as UTC, so epoch rows and string rows on the same page compare without `TypeError`.
+- `nsiq.url_lookup()` and `nsiq.lookup_iocs()` retry transient failures on both the sync and async clients. They read through POST, like the UCI, UBA, user-management, device-tag and DEM query endpoints that already opted in.
+- Publisher response accessors validate `publisher_id` before building the request path, matching the private-app and RBAC accessors. A caller-supplied identifier can no longer redirect the request to another endpoint.
+- `PrivateAppPolicyUsage` decodes an acknowledgment that carries no policy references. `{"status": "success"}` and an explicit `"data": null` read as an empty reference list instead of failing validation.
+- An HTTP-200 datasearch execution failure names itself. The error reads "The datasearch query reported execution=FAILED for <METHOD> <path>", with the API's own message appended when the body carries one, instead of "[HTTP 200] Unknown error". The status code and exception class are unchanged.
+- The legacy `client.<namespace>.list()` iterators (offset and SCIM) report a 200 response whose body is not JSON, is empty, or is not a JSON object or array as `ResponseValidationError`, instead of letting `json.JSONDecodeError` or `AttributeError` escape the SDK error hierarchy. A body that cannot be decoded as text reports a fixed message that never quotes the offending bytes.
+- A first page carrying more records than its stated total keeps those records instead of discarding them and returning an empty iterator: the total is treated as unusable (`Page.total` and `Page.has_more` are `None`) and the traversal continues. A total the records outrun after rows have shipped still ends the traversal, logged at WARNING with the number of records dropped.
+- A page shorter than the requested page size ends the traversal instead of advancing the offset past the records the API withheld, which skipped records and stopped while the last page still reported `has_more=True`. Such a page reports `has_more=None` and logs a WARNING.
+- Reaching the 1000-page safety limit raises `PaginationError` naming the offset, instead of returning a truncated result set that looks complete.
+- `PaginationError` raised while decoding a page inside `list()` carries the request method, path and request id, as the typed `with_response` path does.
+- The shared administrative page decoder passes the envelope's echoed `offset` as received, so a garbage, negative or boolean echo is rejected rather than read as "the envelope stated nothing".
+- The request log line records the method and path only; query strings (JQL, usernames, filters) no longer reach the DEBUG log.
+
 ## [1.1.0] - 2026-07-03
 
 Major expansion of API coverage — from 8 to 24 resource namespaces. Every new
@@ -88,8 +402,8 @@ assumptions previously derived from the Netskope CLI.
 - `url_lists.update()` now GETs the existing list and merges the provided fields over the current values before sending the PUT, so callers only need to specify what they want to change. The Netskope API requires `name`, `data.urls`, and `data.type` on every PUT, so previously calling `update(list_id, urls=[...])` would fail with `name required`.
 - `url_lists.create()` now correctly handles the API's list-shaped POST response (`[{...}]`) instead of crashing on `body.get(...)`.
 - `url_lists.update()` raises `ValueError` when called with no fields to change (previously sent an empty body).
-- Verified against `nskp-io.goskope.com`: list, create (`type=regex`), update with urls only (preserves `name` and `type`), update with name only (preserves `urls` and `type`), update with all fields, delete.
-- Parallel to [netskopeoss/netskope-cli#10](https://github.com/netskopeoss/netskope-cli/pull/10) and [netSkope/mcp-server-pilot#19](https://github.com/netSkope/mcp-server-pilot/pull/19), which fix the same class of bug on the CLI's PUT and the MCP server's PATCH respectively.
+- Verified against `example.goskope.com`: list, create (`type=regex`), update with urls only (preserves `name` and `type`), update with name only (preserves `urls` and `type`), update with all fields, delete.
+- Parallel to [netskopeoss/netskope-cli#10](https://github.com/netskopeoss/netskope-cli/pull/10) and the equivalent fix on the Netskope MCP server's PATCH, which hit the same class of bug.
 - Fix `raise_for_status()` rendering the API's list-shaped `message` field as a stringified Python list. The Netskope API returns multi-error validation responses as `"message": ["...", "..."]`; these are now joined with `; ` so the resulting `APIError` message is human-readable.
 - Resolve a `mypy --strict` error in `exceptions.py` by typing the parsed error payload explicitly.
 

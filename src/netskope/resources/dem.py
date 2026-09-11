@@ -30,7 +30,7 @@ import asyncio
 import builtins
 import functools
 from datetime import datetime
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from netskope.exceptions import ValidationError
 from netskope.models.dem import (
@@ -41,11 +41,30 @@ from netskope.models.dem import (
     AdemUserInfo,
     AggregationType,
     DemAlert,
+    DemQueryResult,
     NetworkMetricType,
     QueryDataSource,
 )
 from netskope.resources._base import AsyncResource, SyncResource
 from netskope.resources._extract import extract_item, extract_list, quote_id, validate_id
+
+if TYPE_CHECKING:
+    from netskope.resources._dem_response import (
+        AsyncDemAlertResponses,
+        AsyncDemAlertRuleResponses,
+        AsyncDemAppResponses,
+        AsyncDemNetworkProbeResponses,
+        AsyncDemProbeResponses,
+        AsyncDemQueryResponses,
+        AsyncDemUserResponses,
+        DemAlertResponses,
+        DemAlertRuleResponses,
+        DemAppResponses,
+        DemNetworkProbeResponses,
+        DemProbeResponses,
+        DemQueryResponses,
+        DemUserResponses,
+    )
 
 # --- Path constants -------------------------------------------------------
 
@@ -57,6 +76,7 @@ _GETALERTS_PATH = "/api/v2/dem/alerts/getalerts"
 _APPS_PATH = "/api/v2/dem/apps"
 
 _QUERY_GETDATA_PATH = "/api/v2/dem/query/getdata"
+_QUERY_GETDATASET_PATH = "/api/v2/dem/query/getdataset"
 _QUERY_GETENTITIES_PATH = "/api/v2/dem/query/getentities"
 _QUERY_GETSTATES_PATH = "/api/v2/dem/query/getstates"
 _QUERY_GETTRACEROUTE_PATH = "/api/v2/dem/query/gettraceroute"
@@ -330,6 +350,13 @@ def _normalize_device_list(body: Any) -> builtins.list[dict[str, Any]]:
 class DemProbesResource(SyncResource):
     """DEM application probes — ``/api/v2/dem/appprobes``."""
 
+    @functools.cached_property
+    def with_response(self) -> DemProbeResponses:
+        """Inspect one completed request together with its typed result."""
+        from netskope.resources._dem_response import DemProbeResponses
+
+        return DemProbeResponses(self._transport)
+
     def list(self, *, limit: int | None = None, offset: int | None = None) -> dict[str, Any]:
         """List configured application probes."""
         params: dict[str, Any] = {}
@@ -376,7 +403,15 @@ class DemProbesResource(SyncResource):
 class AsyncDemProbesResource(AsyncResource):
     """Async DEM application probes."""
 
+    @functools.cached_property
+    def with_response(self) -> AsyncDemProbeResponses:
+        """Inspect one completed request together with its typed result."""
+        from netskope.resources._dem_response import AsyncDemProbeResponses
+
+        return AsyncDemProbeResponses(self._transport)
+
     async def list(self, *, limit: int | None = None, offset: int | None = None) -> dict[str, Any]:
+        """List configured application probes."""
         params: dict[str, Any] = {}
         if limit is not None:
             params["limit"] = limit
@@ -418,6 +453,13 @@ class AsyncDemProbesResource(AsyncResource):
 class DemNetworkProbesResource(SyncResource):
     """DEM network probes — ``/api/v2/dem/networkprobes``."""
 
+    @functools.cached_property
+    def with_response(self) -> DemNetworkProbeResponses:
+        """Inspect one completed request together with its typed result."""
+        from netskope.resources._dem_response import DemNetworkProbeResponses
+
+        return DemNetworkProbeResponses(self._transport)
+
     def list(self, *, limit: int | None = None, offset: int | None = None) -> dict[str, Any]:
         """List configured network probes."""
         params: dict[str, Any] = {}
@@ -443,7 +485,15 @@ class DemNetworkProbesResource(SyncResource):
 class AsyncDemNetworkProbesResource(AsyncResource):
     """Async DEM network probes."""
 
+    @functools.cached_property
+    def with_response(self) -> AsyncDemNetworkProbeResponses:
+        """Inspect one completed request together with its typed result."""
+        from netskope.resources._dem_response import AsyncDemNetworkProbeResponses
+
+        return AsyncDemNetworkProbeResponses(self._transport)
+
     async def list(self, *, limit: int | None = None, offset: int | None = None) -> dict[str, Any]:
+        """List configured network probes."""
         params: dict[str, Any] = {}
         if limit is not None:
             params["limit"] = limit
@@ -473,6 +523,13 @@ class AsyncDemNetworkProbesResource(AsyncResource):
 
 class DemAlertRulesResource(SyncResource):
     """DEM experience-alert rules — ``/api/v2/dem/alert/rules``."""
+
+    @functools.cached_property
+    def with_response(self) -> DemAlertRuleResponses:
+        """Inspect one completed request together with its typed result."""
+        from netskope.resources._dem_response import DemAlertRuleResponses
+
+        return DemAlertRuleResponses(self._transport)
 
     def list(self, *, limit: int | None = None, offset: int | None = None) -> dict[str, Any]:
         """List configured DEM alert rules."""
@@ -524,7 +581,15 @@ class DemAlertRulesResource(SyncResource):
 class AsyncDemAlertRulesResource(AsyncResource):
     """Async DEM experience-alert rules."""
 
+    @functools.cached_property
+    def with_response(self) -> AsyncDemAlertRuleResponses:
+        """Inspect one completed request together with its typed result."""
+        from netskope.resources._dem_response import AsyncDemAlertRuleResponses
+
+        return AsyncDemAlertRuleResponses(self._transport)
+
     async def list(self, *, limit: int | None = None, offset: int | None = None) -> dict[str, Any]:
+        """List configured DEM alert rules."""
         params: dict[str, Any] = {}
         if limit is not None:
             params["limit"] = limit
@@ -573,6 +638,44 @@ class DemQueryResource(SyncResource):
     documented API.  Scoped API tokens may receive HTTP 403.
     """
 
+    def get_dataset(
+        self,
+        data_source: str,
+        select: builtins.list[Any],
+        *,
+        begin: datetime | int,
+        end: datetime | int,
+        where: Any | None = None,
+        group_by: builtins.list[str] | None = None,
+        order_by: Any | None = None,
+        limit: int | None = None,
+        offset: int | None = None,
+    ) -> DemQueryResult:
+        """Query one bounded dataset result, in native epoch milliseconds.
+
+        RUM, HTTP and traceroute sources only; at most 48 hours and 9999 rows.
+        Sampling metadata is retained and does not imply complete coverage.
+        """
+        response = self.with_response.get_dataset(
+            data_source,
+            select,
+            begin=begin,
+            end=end,
+            where=where,
+            group_by=group_by,
+            order_by=order_by,
+            limit=limit,
+            offset=offset,
+        )
+        return response.parse()
+
+    @functools.cached_property
+    def with_response(self) -> DemQueryResponses:
+        """Inspect one completed request together with its typed result."""
+        from netskope.resources._dem_response import DemQueryResponses
+
+        return DemQueryResponses(self._transport)
+
     def get_data(
         self,
         data_source: str,
@@ -590,7 +693,7 @@ class DemQueryResource(SyncResource):
         body = _getdata_body(
             data_source, select, begin, end, where, group_by, order_by, limit, offset
         )
-        return self._post(_QUERY_GETDATA_PATH, json=body)
+        return self._post(_QUERY_GETDATA_PATH, json=body, retry_safe=True)
 
     def get_entities(
         self,
@@ -629,7 +732,7 @@ class DemQueryResource(SyncResource):
             source_ip,
         )
         params = _getentities_params(limit, offset, sort_order)
-        return self._post(_QUERY_GETENTITIES_PATH, json=body, **params)
+        return self._post(_QUERY_GETENTITIES_PATH, json=body, retry_safe=True, **params)
 
     def get_states(
         self,
@@ -644,7 +747,7 @@ class DemQueryResource(SyncResource):
     ) -> dict[str, Any]:
         """Query current agent/client states (``getstates``).  No time window."""
         body = _getstates_body(data_source, select, where, group_by, order_by, limit, offset)
-        return self._post(_QUERY_GETSTATES_PATH, json=body)
+        return self._post(_QUERY_GETSTATES_PATH, json=body, retry_safe=True)
 
     def get_traceroute(
         self,
@@ -660,7 +763,7 @@ class DemQueryResource(SyncResource):
         Note: this endpoint does not support a ``limit`` parameter.
         """
         body = _gettraceroute_body(data_source, begin, end, where, order_by)
-        return self._post(_QUERY_GETTRACEROUTE_PATH, json=body)
+        return self._post(_QUERY_GETTRACEROUTE_PATH, json=body, retry_safe=True)
 
     def definitions(self, *, source: str | None = None) -> dict[str, Any]:
         """List DEM field definitions for query building (``definitions``)."""
@@ -672,6 +775,44 @@ class DemQueryResource(SyncResource):
 
 class AsyncDemQueryResource(AsyncResource):
     """Async DEM query surface.  PRIVILEGED — scoped tokens may 403."""
+
+    async def get_dataset(
+        self,
+        data_source: str,
+        select: builtins.list[Any],
+        *,
+        begin: datetime | int,
+        end: datetime | int,
+        where: Any | None = None,
+        group_by: builtins.list[str] | None = None,
+        order_by: Any | None = None,
+        limit: int | None = None,
+        offset: int | None = None,
+    ) -> DemQueryResult:
+        """Query one bounded dataset result, in native epoch milliseconds.
+
+        RUM, HTTP and traceroute sources only; at most 48 hours and 9999 rows.
+        Sampling metadata is retained and does not imply complete coverage.
+        """
+        response = await self.with_response.get_dataset(
+            data_source,
+            select,
+            begin=begin,
+            end=end,
+            where=where,
+            group_by=group_by,
+            order_by=order_by,
+            limit=limit,
+            offset=offset,
+        )
+        return response.parse()
+
+    @functools.cached_property
+    def with_response(self) -> AsyncDemQueryResponses:
+        """Inspect one completed request together with its typed result."""
+        from netskope.resources._dem_response import AsyncDemQueryResponses
+
+        return AsyncDemQueryResponses(self._transport)
 
     async def get_data(
         self,
@@ -690,7 +831,7 @@ class AsyncDemQueryResource(AsyncResource):
         body = _getdata_body(
             data_source, select, begin, end, where, group_by, order_by, limit, offset
         )
-        return await self._post(_QUERY_GETDATA_PATH, json=body)
+        return await self._post(_QUERY_GETDATA_PATH, json=body, retry_safe=True)
 
     async def get_entities(
         self,
@@ -723,7 +864,7 @@ class AsyncDemQueryResource(AsyncResource):
             source_ip,
         )
         params = _getentities_params(limit, offset, sort_order)
-        return await self._post(_QUERY_GETENTITIES_PATH, json=body, **params)
+        return await self._post(_QUERY_GETENTITIES_PATH, json=body, retry_safe=True, **params)
 
     async def get_states(
         self,
@@ -738,7 +879,7 @@ class AsyncDemQueryResource(AsyncResource):
     ) -> dict[str, Any]:
         """See :meth:`DemQueryResource.get_states`."""
         body = _getstates_body(data_source, select, where, group_by, order_by, limit, offset)
-        return await self._post(_QUERY_GETSTATES_PATH, json=body)
+        return await self._post(_QUERY_GETSTATES_PATH, json=body, retry_safe=True)
 
     async def get_traceroute(
         self,
@@ -751,7 +892,7 @@ class AsyncDemQueryResource(AsyncResource):
     ) -> dict[str, Any]:
         """See :meth:`DemQueryResource.get_traceroute`."""
         body = _gettraceroute_body(data_source, begin, end, where, order_by)
-        return await self._post(_QUERY_GETTRACEROUTE_PATH, json=body)
+        return await self._post(_QUERY_GETTRACEROUTE_PATH, json=body, retry_safe=True)
 
     async def definitions(self, *, source: str | None = None) -> dict[str, Any]:
         """See :meth:`DemQueryResource.definitions`."""
@@ -769,6 +910,13 @@ class AsyncDemQueryResource(AsyncResource):
 class DemAlertsResource(SyncResource):
     """DEM experience alerts (triggered instances) — ``/api/v2/dem/alerts``."""
 
+    @functools.cached_property
+    def with_response(self) -> DemAlertResponses:
+        """Inspect one completed request together with its typed result."""
+        from netskope.resources._dem_response import DemAlertResponses
+
+        return DemAlertResponses(self._transport)
+
     def search(
         self,
         *,
@@ -785,7 +933,7 @@ class DemAlertsResource(SyncResource):
         body = _getalerts_body(
             alert_category, alert_type, severity, open_time, sort_field, sort_desc, limit, offset
         )
-        resp = self._post(_GETALERTS_PATH, json=body)
+        resp = self._post(_GETALERTS_PATH, json=body, retry_safe=True)
         return [DemAlert.model_validate(item) for item in extract_list(resp, "alerts")]
 
     def get(self, alert_id: str) -> DemAlert:
@@ -818,6 +966,13 @@ class DemAlertsResource(SyncResource):
 class AsyncDemAlertsResource(AsyncResource):
     """Async DEM experience alerts."""
 
+    @functools.cached_property
+    def with_response(self) -> AsyncDemAlertResponses:
+        """Inspect one completed request together with its typed result."""
+        from netskope.resources._dem_response import AsyncDemAlertResponses
+
+        return AsyncDemAlertResponses(self._transport)
+
     async def search(
         self,
         *,
@@ -834,7 +989,7 @@ class AsyncDemAlertsResource(AsyncResource):
         body = _getalerts_body(
             alert_category, alert_type, severity, open_time, sort_field, sort_desc, limit, offset
         )
-        resp = await self._post(_GETALERTS_PATH, json=body)
+        resp = await self._post(_GETALERTS_PATH, json=body, retry_safe=True)
         return [DemAlert.model_validate(item) for item in extract_list(resp, "alerts")]
 
     async def get(self, alert_id: str) -> DemAlert:
@@ -872,6 +1027,13 @@ class AsyncDemAlertsResource(AsyncResource):
 class DemAppsResource(SyncResource):
     """DEM-monitored applications — ``/api/v2/dem/apps``."""
 
+    @functools.cached_property
+    def with_response(self) -> DemAppResponses:
+        """Inspect one completed request together with its typed result."""
+        from netskope.resources._dem_response import DemAppResponses
+
+        return DemAppResponses(self._transport)
+
     def list(
         self,
         *,
@@ -896,6 +1058,13 @@ class DemAppsResource(SyncResource):
 class AsyncDemAppsResource(AsyncResource):
     """Async DEM-monitored applications."""
 
+    @functools.cached_property
+    def with_response(self) -> AsyncDemAppResponses:
+        """Inspect one completed request together with its typed result."""
+        from netskope.resources._dem_response import AsyncDemAppResponses
+
+        return AsyncDemAppResponses(self._transport)
+
     async def list(
         self,
         *,
@@ -904,6 +1073,7 @@ class AsyncDemAppsResource(AsyncResource):
         limit: int | None = None,
         offset: int | None = None,
     ) -> dict[str, Any]:
+        """List DEM-monitored applications.  ``app_type`` is ``custom`` or ``predefined``."""
         params: dict[str, Any] = {}
         if app_type:
             params["type"] = app_type
@@ -924,6 +1094,13 @@ class AsyncDemAppsResource(AsyncResource):
 class DemUsersResource(SyncResource):
     """ADEM per-user/per-device telemetry — ``/api/v2/adem/users`` (all POST, epoch **seconds**)."""
 
+    @functools.cached_property
+    def with_response(self) -> DemUserResponses:
+        """Inspect one completed request together with its typed result."""
+        from netskope.resources._dem_response import DemUserResponses
+
+        return DemUserResponses(self._transport)
+
     def devices(
         self, user: str, *, start_time: datetime | int, end_time: datetime | int
     ) -> builtins.list[AdemDevice]:
@@ -933,7 +1110,7 @@ class DemUsersResource(SyncResource):
         return the full device list.
         """
         body = _adem_body(start_time, end_time, user=user, userLocation=[])
-        resp = self._post(f"{_ADEM_USERS_PATH}/device/getlist", json=body)
+        resp = self._post(f"{_ADEM_USERS_PATH}/device/getlist", json=body, retry_safe=True)
         return [AdemDevice.model_validate(d) for d in _normalize_device_list(resp)]
 
     def device_details(
@@ -946,14 +1123,14 @@ class DemUsersResource(SyncResource):
     ) -> dict[str, Any]:
         """Get detailed device information (hardware, software, location)."""
         body = _adem_body(start_time, end_time, user=user, device_id=device_id)
-        return self._post(f"{_ADEM_USERS_PATH}/device/getdetails", json=body)
+        return self._post(f"{_ADEM_USERS_PATH}/device/getdetails", json=body, retry_safe=True)
 
     def info(
         self, user: str, *, start_time: datetime | int, end_time: datetime | int
     ) -> AdemUserInfo:
         """Get the user info summary (experience score and location)."""
         body = _adem_body(start_time, end_time, user=user)
-        resp = self._post(f"{_ADEM_USERS_PATH}/getinfo", json=body)
+        resp = self._post(f"{_ADEM_USERS_PATH}/getinfo", json=body, retry_safe=True)
         return AdemUserInfo.model_validate(extract_item(resp))
 
     def applications(
@@ -970,13 +1147,13 @@ class DemUsersResource(SyncResource):
         1-2 app subset instead of the full per-device list.
         """
         body = _adem_body(start_time, end_time, user=user, device_id=device_id)
-        resp = self._post(f"{_ADEM_USERS_PATH}/getapplications", json=body)
+        resp = self._post(f"{_ADEM_USERS_PATH}/getapplications", json=body, retry_safe=True)
         return [AdemApplication.model_validate(a) for a in extract_list(resp, "applications")]
 
     def locations(self, *, start_time: datetime | int, end_time: datetime | int) -> dict[str, Any]:
         """Get all user locations."""
         body = _adem_body(start_time, end_time)
-        return self._post(f"{_ADEM_USERS_PATH}/getlocations", json=body)
+        return self._post(f"{_ADEM_USERS_PATH}/getlocations", json=body, retry_safe=True)
 
     def aggregated_scores(
         self,
@@ -995,7 +1172,9 @@ class DemUsersResource(SyncResource):
             device_id=device_id,
             aggregationType=aggregation_type,
         )
-        return self._post(f"{_ADEM_USERS_PATH}/device/getaggregatedscores", json=body)
+        return self._post(
+            f"{_ADEM_USERS_PATH}/device/getaggregatedscores", json=body, retry_safe=True
+        )
 
     def exp_score(
         self,
@@ -1007,7 +1186,7 @@ class DemUsersResource(SyncResource):
     ) -> dict[str, Any]:
         """Get the experience-score time series for a device."""
         body = _adem_body(start_time, end_time, user=user, device_id=device_id)
-        return self._post(f"{_ADEM_USERS_PATH}/metrics/getexpscore", json=body)
+        return self._post(f"{_ADEM_USERS_PATH}/metrics/getexpscore", json=body, retry_safe=True)
 
     def rca(
         self,
@@ -1019,7 +1198,7 @@ class DemUsersResource(SyncResource):
     ) -> dict[str, Any]:
         """Get the root-cause-analysis tree and per-component scores for a device."""
         body = _adem_body(start_time, end_time, user=user, device_id=device_id)
-        return self._post(f"{_ADEM_USERS_PATH}/device/getrca", json=body)
+        return self._post(f"{_ADEM_USERS_PATH}/device/getrca", json=body, retry_safe=True)
 
     def network_metrics(
         self,
@@ -1034,7 +1213,7 @@ class DemUsersResource(SyncResource):
         body = _adem_body(
             start_time, end_time, user=user, device_id=device_id, metricType=metric_type
         )
-        return self._post(f"{_ADEM_USERS_PATH}/metrics/getnetwork", json=body)
+        return self._post(f"{_ADEM_USERS_PATH}/metrics/getnetwork", json=body, retry_safe=True)
 
     def npa_hosts(
         self,
@@ -1046,7 +1225,7 @@ class DemUsersResource(SyncResource):
     ) -> dict[str, Any]:
         """Get NPA hosts (with scores/applications) for a user and device."""
         body = _adem_body(start_time, end_time, user=user, device_id=device_id)
-        return self._post(f"{_ADEM_USERS_PATH}/npa/getnpahosts", json=body)
+        return self._post(f"{_ADEM_USERS_PATH}/npa/getnpahosts", json=body, retry_safe=True)
 
     def npa_network_paths(
         self,
@@ -1059,7 +1238,7 @@ class DemUsersResource(SyncResource):
     ) -> dict[str, Any]:
         """Get the NPA network-path graph between a device and an NPA host."""
         body = _adem_body(start_time, end_time, user=user, device_id=device_id, npaHost=npa_host)
-        return self._post(f"{_ADEM_USERS_PATH}/npa/getnetworkpaths", json=body)
+        return self._post(f"{_ADEM_USERS_PATH}/npa/getnetworkpaths", json=body, retry_safe=True)
 
     def traceroute_timestamps(
         self,
@@ -1074,7 +1253,9 @@ class DemUsersResource(SyncResource):
         PRIVILEGED: internal endpoint; scoped tokens may receive 403.
         """
         body = _adem_body(start_time, end_time, user=user, device_id=device_id)
-        return self._post(f"{_ADEM_USERS_PATH}/device/gettraceroutetimestamps", json=body)
+        return self._post(
+            f"{_ADEM_USERS_PATH}/device/gettraceroutetimestamps", json=body, retry_safe=True
+        )
 
     def traceroute(
         self,
@@ -1091,7 +1272,7 @@ class DemUsersResource(SyncResource):
         ``start_time`` and ``end_time``.
         """
         body = _adem_body(start_time, end_time, user=user, device_id=device_id)
-        return self._post(f"{_ADEM_USERS_PATH}/device/gettraceroute", json=body)
+        return self._post(f"{_ADEM_USERS_PATH}/device/gettraceroute", json=body, retry_safe=True)
 
     def diagnose(
         self,
@@ -1225,12 +1406,19 @@ class DemUsersResource(SyncResource):
 class AsyncDemUsersResource(AsyncResource):
     """Async ADEM per-user/per-device telemetry."""
 
+    @functools.cached_property
+    def with_response(self) -> AsyncDemUserResponses:
+        """Inspect one completed request together with its typed result."""
+        from netskope.resources._dem_response import AsyncDemUserResponses
+
+        return AsyncDemUserResponses(self._transport)
+
     async def devices(
         self, user: str, *, start_time: datetime | int, end_time: datetime | int
     ) -> builtins.list[AdemDevice]:
         """See :meth:`DemUsersResource.devices`."""
         body = _adem_body(start_time, end_time, user=user, userLocation=[])
-        resp = await self._post(f"{_ADEM_USERS_PATH}/device/getlist", json=body)
+        resp = await self._post(f"{_ADEM_USERS_PATH}/device/getlist", json=body, retry_safe=True)
         return [AdemDevice.model_validate(d) for d in _normalize_device_list(resp)]
 
     async def device_details(
@@ -1243,14 +1431,14 @@ class AsyncDemUsersResource(AsyncResource):
     ) -> dict[str, Any]:
         """See :meth:`DemUsersResource.device_details`."""
         body = _adem_body(start_time, end_time, user=user, device_id=device_id)
-        return await self._post(f"{_ADEM_USERS_PATH}/device/getdetails", json=body)
+        return await self._post(f"{_ADEM_USERS_PATH}/device/getdetails", json=body, retry_safe=True)
 
     async def info(
         self, user: str, *, start_time: datetime | int, end_time: datetime | int
     ) -> AdemUserInfo:
         """See :meth:`DemUsersResource.info`."""
         body = _adem_body(start_time, end_time, user=user)
-        resp = await self._post(f"{_ADEM_USERS_PATH}/getinfo", json=body)
+        resp = await self._post(f"{_ADEM_USERS_PATH}/getinfo", json=body, retry_safe=True)
         return AdemUserInfo.model_validate(extract_item(resp))
 
     async def applications(
@@ -1263,7 +1451,7 @@ class AsyncDemUsersResource(AsyncResource):
     ) -> builtins.list[AdemApplication]:
         """See :meth:`DemUsersResource.applications`."""
         body = _adem_body(start_time, end_time, user=user, device_id=device_id)
-        resp = await self._post(f"{_ADEM_USERS_PATH}/getapplications", json=body)
+        resp = await self._post(f"{_ADEM_USERS_PATH}/getapplications", json=body, retry_safe=True)
         return [AdemApplication.model_validate(a) for a in extract_list(resp, "applications")]
 
     async def locations(
@@ -1271,7 +1459,7 @@ class AsyncDemUsersResource(AsyncResource):
     ) -> dict[str, Any]:
         """See :meth:`DemUsersResource.locations`."""
         body = _adem_body(start_time, end_time)
-        return await self._post(f"{_ADEM_USERS_PATH}/getlocations", json=body)
+        return await self._post(f"{_ADEM_USERS_PATH}/getlocations", json=body, retry_safe=True)
 
     async def aggregated_scores(
         self,
@@ -1290,7 +1478,9 @@ class AsyncDemUsersResource(AsyncResource):
             device_id=device_id,
             aggregationType=aggregation_type,
         )
-        return await self._post(f"{_ADEM_USERS_PATH}/device/getaggregatedscores", json=body)
+        return await self._post(
+            f"{_ADEM_USERS_PATH}/device/getaggregatedscores", json=body, retry_safe=True
+        )
 
     async def exp_score(
         self,
@@ -1302,7 +1492,9 @@ class AsyncDemUsersResource(AsyncResource):
     ) -> dict[str, Any]:
         """See :meth:`DemUsersResource.exp_score`."""
         body = _adem_body(start_time, end_time, user=user, device_id=device_id)
-        return await self._post(f"{_ADEM_USERS_PATH}/metrics/getexpscore", json=body)
+        return await self._post(
+            f"{_ADEM_USERS_PATH}/metrics/getexpscore", json=body, retry_safe=True
+        )
 
     async def rca(
         self,
@@ -1314,7 +1506,7 @@ class AsyncDemUsersResource(AsyncResource):
     ) -> dict[str, Any]:
         """See :meth:`DemUsersResource.rca`."""
         body = _adem_body(start_time, end_time, user=user, device_id=device_id)
-        return await self._post(f"{_ADEM_USERS_PATH}/device/getrca", json=body)
+        return await self._post(f"{_ADEM_USERS_PATH}/device/getrca", json=body, retry_safe=True)
 
     async def network_metrics(
         self,
@@ -1329,7 +1521,9 @@ class AsyncDemUsersResource(AsyncResource):
         body = _adem_body(
             start_time, end_time, user=user, device_id=device_id, metricType=metric_type
         )
-        return await self._post(f"{_ADEM_USERS_PATH}/metrics/getnetwork", json=body)
+        return await self._post(
+            f"{_ADEM_USERS_PATH}/metrics/getnetwork", json=body, retry_safe=True
+        )
 
     async def npa_hosts(
         self,
@@ -1341,7 +1535,7 @@ class AsyncDemUsersResource(AsyncResource):
     ) -> dict[str, Any]:
         """See :meth:`DemUsersResource.npa_hosts`."""
         body = _adem_body(start_time, end_time, user=user, device_id=device_id)
-        return await self._post(f"{_ADEM_USERS_PATH}/npa/getnpahosts", json=body)
+        return await self._post(f"{_ADEM_USERS_PATH}/npa/getnpahosts", json=body, retry_safe=True)
 
     async def npa_network_paths(
         self,
@@ -1354,7 +1548,9 @@ class AsyncDemUsersResource(AsyncResource):
     ) -> dict[str, Any]:
         """See :meth:`DemUsersResource.npa_network_paths`."""
         body = _adem_body(start_time, end_time, user=user, device_id=device_id, npaHost=npa_host)
-        return await self._post(f"{_ADEM_USERS_PATH}/npa/getnetworkpaths", json=body)
+        return await self._post(
+            f"{_ADEM_USERS_PATH}/npa/getnetworkpaths", json=body, retry_safe=True
+        )
 
     async def traceroute_timestamps(
         self,
@@ -1366,7 +1562,9 @@ class AsyncDemUsersResource(AsyncResource):
     ) -> dict[str, Any]:
         """See :meth:`DemUsersResource.traceroute_timestamps`.  PRIVILEGED."""
         body = _adem_body(start_time, end_time, user=user, device_id=device_id)
-        return await self._post(f"{_ADEM_USERS_PATH}/device/gettraceroutetimestamps", json=body)
+        return await self._post(
+            f"{_ADEM_USERS_PATH}/device/gettraceroutetimestamps", json=body, retry_safe=True
+        )
 
     async def traceroute(
         self,
@@ -1378,7 +1576,9 @@ class AsyncDemUsersResource(AsyncResource):
     ) -> dict[str, Any]:
         """See :meth:`DemUsersResource.traceroute`.  PRIVILEGED."""
         body = _adem_body(start_time, end_time, user=user, device_id=device_id)
-        return await self._post(f"{_ADEM_USERS_PATH}/device/gettraceroute", json=body)
+        return await self._post(
+            f"{_ADEM_USERS_PATH}/device/gettraceroute", json=body, retry_safe=True
+        )
 
     async def diagnose(
         self,

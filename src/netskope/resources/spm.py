@@ -23,10 +23,14 @@ Note:
 
 from __future__ import annotations
 
+import functools
 import urllib.parse
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from netskope.resources._base import AsyncResource, SyncResource
+
+if TYPE_CHECKING:
+    from netskope.resources._spm_response import AsyncSpmResponses, SpmResponses
 
 _APPS_PATH = "/api/v2/spm/apps"
 _INVENTORY_PATH = "/api/v2/spm/inventory"
@@ -60,6 +64,12 @@ def _inventory_body(filter: str | None) -> dict[str, Any] | None:
 class SpmResource(SyncResource):
     """Synchronous interface to the SaaS Security Posture Management API."""
 
+    @functools.cached_property
+    def with_response(self) -> SpmResponses:
+        from netskope.resources._spm_response import SpmResponses
+
+        return SpmResponses(self._transport)
+
     def list_apps(self) -> dict[str, Any]:
         """List all SaaS applications monitored by SPM.
 
@@ -86,7 +96,7 @@ class SpmResource(SyncResource):
                 API in the request body as ``{"filter": <str>}``.  When
                 ``None`` (default) the inventory is queried with no filter.
         """
-        return self._post(_INVENTORY_PATH, json=_inventory_body(filter))
+        return self._post(_INVENTORY_PATH, json=_inventory_body(filter), retry_safe=True)
 
     def posture_score(self) -> dict[str, Any]:
         """Get the aggregated SaaS security posture score for the tenant.
@@ -117,6 +127,12 @@ class SpmResource(SyncResource):
 class AsyncSpmResource(AsyncResource):
     """Asynchronous interface to the SaaS Security Posture Management API."""
 
+    @functools.cached_property
+    def with_response(self) -> AsyncSpmResponses:
+        from netskope.resources._spm_response import AsyncSpmResponses
+
+        return AsyncSpmResponses(self._transport)
+
     async def list_apps(self) -> dict[str, Any]:
         """List all SaaS applications monitored by SPM.
 
@@ -136,7 +152,7 @@ class AsyncSpmResource(AsyncResource):
 
         See :meth:`SpmResource.inventory`.
         """
-        return await self._post(_INVENTORY_PATH, json=_inventory_body(filter))
+        return await self._post(_INVENTORY_PATH, json=_inventory_body(filter), retry_safe=True)
 
     async def posture_score(self) -> dict[str, Any]:
         """Get the aggregated SaaS security posture score for the tenant.

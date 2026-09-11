@@ -7,8 +7,8 @@ import pytest
 import respx
 
 from netskope import AsyncNetskopeClient, NetskopeClient
-from netskope.exceptions import NotFoundError, ValidationError
-from netskope.models.events import NetworkEvent
+from netskope.exceptions import NotFoundError, ResponseValidationError, ValidationError
+from netskope.models.events import EventQueryCapabilities, NetworkEvent
 
 _BASE = "https://t.goskope.com"
 _APP_URL = f"{_BASE}/api/v2/events/datasearch/application"
@@ -142,6 +142,15 @@ class TestEventsResource:
         assert event.src_ip == "10.0.0.1"
 
     @respx.mock
+    def test_get_uses_the_same_endpoint_as_list(self, client: NetskopeClient) -> None:
+        """Infrastructure lookups query the data endpoint that list() uses."""
+        route = respx.get(_INFRA_URL).mock(
+            return_value=httpx.Response(200, json={"result": [{"_id": "beef01"}]})
+        )
+        assert client.events.get("beef01", event_type="infrastructure").id == "beef01"
+        assert route.calls.last.request.url.path == "/api/v2/events/data/infrastructure"
+
+    @respx.mock
     def test_get_rejects_non_hex_id_no_http(self, client: NetskopeClient) -> None:
         with pytest.raises(ValidationError):
             client.events.get("not-hex!")
@@ -203,3 +212,91 @@ class TestAsyncEventsResource:
         with pytest.raises(ValidationError):
             aclient.events.list("audit", query="x")
         assert len(respx.calls) == 0
+
+
+_NUMERIC_CLIENT_STATUS = {
+    "_id": "cs1",
+    "device_id": 4815162342,
+    "hostname": 900913,
+    "client_version": 105,
+    "os": 11,
+    "status": 1,
+}
+_NUMERIC_INCIDENT = {
+    "_id": "in1",
+    "incident_id": 77,
+    "status": 2,
+    "assignee": 4242,
+    "dlp_profile": 9,
+    "dlp_rule": 31,
+}
+
+
+@pytest.mark.parametrize(
+    ("event_type", "record"),
+    [("clientstatus", _NUMERIC_CLIENT_STATUS), ("incident", _NUMERIC_INCIDENT)],
+)
+@pytest.mark.parametrize("asynchronous", [False, True], ids=["sync", "async"])
+@respx.mock
+async def test_numeric_record_fields_survive_the_typed_models(
+    client: NetskopeClient,
+    aclient: AsyncNetskopeClient,
+    asynchronous: bool,
+    event_type: str,
+    record: dict,
+) -> None:
+    """Tenants report these fields as numbers; the value must reach the caller."""
+    respx.get(f"{_BASE}/api/v2/events/datasearch/{event_type}").mock(
+        return_value=httpx.Response(200, json={"result": [record], "status": {"total": 1}})
+    )
+    paginated = (aclient if asynchronous else client).events.list(event_type)
+    events = [event async for event in paginated] if asynchronous else list(paginated)
+    assert len(events) == 1
+    for name, value in record.items():
+        if name != "_id":
+            assert getattr(events[0], name) == value
+
+
+@pytest.mark.parametrize("asynchronous", [False, True], ids=["sync", "async"])
+@respx.mock
+async def test_undecodable_record_raises_an_sdk_error(
+    client: NetskopeClient, aclient: AsyncNetskopeClient, asynchronous: bool
+) -> None:
+    """A record the model rejects stays inside the NetskopeError hierarchy."""
+    respx.get(f"{_BASE}/api/v2/events/datasearch/clientstatus").mock(
+        return_value=httpx.Response(
+            200,
+            json={"result": [{"_id": "cs1", "hostname": {"secret": "value"}}]},
+            headers={"x-request-id": "events-1"},
+        )
+    )
+    paginated = (aclient if asynchronous else client).events.list("clientstatus")
+    with pytest.raises(ResponseValidationError) as caught:
+        if asynchronous:
+            _ = [event async for event in paginated]
+        else:
+            list(paginated)
+    assert caught.value.request_path == "/api/v2/events/datasearch/clientstatus"
+    assert caught.value.request_id == "events-1"
+    assert {error[0][0] for error in caught.value.field_errors} == {"hostname"}
+    assert "secret" not in str(caught.value)
+
+
+def test_event_capabilities_default_to_supporting_jql() -> None:
+    """External constructors predate the jql field; audit is the only exception."""
+    assert (
+        EventQueryCapabilities(
+            page_limit=100, scannable=False, projection=False, grouping=False, ordering=False
+        ).jql
+        is True
+    )
+
+
+@pytest.mark.parametrize(
+    ("event_type", "jql"),
+    [("application", True), ("infrastructure", True), ("audit", False)],
+)
+def test_declared_capabilities_state_jql_support(
+    client: NetskopeClient, event_type: str, jql: bool
+) -> None:
+    assert client.events.capabilities(event_type).jql is jql

@@ -12,18 +12,26 @@ Example::
 from __future__ import annotations
 
 import builtins
-from typing import Any
+from functools import cached_property
+from typing import TYPE_CHECKING, Any, cast
 
-from netskope._pagination import AsyncPaginatedResponse, SyncPaginatedResponse
-from netskope.exceptions import NetskopeError, ValidationError
+from pydantic import ValidationError as PydanticValidationError
+
+from netskope._pagination import AsyncPaginatedResponse, Page, SyncPaginatedResponse, _make_page
+from netskope.exceptions import ResponseValidationError, ValidationError
 from netskope.models.publishers import (
     Publisher,
     PublisherAlertEventType,
     PublisherAlertsConfiguration,
+    PublisherCreate,
     PublisherRelease,
+    PublisherUpdate,
 )
 from netskope.resources._base import AsyncResource, SyncResource
 from netskope.resources._extract import extract_item, extract_list
+
+if TYPE_CHECKING:
+    from netskope.resources._publisher_response import AsyncPublisherResponses, PublisherResponses
 
 _PATH = "/api/v2/infrastructure/publishers"
 
@@ -33,26 +41,68 @@ _BULK_PATH = f"{_PATH}/bulk"
 _ALERTS_CONFIG_PATH = f"{_PATH}/alertsconfiguration"
 
 
-def _extract_publishers(body: dict[str, Any]) -> list[dict[str, Any]]:
-    return extract_list(body, "publishers")
+def _parse_publishers_page(body: Any, offset: int, limit: int | None) -> Page[Publisher]:
+    """Decode publisher records and retain metadata without retaining their raw bodies."""
+    metadata: dict[str, Any] = {}
+    if isinstance(body, list):
+        records = body
+    elif isinstance(body, dict):
+        metadata = dict(body)
+        if isinstance(body.get("result"), list):
+            records = metadata.pop("result")
+        elif isinstance(body.get("data"), list):
+            records = metadata.pop("data")
+        elif isinstance(body.get("data"), dict) and "publishers" in body["data"]:
+            nested = dict(body["data"])
+            records = nested.pop("publishers")
+            if nested:
+                metadata["data"] = nested
+            else:
+                metadata.pop("data")
+        elif "publishers" in body:
+            records = metadata.pop("publishers")
+        elif isinstance(body.get("Resources"), list):
+            records = metadata.pop("Resources")
+        else:
+            raise ResponseValidationError(
+                "Invalid publishers response: expected a publisher collection."
+            )
+    else:
+        raise ResponseValidationError("Invalid publishers response: expected an object or list.")
+
+    if not isinstance(records, list) or any(not isinstance(item, dict) for item in records):
+        raise ResponseValidationError(
+            "Invalid publishers response: expected a list of publisher objects."
+        )
+    items = [Publisher.model_validate(item) for item in records]
+    return _make_page(items, metadata, offset, limit)
 
 
 def _extract_publisher(body: dict[str, Any]) -> Publisher:
+    if not isinstance(body, dict):
+        raise ResponseValidationError("Invalid publisher response: expected a publisher object.")
     data = body.get("data", body)
     if isinstance(data, dict) and "publishers" in data:
         items = data["publishers"]
-        if items:
-            return Publisher.model_validate(items[0])
+        if not isinstance(items, list) or len(items) != 1:
+            raise ResponseValidationError(
+                "Invalid publisher response: expected one publisher object."
+            )
+        data = items[0]
+    if not isinstance(data, dict) or not data:
+        raise ResponseValidationError("Invalid publisher response: expected a publisher object.")
     return Publisher.model_validate(data)
 
 
 def _extract_token(body: dict[str, Any]) -> str:
+    if not isinstance(body, dict):
+        raise ResponseValidationError("Registration token missing from response.")
     data = body.get("data")
     if isinstance(data, dict) and data.get("token") is not None:
         return str(data["token"])
     if body.get("token") is not None:
         return str(body["token"])
-    raise NetskopeError(f"Registration token missing from response: {body!r}")
+    raise ResponseValidationError("Registration token missing from response.")
 
 
 def _build_list_params(
@@ -67,6 +117,34 @@ def _build_list_params(
     return params
 
 
+def _build_page_params(
+    filter_expr: str | None,
+    fields: builtins.list[str] | None,
+    offset: int | None,
+    limit: int | None,
+) -> dict[str, Any]:
+    params = _build_list_params(filter_expr, fields)
+    for name, value, minimum in (("offset", offset, 0), ("limit", limit, 1)):
+        if value is None:
+            continue
+        if isinstance(value, bool) or not isinstance(value, int) or value < minimum:
+            raise ValidationError(f"Invalid {name}: expected an integer >= {minimum}.")
+        params[name] = value
+    return params
+
+
+def _validate_publisher_payload(
+    payload: dict[str, Any],
+    model: type[PublisherCreate] | type[PublisherUpdate],
+) -> dict[str, Any]:
+    known_fields = {key: value for key, value in payload.items() if key in model.model_fields}
+    try:
+        request = model.model_validate(known_fields)
+    except PydanticValidationError as exc:
+        raise ValidationError(str(exc)) from exc
+    return {**payload, **request.model_dump(mode="json", exclude_unset=True)}
+
+
 def _build_create_payload(
     name: str,
     lbroker_connect: bool,
@@ -75,7 +153,7 @@ def _build_create_payload(
     payload: dict[str, Any] = {"name": name, "lbroker_connect": lbroker_connect}
     if extra_fields:
         payload.update(extra_fields)
-    return payload
+    return _validate_publisher_payload(payload, PublisherCreate)
 
 
 def _build_update_payload(
@@ -87,14 +165,20 @@ def _build_update_payload(
         payload["name"] = name
     if extra_fields:
         payload.update(extra_fields)
-    return payload
+    if not payload:
+        raise ValidationError("update() requires name or at least one extra field to change.")
+    return _validate_publisher_payload(payload, PublisherUpdate)
 
 
 def _build_bulk_upgrade_payload(publisher_ids: builtins.list[int]) -> dict[str, Any]:
+    if not isinstance(publisher_ids, list):
+        raise ValidationError("publisher_ids must be a list of integer publisher IDs.")
+    if any(isinstance(pid, bool) or not isinstance(pid, int) for pid in publisher_ids):
+        raise ValidationError("publisher_ids must contain integer publisher IDs.")
     return {
         "publishers": {
             "apply": {"upgrade_request": True},
-            "id": [int(publisher_id) for publisher_id in publisher_ids],
+            "id": list(publisher_ids),
         }
     }
 
@@ -120,6 +204,13 @@ def _build_alerts_config_payload(
 
 class PublishersResource(SyncResource):
     """Synchronous interface to ``/api/v2/infrastructure/publishers``."""
+
+    @cached_property
+    def with_response(self) -> PublisherResponses:
+        """Inspect the original response and parse its typed result from one request."""
+        from netskope.resources._publisher_response import PublisherResponses
+
+        return PublisherResponses(self._transport)
 
     def list(
         self,
@@ -147,8 +238,25 @@ class PublishersResource(SyncResource):
             params=_build_list_params(filter_expr, fields),
             model=Publisher,
             page_size=page_size,
-            extract=_extract_publishers,
+            parse_page=_parse_publishers_page,
         )
+
+    def list_page(
+        self,
+        *,
+        filter_expr: str | None = None,
+        fields: builtins.list[str] | None = None,
+        offset: int | None = None,
+        limit: int | None = None,
+    ) -> Page[Publisher]:
+        """Fetch one page, preserving API defaults for omitted pagination parameters.
+
+        The result retains envelope metadata and any stated total. An
+        unknown total does not establish whether more records exist.
+        """
+        return self.with_response.list_page(
+            filter_expr=filter_expr, fields=fields, offset=offset, limit=limit
+        ).parse()
 
     def get(self, publisher_id: int) -> Publisher:
         """Get a publisher by ID.
@@ -156,8 +264,7 @@ class PublishersResource(SyncResource):
         Args:
             publisher_id: The numeric publisher identifier.
         """
-        body = self._get(f"{_PATH}/{publisher_id}")
-        return _extract_publisher(body)
+        return self.with_response.get(publisher_id).parse()
 
     def create(
         self,
@@ -173,9 +280,9 @@ class PublishersResource(SyncResource):
             lbroker_connect: Enable local broker connectivity (default False).
             extra_fields: Optional additional publisher settings.
         """
-        payload = _build_create_payload(name, lbroker_connect, extra_fields)
-        body = self._post(_PATH, json=payload)
-        return _extract_publisher(body)
+        return self.with_response.create(
+            name, lbroker_connect=lbroker_connect, extra_fields=extra_fields
+        ).parse()
 
     def update(
         self,
@@ -191,9 +298,7 @@ class PublishersResource(SyncResource):
             name: New name (optional, sent as ``name``).
             extra_fields: Optional additional settings to update.
         """
-        payload = _build_update_payload(name, extra_fields)
-        body = self._patch(f"{_PATH}/{publisher_id}", json=payload)
-        return _extract_publisher(body)
+        return self.with_response.update(publisher_id, name=name, extra_fields=extra_fields).parse()
 
     def delete(self, publisher_id: int) -> None:
         """Delete a publisher.
@@ -212,8 +317,8 @@ class PublishersResource(SyncResource):
         Returns:
             A list of raw app records.
         """
-        body = self._get(f"{_PATH}/{publisher_id}/apps")
-        return extract_list(body, "apps")
+        response = self.with_response.list_apps(publisher_id)
+        return extract_list(response.json(), "apps")
 
     def create_registration_token(self, publisher_id: int) -> str:
         """Generate a registration token for a publisher.
@@ -228,8 +333,7 @@ class PublishersResource(SyncResource):
             netskope.exceptions.NetskopeError: If no token is present in
                 the response.
         """
-        body = self._post(f"{_PATH}/{publisher_id}/registration_token")
-        return _extract_token(body)
+        return self.with_response.create_registration_token(publisher_id).parse()
 
     def list_releases(self) -> builtins.list[PublisherRelease]:
         """List available publisher software releases.
@@ -237,8 +341,7 @@ class PublishersResource(SyncResource):
         Returns:
             A list of :class:`~netskope.models.publishers.PublisherRelease`.
         """
-        body = self._get(_RELEASES_PATH)
-        return [PublisherRelease.model_validate(item) for item in extract_list(body, "releases")]
+        return self.with_response.list_releases().parse()
 
     def bulk_upgrade(self, publisher_ids: builtins.list[int]) -> dict[str, Any]:
         """Trigger an upgrade for one or more publishers.
@@ -249,8 +352,7 @@ class PublishersResource(SyncResource):
         Returns:
             The raw API response body.
         """
-        body = self._put(_BULK_PATH, json=_build_bulk_upgrade_payload(publisher_ids))
-        return body
+        return cast(dict[str, Any], self.with_response.bulk_upgrade(publisher_ids).json())
 
     def get_alerts_configuration(self) -> PublisherAlertsConfiguration:
         """Get the publisher alert notification configuration."""
@@ -284,6 +386,13 @@ class PublishersResource(SyncResource):
 class AsyncPublishersResource(AsyncResource):
     """Asynchronous interface to ``/api/v2/infrastructure/publishers``."""
 
+    @cached_property
+    def with_response(self) -> AsyncPublisherResponses:
+        """Inspect the original response and parse its typed result from one request."""
+        from netskope.resources._publisher_response import AsyncPublisherResponses
+
+        return AsyncPublisherResponses(self._transport)
+
     def list(
         self,
         *,
@@ -299,13 +408,26 @@ class AsyncPublishersResource(AsyncResource):
             params=_build_list_params(filter_expr, fields),
             model=Publisher,
             page_size=page_size,
-            extract=_extract_publishers,
+            parse_page=_parse_publishers_page,
         )
+
+    async def list_page(
+        self,
+        *,
+        filter_expr: str | None = None,
+        fields: builtins.list[str] | None = None,
+        offset: int | None = None,
+        limit: int | None = None,
+    ) -> Page[Publisher]:
+        """Fetch one page with metadata, leaving omitted pagination values to the API."""
+        response = await self.with_response.list_page(
+            filter_expr=filter_expr, fields=fields, offset=offset, limit=limit
+        )
+        return response.parse()
 
     async def get(self, publisher_id: int) -> Publisher:
         """Get a publisher by ID."""
-        body = await self._get(f"{_PATH}/{publisher_id}")
-        return _extract_publisher(body)
+        return (await self.with_response.get(publisher_id)).parse()
 
     async def create(
         self,
@@ -315,9 +437,10 @@ class AsyncPublishersResource(AsyncResource):
         extra_fields: dict[str, Any] | None = None,
     ) -> Publisher:
         """Register a new publisher."""
-        payload = _build_create_payload(name, lbroker_connect, extra_fields)
-        body = await self._post(_PATH, json=payload)
-        return _extract_publisher(body)
+        response = await self.with_response.create(
+            name, lbroker_connect=lbroker_connect, extra_fields=extra_fields
+        )
+        return response.parse()
 
     async def update(
         self,
@@ -327,9 +450,10 @@ class AsyncPublishersResource(AsyncResource):
         extra_fields: dict[str, Any] | None = None,
     ) -> Publisher:
         """Update a publisher (PATCH)."""
-        payload = _build_update_payload(name, extra_fields)
-        body = await self._patch(f"{_PATH}/{publisher_id}", json=payload)
-        return _extract_publisher(body)
+        response = await self.with_response.update(
+            publisher_id, name=name, extra_fields=extra_fields
+        )
+        return response.parse()
 
     async def delete(self, publisher_id: int) -> None:
         """Delete a publisher."""
@@ -337,29 +461,27 @@ class AsyncPublishersResource(AsyncResource):
 
     async def list_apps(self, publisher_id: int) -> builtins.list[dict[str, Any]]:
         """List private apps associated with a publisher."""
-        body = await self._get(f"{_PATH}/{publisher_id}/apps")
-        return extract_list(body, "apps")
+        response = await self.with_response.list_apps(publisher_id)
+        return extract_list(response.json(), "apps")
 
     async def create_registration_token(self, publisher_id: int) -> str:
         """Generate a registration token for a publisher.
 
         See :meth:`PublishersResource.create_registration_token`.
         """
-        body = await self._post(f"{_PATH}/{publisher_id}/registration_token")
-        return _extract_token(body)
+        return (await self.with_response.create_registration_token(publisher_id)).parse()
 
     async def list_releases(self) -> builtins.list[PublisherRelease]:
         """List available publisher software releases."""
-        body = await self._get(_RELEASES_PATH)
-        return [PublisherRelease.model_validate(item) for item in extract_list(body, "releases")]
+        return (await self.with_response.list_releases()).parse()
 
     async def bulk_upgrade(self, publisher_ids: builtins.list[int]) -> dict[str, Any]:
         """Trigger an upgrade for one or more publishers.
 
         See :meth:`PublishersResource.bulk_upgrade`.
         """
-        body = await self._put(_BULK_PATH, json=_build_bulk_upgrade_payload(publisher_ids))
-        return body
+        response = await self.with_response.bulk_upgrade(publisher_ids)
+        return cast(dict[str, Any], response.json())
 
     async def get_alerts_configuration(self) -> PublisherAlertsConfiguration:
         """Get the publisher alert notification configuration."""

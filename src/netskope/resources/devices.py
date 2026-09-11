@@ -18,14 +18,21 @@ from __future__ import annotations
 
 import builtins
 import functools
-import re
-from typing import Any
+from collections.abc import AsyncIterator, Iterator
+from typing import TYPE_CHECKING, Any
+
+from pydantic import ValidationError as PydanticValidationError
 
 from netskope._pagination import AsyncPaginatedResponse, SyncPaginatedResponse
-from netskope.exceptions import NotFoundError, ValidationError
-from netskope.models.devices import Device, DeviceTag
+from netskope.exceptions import ValidationError
+from netskope.models.devices import Device, DeviceTag, DeviceTagCreate, DeviceTagPatch
+from netskope.pagination import Page
 from netskope.resources._base import AsyncResource, SyncResource
-from netskope.resources._extract import extract_item, extract_list, validate_id
+from netskope.resources._device_response import AsyncDevicesResponses, DevicesResponses
+from netskope.resources._extract import extract_list, validate_id
+
+if TYPE_CHECKING:
+    from netskope.resources._device_tag_response import AsyncDeviceTagResponses, DeviceTagResponses
 
 _DEVICES_PATH = "/api/v2/steering/devices"
 _SUPPORTED_OS_PATH = "/api/v2/devices/supportedos"
@@ -37,11 +44,6 @@ _SUPPORTED_OS_PATH = "/api/v2/devices/supportedos"
 _TAGS_PATH = "/api/v2/devices/device/tags"
 _TAGS_QUERY_PATH = f"{_TAGS_PATH}/gettags"
 
-# Tag names and descriptions accept alphanumerics, hyphens, and spaces only
-# (``CreateTagDto`` / ``UpdateTagDto`` pattern in the gateway spec).  Validate
-# client-side so callers fail fast with a clear message.
-_TAG_TEXT_RE = re.compile(r"^[0-9a-zA-Z\-\s]+$")
-
 # gettags paging bounds per the gateway spec (default limit 20, max 100).
 _TAGS_DEFAULT_LIMIT = 20
 _TAGS_MAX_LIMIT = 100
@@ -49,11 +51,6 @@ _TAGS_MAX_LIMIT = 100
 
 def _extract_devices(body: dict[str, Any]) -> builtins.list[dict[str, Any]]:
     return extract_list(body, "devices")
-
-
-def _extract_tags(body: dict[str, Any]) -> builtins.list[dict[str, Any]]:
-    # Envelope: {"success": true, "data": {"data": [...], "total_count": N}}
-    return extract_list(body, "data")
 
 
 def _coerce_tag_id(tag_id: int | str) -> int:
@@ -64,19 +61,10 @@ def _coerce_tag_id(tag_id: int | str) -> int:
     return int(validated)
 
 
-def _validate_tag_text(value: str, name: str) -> str:
-    if not _TAG_TEXT_RE.match(value):
-        raise ValidationError(
-            f"Invalid {name}: {value!r} "
-            "(only alphanumeric characters, hyphens, and spaces are allowed)"
-        )
-    return value
-
-
 def _build_tags_query(name: str | None, offset: int, limit: int) -> dict[str, Any]:
-    if not 1 <= limit <= _TAGS_MAX_LIMIT:
+    if isinstance(limit, bool) or not isinstance(limit, int) or not 1 <= limit <= _TAGS_MAX_LIMIT:
         raise ValidationError(f"Invalid limit {limit!r}. Must be between 1 and {_TAGS_MAX_LIMIT}.")
-    if offset < 0:
+    if isinstance(offset, bool) or not isinstance(offset, int) or offset < 0:
         raise ValidationError(f"Invalid offset {offset!r}. Must be >= 0.")
     payload: dict[str, Any] = {"offset": offset, "limit": limit}
     if name is not None:
@@ -85,32 +73,89 @@ def _build_tags_query(name: str | None, offset: int, limit: int) -> dict[str, An
 
 
 def _build_create_payload(name: str, description: str | None) -> dict[str, Any]:
-    payload: dict[str, Any] = {"name": _validate_tag_text(name, "name")}
+    payload: dict[str, Any] = {"name": name}
     if description is not None:
-        payload["description"] = _validate_tag_text(description, "description")
-    return payload
+        payload["description"] = description
+    return _validate_tag_payload(DeviceTagCreate, payload)
 
 
 def _build_update_payload(name: str | None, description: str | None) -> dict[str, Any]:
     payload: dict[str, Any] = {}
     if name is not None:
-        payload["name"] = _validate_tag_text(name, "name")
+        payload["name"] = name
     if description is not None:
-        payload["description"] = _validate_tag_text(description, "description")
+        payload["description"] = description
     if not payload:
         raise ValidationError("Nothing to update. Provide name and/or description.")
-    return payload
+    return _validate_tag_payload(DeviceTagPatch, payload)
 
 
-def _tag_from_query_response(body: dict[str, Any], tag_id: int) -> DeviceTag:
-    items = _extract_tags(body)
-    if not items:
-        raise NotFoundError(f"Device tag {tag_id} not found", status_code=404, body=body)
-    return DeviceTag.model_validate(items[0])
+def _validate_tag_payload(
+    model: type[DeviceTagCreate] | type[DeviceTagPatch], payload: dict[str, Any]
+) -> dict[str, Any]:
+    try:
+        request = model.model_validate(payload)
+    except PydanticValidationError as exc:
+        fields = ", ".join(".".join(map(str, error["loc"])) for error in exc.errors())
+        raise ValidationError(
+            f"Invalid device-tag fields: {fields}. "
+            "Use nonempty strings containing alphanumeric characters, hyphens, and whitespace."
+        ) from None
+    return request.model_dump(exclude_unset=True)
 
 
 class DeviceTagsResource(SyncResource):
     """Synchronous interface to device tags (``/api/v2/devices/device/tags``)."""
+
+    @functools.cached_property
+    def with_response(self) -> DeviceTagResponses:
+        """Inspect the completed HTTP response alongside each typed read."""
+        from netskope.resources._device_tag_response import DeviceTagResponses
+
+        return DeviceTagResponses(self._transport)
+
+    def list_page(
+        self,
+        *,
+        name: str | None = None,
+        offset: int = 0,
+        limit: int = _TAGS_DEFAULT_LIMIT,
+    ) -> Page[DeviceTag]:
+        """Fetch one POST-body page with its verified ``total_count`` metadata."""
+        return self.with_response.list_page(name=name, offset=offset, limit=limit).parse()
+
+    def iter_pages(
+        self,
+        *,
+        name: str | None = None,
+        offset: int = 0,
+        page_size: int = _TAGS_MAX_LIMIT,
+        max_pages: int = 1_000,
+    ) -> Iterator[Page[DeviceTag]]:
+        """Traverse tags using returned-record offsets, with incomplete scans raising.
+
+        A known total determines completion. Without a total, an empty page is
+        required because the server can return fewer records than requested.
+        This does not provide a snapshot of tags changing during iteration.
+        """
+        for response in self.with_response.iter_pages(
+            name=name, offset=offset, page_size=page_size, max_pages=max_pages
+        ):
+            yield response.parse()
+
+    def iter_all(
+        self,
+        *,
+        name: str | None = None,
+        offset: int = 0,
+        page_size: int = _TAGS_MAX_LIMIT,
+        max_pages: int = 1_000,
+    ) -> Iterator[DeviceTag]:
+        """Yield every tag; see :meth:`iter_pages` for traversal guarantees."""
+        for page in self.iter_pages(
+            name=name, offset=offset, page_size=page_size, max_pages=max_pages
+        ):
+            yield from page.items
 
     def list(
         self,
@@ -134,8 +179,7 @@ class DeviceTagsResource(SyncResource):
             netskope.exceptions.ValidationError: If *offset* or *limit* is
                 out of range.
         """
-        body = self._post(_TAGS_QUERY_PATH, json=_build_tags_query(name, offset, limit))
-        return [DeviceTag.model_validate(item) for item in _extract_tags(body)]
+        return self.list_page(name=name, offset=offset, limit=limit).items
 
     def get(self, tag_id: int | str) -> DeviceTag:
         """Get a device tag by its numeric ID.
@@ -147,9 +191,7 @@ class DeviceTagsResource(SyncResource):
             netskope.exceptions.ValidationError: If *tag_id* is not numeric.
             netskope.exceptions.NotFoundError: If the tag does not exist.
         """
-        coerced = _coerce_tag_id(tag_id)
-        body = self._post(_TAGS_QUERY_PATH, json={"id": coerced})
-        return _tag_from_query_response(body, coerced)
+        return self.with_response.get(tag_id).parse()
 
     def create(self, name: str, *, description: str | None = None) -> DeviceTag:
         """Create a device tag.
@@ -165,8 +207,7 @@ class DeviceTagsResource(SyncResource):
             netskope.exceptions.ValidationError: If *name* or *description*
                 contains disallowed characters.
         """
-        body = self._post(_TAGS_PATH, json=_build_create_payload(name, description))
-        return DeviceTag.model_validate(extract_item(body))
+        return self.with_response.create(name, description=description).parse()
 
     def update(
         self,
@@ -185,9 +226,7 @@ class DeviceTagsResource(SyncResource):
                 *description* is provided, or a value contains disallowed
                 characters.
         """
-        coerced = _coerce_tag_id(tag_id)
-        body = self._patch(f"{_TAGS_PATH}/{coerced}", json=_build_update_payload(name, description))
-        return DeviceTag.model_validate(extract_item(body))
+        return self.with_response.update(tag_id, name=name, description=description).parse()
 
     def delete(self, tag_id: int | str) -> None:
         """Delete a device tag by ID.  Irreversible.
@@ -200,6 +239,10 @@ class DeviceTagsResource(SyncResource):
 
 class DevicesResource(SyncResource):
     """Synchronous interface to the Devices API."""
+
+    @functools.cached_property
+    def with_response(self) -> DevicesResponses:
+        return DevicesResponses(self._transport)
 
     def list(self, *, page_size: int = 100) -> SyncPaginatedResponse[Device]:
         """List managed devices enrolled in the tenant.
@@ -247,6 +290,52 @@ class DevicesResource(SyncResource):
 class AsyncDeviceTagsResource(AsyncResource):
     """Asynchronous interface to device tags."""
 
+    @functools.cached_property
+    def with_response(self) -> AsyncDeviceTagResponses:
+        """Inspect the completed HTTP response alongside each typed read."""
+        from netskope.resources._device_tag_response import AsyncDeviceTagResponses
+
+        return AsyncDeviceTagResponses(self._transport)
+
+    async def list_page(
+        self,
+        *,
+        name: str | None = None,
+        offset: int = 0,
+        limit: int = _TAGS_DEFAULT_LIMIT,
+    ) -> Page[DeviceTag]:
+        """Fetch one tag page. See :meth:`DeviceTagsResource.list_page`."""
+        return (await self.with_response.list_page(name=name, offset=offset, limit=limit)).parse()
+
+    async def iter_pages(
+        self,
+        *,
+        name: str | None = None,
+        offset: int = 0,
+        page_size: int = _TAGS_MAX_LIMIT,
+        max_pages: int = 1_000,
+    ) -> AsyncIterator[Page[DeviceTag]]:
+        """Traverse tags. See :meth:`DeviceTagsResource.iter_pages`."""
+        async for response in self.with_response.iter_pages(
+            name=name, offset=offset, page_size=page_size, max_pages=max_pages
+        ):
+            yield response.parse()
+
+    async def iter_all(
+        self,
+        *,
+        name: str | None = None,
+        offset: int = 0,
+        page_size: int = _TAGS_MAX_LIMIT,
+        max_pages: int = 1_000,
+    ) -> AsyncIterator[DeviceTag]:
+        """Yield every tag. See :meth:`DeviceTagsResource.iter_all`."""
+        async for page in self.iter_pages(
+            name=name, offset=offset, page_size=page_size, max_pages=max_pages
+        ):
+            for item in page.items:
+                yield item
+
     async def list(
         self,
         *,
@@ -258,22 +347,18 @@ class AsyncDeviceTagsResource(AsyncResource):
 
         See :meth:`DeviceTagsResource.list`.
         """
-        body = await self._post(_TAGS_QUERY_PATH, json=_build_tags_query(name, offset, limit))
-        return [DeviceTag.model_validate(item) for item in _extract_tags(body)]
+        return (await self.list_page(name=name, offset=offset, limit=limit)).items
 
     async def get(self, tag_id: int | str) -> DeviceTag:
         """Get a device tag by its numeric ID.
 
         See :meth:`DeviceTagsResource.get`.
         """
-        coerced = _coerce_tag_id(tag_id)
-        body = await self._post(_TAGS_QUERY_PATH, json={"id": coerced})
-        return _tag_from_query_response(body, coerced)
+        return (await self.with_response.get(tag_id)).parse()
 
     async def create(self, name: str, *, description: str | None = None) -> DeviceTag:
         """Create a device tag.  See :meth:`DeviceTagsResource.create`."""
-        body = await self._post(_TAGS_PATH, json=_build_create_payload(name, description))
-        return DeviceTag.model_validate(extract_item(body))
+        return (await self.with_response.create(name, description=description)).parse()
 
     async def update(
         self,
@@ -286,11 +371,7 @@ class AsyncDeviceTagsResource(AsyncResource):
 
         See :meth:`DeviceTagsResource.update`.
         """
-        coerced = _coerce_tag_id(tag_id)
-        body = await self._patch(
-            f"{_TAGS_PATH}/{coerced}", json=_build_update_payload(name, description)
-        )
-        return DeviceTag.model_validate(extract_item(body))
+        return (await self.with_response.update(tag_id, name=name, description=description)).parse()
 
     async def delete(self, tag_id: int | str) -> None:
         """Delete a device tag by ID.  Irreversible."""
@@ -299,6 +380,10 @@ class AsyncDeviceTagsResource(AsyncResource):
 
 class AsyncDevicesResource(AsyncResource):
     """Asynchronous interface to the Devices API."""
+
+    @functools.cached_property
+    def with_response(self) -> AsyncDevicesResponses:
+        return AsyncDevicesResponses(self._transport)
 
     def list(self, *, page_size: int = 100) -> AsyncPaginatedResponse[Device]:
         """List managed devices enrolled in the tenant.

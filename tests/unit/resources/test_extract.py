@@ -8,7 +8,13 @@ import respx
 
 from netskope import AsyncNetskopeClient, NetskopeClient
 from netskope.exceptions import ValidationError
-from netskope.resources._extract import extract_item, extract_list, quote_id, validate_id
+from netskope.resources._extract import (
+    extract_item,
+    extract_list,
+    id_strings,
+    quote_id,
+    validate_id,
+)
 from tests.unit.resources.conftest import sent_json
 
 
@@ -88,6 +94,30 @@ class TestValidateId:
     def test_error_message_uses_name(self) -> None:
         with pytest.raises(ValidationError, match="list_id"):
             validate_id("bad/id", name="list_id")
+
+    def test_zero_is_a_usable_id(self) -> None:
+        assert validate_id(0) == "0"
+
+    @pytest.mark.parametrize("bad", [-1, -3, -12345])
+    def test_negative_ints_raise(self, bad: int) -> None:
+        with pytest.raises(ValidationError, match="Invalid id format"):
+            validate_id(bad)
+
+    @pytest.mark.parametrize("bad", [True, False])
+    def test_bools_raise_despite_being_ints(self, bad: bool) -> None:
+        with pytest.raises(ValidationError):
+            validate_id(bad)
+
+    def test_a_negative_id_never_reaches_the_wire(self, client: NetskopeClient) -> None:
+        with respx.mock:
+            catch_all = respx.route().mock(return_value=httpx.Response(200, json={}))
+            with pytest.raises(ValidationError):
+                client.url_lists.get(-3)
+            assert catch_all.call_count == 0
+
+    def test_id_strings_rejects_a_negative_member(self) -> None:
+        with pytest.raises(ValidationError, match="app_ids"):
+            id_strings([1, -5], "app_ids")
 
 
 class TestQuoteId:

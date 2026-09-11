@@ -7,6 +7,7 @@ import pytest
 import respx
 
 from netskope import NetskopeClient
+from netskope.exceptions import ValidationError
 from netskope.models.url_lists import UrlList
 from tests.unit.resources.conftest import sent_json
 
@@ -98,7 +99,7 @@ class TestUrlListsResource:
         assert result.urls == ["new.com"]
 
     def test_update_raises_when_no_fields_provided(self, client: NetskopeClient) -> None:
-        with pytest.raises(ValueError):
+        with pytest.raises(ValidationError):
             client.url_lists.update(42)
 
     @respx.mock

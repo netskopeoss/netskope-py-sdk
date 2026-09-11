@@ -121,52 +121,52 @@ class TestIncidentsResource:
         assert sent_json(route)["fromTime"] == 1700000000000
 
     @respx.mock
-    def test_get_anomalies_default_body(self, client: NetskopeClient) -> None:
+    def test_get_anomalies_sends_paging_in_the_query(self, client: NetskopeClient) -> None:
+        """Paging and sorting are query parameters; the body carries users/timeframe."""
         route = respx.post(_ANOMALIES_URL).mock(
             return_value=httpx.Response(200, json={"data": [{"_id": "an1", "user": "a@ex.com"}]})
         )
         anomalies = client.incidents.get_anomalies(["a@ex.com"])
         assert len(anomalies) == 1
         assert anomalies[0].user == "a@ex.com"
-        assert sent_json(route) == {
-            "users": ["a@ex.com"],
-            "timeframe": 30,
-            "limit": 100,
-            "offset": 0,
+        assert sent_json(route) == {"users": ["a@ex.com"], "timeframe": 30}
+        assert dict(route.calls.last.request.url.params) == {
+            "limit": "100",
+            "offset": "0",
             "sortby": "time",
             "sortorder": "desc",
         }
 
     @respx.mock
-    def test_get_anomalies_severity_str_normalized_to_list(self, client: NetskopeClient) -> None:
-        route = respx.post(_ANOMALIES_URL).mock(return_value=httpx.Response(200, json={"data": []}))
-        client.incidents.get_anomalies(["a@ex.com"], severity="High")
-        assert sent_json(route)["severity_filter"] == ["High"]
-
-    @respx.mock
-    def test_get_anomalies_severity_list_passthrough(self, client: NetskopeClient) -> None:
-        route = respx.post(_ANOMALIES_URL).mock(return_value=httpx.Response(200, json={"data": []}))
-        client.incidents.get_anomalies(["a@ex.com"], severity=["High", "Critical"])
-        assert sent_json(route)["severity_filter"] == ["High", "Critical"]
+    @pytest.mark.parametrize("severity", ["High", "high", ["High", "Critical"]])
+    def test_get_anomalies_rejects_severity_no_http(
+        self, client: NetskopeClient, severity: object
+    ) -> None:
+        """The endpoint has no severity filter, so a value is rejected, not dropped."""
+        with pytest.raises(ValidationError, match="severity filter"):
+            client.incidents.get_anomalies(["a@ex.com"], severity=severity)  # type: ignore[arg-type]
+        assert len(respx.calls) == 0
 
     @respx.mock
     @pytest.mark.parametrize(
         "kwargs",
         [
-            {"severity": "high"},  # severities are capitalized
-            {"severity": ["Critical", "bogus"]},
+            {"users": []},
             {"timeframe": 0},
             {"timeframe": 91},
             {"limit": 0},
             {"limit": 10001},
+            {"offset": -1},
+            {"sort_by": ""},
             {"sort_order": "descending"},
         ],
     )
     def test_get_anomalies_validation_no_http(
         self, client: NetskopeClient, kwargs: dict[str, object]
     ) -> None:
+        users = kwargs.pop("users", ["a@ex.com"])
         with pytest.raises(ValidationError):
-            client.incidents.get_anomalies(["a@ex.com"], **kwargs)  # type: ignore[arg-type]
+            client.incidents.get_anomalies(users, **kwargs)  # type: ignore[arg-type]
         assert len(respx.calls) == 0
 
     @respx.mock
@@ -288,19 +288,29 @@ class TestAsyncIncidentsResource:
         assert low <= body["fromTime"] <= high
 
     @respx.mock
-    async def test_get_anomalies_body(self, aclient: AsyncNetskopeClient) -> None:
+    async def test_get_anomalies_body_and_params(self, aclient: AsyncNetskopeClient) -> None:
         route = respx.post(_ANOMALIES_URL).mock(return_value=httpx.Response(200, json={"data": []}))
-        await aclient.incidents.get_anomalies(["a@ex.com"], severity="Low", timeframe=7)
-        body = sent_json(route)
-        assert body["timeframe"] == 7
-        assert body["severity_filter"] == ["Low"]
-        assert body["sortby"] == "time"
-        assert body["sortorder"] == "desc"
+        await aclient.incidents.get_anomalies(["a@ex.com"], timeframe=7, sort_by="severity")
+        assert sent_json(route) == {"users": ["a@ex.com"], "timeframe": 7}
+        assert dict(route.calls.last.request.url.params) == {
+            "limit": "100",
+            "offset": "0",
+            "sortby": "severity",
+            "sortorder": "desc",
+        }
 
     @respx.mock
     async def test_get_anomalies_validation_no_http(self, aclient: AsyncNetskopeClient) -> None:
         with pytest.raises(ValidationError):
             await aclient.incidents.get_anomalies(["a@ex.com"], sort_order="up")
+        assert len(respx.calls) == 0
+
+    @respx.mock
+    async def test_get_anomalies_rejects_severity_no_http(
+        self, aclient: AsyncNetskopeClient
+    ) -> None:
+        with pytest.raises(ValidationError, match="severity filter"):
+            await aclient.incidents.get_anomalies(["a@ex.com"], severity="Low")
         assert len(respx.calls) == 0
 
     @respx.mock

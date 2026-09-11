@@ -25,10 +25,12 @@ Example::
 
 from __future__ import annotations
 
+import functools
 from typing import Any
 
 from netskope.resources._base import AsyncResource, SyncResource
 from netskope.resources._extract import quote_id
+from netskope.resources._nsiq_response import AsyncNsiqResponses, NsiqResponses
 
 # All NSIQ routes hang off this v2 prefix (verified against the CLI and the
 # api-gateway relative paths, which resolve under /api/v2/nsiq).
@@ -119,6 +121,10 @@ def _build_fp_body(
 class NsiqResource(SyncResource):
     """Synchronous interface to the Netskope Intelligence (NSIQ) API."""
 
+    @functools.cached_property
+    def with_response(self) -> NsiqResponses:
+        return NsiqResponses(self._transport)
+
     def url_lookup(
         self,
         urls: str | list[str],
@@ -137,7 +143,9 @@ class NsiqResource(SyncResource):
             The decoded response body — ``{"query": {...}, "result": [...]}``.
         """
         return self._post(
-            _URLLOOKUP_PATH, json=_build_lookup_body(urls, disable_dns_lookup, category)
+            _URLLOOKUP_PATH,
+            json=_build_lookup_body(urls, disable_dns_lookup, category),
+            retry_safe=True,
         )
 
     def recategorize(
@@ -210,7 +218,7 @@ class NsiqResource(SyncResource):
         Returns:
             ``{"status": ..., "result": {<hash>: {...}}}``.
         """
-        return self._post(_RETROHUNT_GETINFO_PATH, json={"hash": _as_list(hashes)})
+        return self._post(_RETROHUNT_GETINFO_PATH, json={"hash": _as_list(hashes)}, retry_safe=True)
 
     def get_ioc(self, sample_hash: str) -> dict[str, Any]:
         """RetroHunt: get info for a single sample hash (md5 or sha256)."""
@@ -311,6 +319,10 @@ class NsiqResource(SyncResource):
 class AsyncNsiqResource(AsyncResource):
     """Asynchronous interface to the Netskope Intelligence (NSIQ) API."""
 
+    @functools.cached_property
+    def with_response(self) -> AsyncNsiqResponses:
+        return AsyncNsiqResponses(self._transport)
+
     async def url_lookup(
         self,
         urls: str | list[str],
@@ -323,7 +335,9 @@ class AsyncNsiqResource(AsyncResource):
         See :meth:`NsiqResource.url_lookup`.
         """
         return await self._post(
-            _URLLOOKUP_PATH, json=_build_lookup_body(urls, disable_dns_lookup, category)
+            _URLLOOKUP_PATH,
+            json=_build_lookup_body(urls, disable_dns_lookup, category),
+            retry_safe=True,
         )
 
     async def recategorize(
@@ -366,7 +380,9 @@ class AsyncNsiqResource(AsyncResource):
 
     async def lookup_iocs(self, hashes: str | list[str]) -> dict[str, Any]:
         """RetroHunt: batch sample-info lookup by hash.  See :meth:`NsiqResource.lookup_iocs`."""
-        return await self._post(_RETROHUNT_GETINFO_PATH, json={"hash": _as_list(hashes)})
+        return await self._post(
+            _RETROHUNT_GETINFO_PATH, json={"hash": _as_list(hashes)}, retry_safe=True
+        )
 
     async def get_ioc(self, sample_hash: str) -> dict[str, Any]:
         """RetroHunt: get info for a single sample hash (md5 or sha256)."""

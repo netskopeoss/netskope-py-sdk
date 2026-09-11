@@ -2,11 +2,68 @@
 
 from __future__ import annotations
 
-from typing import Any
+from typing import Any, Self
 
-from pydantic import Field
+from pydantic import BaseModel, ConfigDict, Field, JsonValue, field_validator, model_validator
 
 from netskope.models.common import NetskopeModel
+
+
+class _ScimRequest(BaseModel):
+    model_config = ConfigDict(
+        extra="forbid", strict=True, frozen=True, revalidate_instances="always"
+    )
+
+    @model_validator(mode="after")
+    def _omit_nulls(self) -> Self:
+        if any(getattr(self, key) is None for key in self.model_fields_set):
+            raise ValueError("Omit optional SCIM fields instead of supplying null.")
+        return self
+
+
+class ScimUserCreate(_ScimRequest):
+    """Provision one user with an explicit primary email and account state."""
+
+    user_name: str = Field(min_length=1)
+    email: str = Field(min_length=1)
+    active: bool = True
+
+
+class ScimUserPatch(_ScimRequest):
+    """Replace named SCIM attributes, including tenant extension paths.
+
+    JSON values retain their types. This model does not coerce a string such
+    as ``"false"`` to an account-state boolean.
+    """
+
+    fields: dict[str, JsonValue] = Field(min_length=1)
+
+    @field_validator("fields")
+    @classmethod
+    def _check_paths(cls, fields: dict[str, JsonValue]) -> dict[str, JsonValue]:
+        if any(not path.strip() for path in fields):
+            raise ValueError("SCIM replacement paths cannot be blank.")
+        return fields
+
+
+class ScimGroupCreate(_ScimRequest):
+    """Provision a group, optionally with explicit initial member IDs."""
+
+    display_name: str = Field(min_length=1)
+    member_ids: list[str] | None = None
+
+
+class ScimGroupPatch(_ScimRequest):
+    """Replace a name or the entire member list; an empty list clears it."""
+
+    display_name: str | None = Field(None, min_length=1)
+    member_ids: list[str] | None = None
+
+    @model_validator(mode="after")
+    def _require_changes(self) -> Self:
+        if not self.model_fields_set:
+            raise ValueError("Supply a display name or member list.")
+        return self
 
 
 class ScimEmail(NetskopeModel):

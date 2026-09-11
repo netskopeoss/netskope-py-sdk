@@ -23,6 +23,12 @@ from netskope._pagination import AsyncPaginatedResponse, SyncPaginatedResponse
 from netskope.exceptions import ValidationError
 from netskope.models.dns import DnsInheritanceGroup, DnsProfile
 from netskope.resources._base import AsyncResource, SyncResource
+from netskope.resources._dns_response import (
+    AsyncDnsInheritanceGroupsResponses,
+    AsyncDnsResponses,
+    DnsInheritanceGroupsResponses,
+    DnsResponses,
+)
 from netskope.resources._extract import extract_item, extract_list, validate_id
 
 _DNS_PATH = "/api/v2/profiles/dns"
@@ -112,6 +118,10 @@ def _build_deploy_payload(
 class DnsInheritanceGroupsResource(SyncResource):
     """Synchronous interface to ``/api/v2/profiles/dns/inheritancegroups``."""
 
+    @functools.cached_property
+    def with_response(self) -> DnsInheritanceGroupsResponses:
+        return DnsInheritanceGroupsResponses(self._transport)
+
     def list(
         self,
         *,
@@ -200,6 +210,10 @@ class DnsInheritanceGroupsResource(SyncResource):
 
 class DnsResource(SyncResource):
     """Synchronous interface to the DNS Security profiles API."""
+
+    @functools.cached_property
+    def with_response(self) -> DnsResponses:
+        return DnsResponses(self._transport)
 
     def list(
         self,
@@ -351,6 +365,10 @@ class DnsResource(SyncResource):
 class AsyncDnsInheritanceGroupsResource(AsyncResource):
     """Async interface to ``/api/v2/profiles/dns/inheritancegroups``."""
 
+    @functools.cached_property
+    def with_response(self) -> AsyncDnsInheritanceGroupsResponses:
+        return AsyncDnsInheritanceGroupsResponses(self._transport)
+
     def list(
         self,
         *,
@@ -417,6 +435,10 @@ class AsyncDnsInheritanceGroupsResource(AsyncResource):
 
 class AsyncDnsResource(AsyncResource):
     """Asynchronous interface to the DNS Security profiles API."""
+
+    @functools.cached_property
+    def with_response(self) -> AsyncDnsResponses:
+        return AsyncDnsResponses(self._transport)
 
     def list(
         self,

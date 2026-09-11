@@ -4,18 +4,17 @@ DEM covers application/network probes, experience-alert rules, a privileged
 metrics query surface, and ADEM (Advanced DEM) per-user/per-device telemetry
 exposed in the CLI as ``dem users``.
 
-Most DEM/ADEM responses are deeply nested, endpoint-specific graph or
-time-series structures with no stable public schema, so the resource layer
-returns raw ``dict``/``list`` payloads for those.  The typed models below cover
-only the handful of list-shaped, stable responses (experience alerts and the
-common ADEM entity summaries).
+Typed response accessors expose endpoint-specific graph, time-series, and
+entity models. Query aliases remain dynamic columns inside a validated row
+and metadata contract. Legacy raw-returning resource methods remain available.
 """
 
 from __future__ import annotations
 
 from enum import StrEnum
+from typing import Any, Literal, Self
 
-from pydantic import Field
+from pydantic import BaseModel, ConfigDict, Field, RootModel, model_validator
 
 from netskope.models.common import NetskopeModel
 
@@ -116,3 +115,259 @@ class NpaHost(NetskopeModel):
     npa_host: str | None = Field(None, alias="npaHost")
     exp_score: float | None = Field(None, alias="expScore")
     npa_applications: list[str] = Field(default_factory=list, alias="npaApplications")
+
+
+class DemQueryRow(RootModel[dict[str, Any]]):
+    """One dynamic select/alias row. Column names are chosen by the caller."""
+
+    model_config = ConfigDict(frozen=True)
+
+
+class DemQueryMetadata(NetskopeModel):
+    """Query execution information, not proof of complete pagination."""
+
+    fields: list[str] = Field(default_factory=list)
+    elapsed: float | None = None
+    total: int | None = Field(default=None, ge=0)
+    is_timeseries: bool | None = None
+    sampling_enabled: bool | None = None
+    extra_points: bool | None = None
+    slot_size: int | None = None
+    begin: str | int | None = None
+    end: str | int | None = None
+    call_date: str | None = None
+
+
+class DemQueryResult(NetskopeModel):
+    """A bounded query result with typed metadata and dynamic selected columns."""
+
+    data: list[DemQueryRow]
+    meta: DemQueryMetadata | None = None
+
+
+class DemProbe(NetskopeModel):
+    id: str | int | None = None
+    name: str | None = None
+    target: str | None = None
+    protocol: str | None = None
+    interval: int | None = None
+    enabled: bool | None = None
+
+
+class DemAlertRule(NetskopeModel):
+    id: str | int | None = None
+    name: str | None = None
+    metric: str | None = None
+    threshold: float | None = None
+    severity: str | None = None
+    probe_id: str | None = None
+
+
+class DemApp(NetskopeModel):
+    id: str | int | None = None
+    name: str | None = Field(default=None, alias="appName")
+    type: str | None = Field(default=None, alias="appType")
+
+
+class DemEntity(NetskopeModel):
+    user: str | None = None
+    user_id: str | None = None
+    exp_score: float | None = None
+    user_score: float | None = None
+    location: str | None = None
+    applications_count: int | None = Field(default=None, alias="applicationsCount")
+    devices: list[AdemDevice] = Field(default_factory=list)
+    user_groups: list[str] = Field(default_factory=list, alias="userGroups")
+
+
+class DemDefinitionField(NetskopeModel):
+    name: str
+    description: str | None = None
+    unit: str | None = None
+    sources: list[str] | None = None
+
+
+class DemDefinitionFunction(NetskopeModel):
+    name: str
+    valid_on_keys: bool | None = None
+
+
+class DemDefinitionComparison(NetskopeModel):
+    name: str
+    type: str | None = None
+
+
+class DemDefinitions(NetskopeModel):
+    metrics: list[DemDefinitionField]
+    keys: list[DemDefinitionField]
+    functions: list[DemDefinitionFunction | str]
+    comparisons: list[DemDefinitionComparison] = Field(default_factory=list)
+
+
+class AdemLocation(NetskopeModel):
+    city: str | None = None
+    country: str | None = None
+    region: str | None = None
+    latitude: float | None = None
+    longitude: float | None = None
+
+
+class AdemDeviceDetails(AdemDevice):
+    client_status: str | None = Field(default=None, alias="clientStatus")
+    client_version: str | None = Field(default=None, alias="clientVersion")
+    classification: str | None = Field(default=None, alias="deviceClassification")
+    device_score: float | None = Field(default=None, alias="deviceScore")
+    cpu: str | None = None
+    memory: str | None = None
+    model: str | None = None
+    geo: AdemLocation | None = None
+    gateway: str | None = None
+    pop: str | None = None
+    private_ip: str | None = Field(default=None, alias="privateIp")
+    public_ip: str | None = Field(default=None, alias="publicIp")
+    last_activity: int | None = Field(default=None, alias="lastActivity")
+
+
+class AdemScores(NetskopeModel):
+    exp_score: float | None = Field(default=None, alias="expScore")
+    device_score: float | None = Field(default=None, alias="deviceScore")
+    network_score: float | None = Field(default=None, alias="networkScore")
+    app_score: float | None = Field(default=None, alias="appScore")
+    npa_host_score: float | None = Field(default=None, alias="npaHostScore")
+
+
+class AdemAggregatedScores(NetskopeModel):
+    aggregation_type: str | None = Field(default=None, alias="aggregationType")
+    metrics: AdemScores
+
+
+class AdemMetricPoint(NetskopeModel):
+    timestamp: int | None = None
+    exp_score: float | None = Field(default=None, alias="expScore")
+    latency: float | None = None
+    packet_loss: float | None = Field(default=None, alias="packetLoss")
+    jitter: float | None = None
+    pop: str | None = None
+
+
+class AdemEvidence(NetskopeModel):
+    key: str | None = None
+    value: Any | None = None
+    obs: dict[str, Any] = Field(default_factory=dict)
+
+
+class AdemCause(NetskopeModel):
+    name: str | None = None
+    weight: float | None = None
+    evidence: AdemEvidence | None = None
+    caused_by: list[AdemCause] | None = Field(default=None, alias="causedBy")
+
+
+class AdemRcaItem(NetskopeModel):
+    starttime: int | None = None
+    endtime: int | None = None
+    root_cause: AdemCause | None = Field(default=None, alias="rootCause")
+    score_summary: dict[str, float | None] = Field(default_factory=dict, alias="scoreSummary")
+
+
+class AdemComponentScore(NetskopeModel):
+    score: float | None = None
+    utilization: float | None = None
+
+
+class AdemRootCause(NetskopeModel):
+    """Current RCA trees and older component-score responses."""
+
+    items: list[AdemRcaItem] = Field(default_factory=list)
+    cpu: AdemComponentScore | None = Field(default=None, alias="CPU_SCORE")
+    memory: AdemComponentScore | None = Field(default=None, alias="MEMORY_SCORE")
+    disk: AdemComponentScore | None = Field(default=None, alias="DISK_SCORE")
+
+
+class AdemGraphNode(NetskopeModel):
+    id: str | int
+    name: str | None = None
+    type: str | None = None
+    hop_type: str | None = Field(default=None, alias="hopType")
+    ip: str | None = None
+    latency_ms: float | None = Field(default=None, alias="latencyms")
+    packet_loss: float | None = Field(default=None, alias="packetLoss")
+    npa_host_details: NpaHost | None = Field(default=None, alias="npaHostDetails")
+
+
+class AdemGraphEdge(NetskopeModel):
+    source: str | int
+    destination: str | int
+    average_latency: float | None = Field(default=None, alias="avgLatency")
+    median_latency: float | None = Field(default=None, alias="medianLatency")
+    sessions: int | None = Field(default=None, alias="noOfSessions")
+    latency_ms: float | None = Field(default=None, alias="latencyms")
+
+
+class AdemNetworkGraph(NetskopeModel):
+    nodes: list[AdemGraphNode]
+    edges: list[AdemGraphEdge]
+    complete: bool | None = Field(default=None, alias="isComplete")
+    device_to_pop_latency_ms: float | None = Field(default=None, alias="deviceToPopLatencyms")
+
+
+class DemProbeCreate(BaseModel):
+    model_config = ConfigDict(extra="allow", strict=True, frozen=True)
+
+    name: str
+    target: str
+    protocol: str = "https"
+    interval: int | None = None
+
+
+class DemAlertRuleCreate(BaseModel):
+    model_config = ConfigDict(extra="allow", strict=True, frozen=True)
+
+    name: str
+    metric: str
+    threshold: float
+    severity: str = "medium"
+    probe_id: str | None = None
+
+
+class DemQueryRequest(BaseModel):
+    """Native DEM query arguments; arbitrary select expressions remain dynamic."""
+
+    model_config = ConfigDict(extra="forbid", populate_by_name=True, strict=True, frozen=True)
+
+    data_source: str = Field(alias="from")
+    select: list[Any] = Field(min_length=1)
+    begin: int | None = None
+    end: int | None = None
+    where: Any | None = None
+    group_by: list[str] | None = Field(default=None, alias="groupby")
+    order_by: list[Any] | None = Field(default=None, alias="orderby")
+    limit: int | None = Field(default=None, ge=0)
+    offset: int | None = Field(default=None, ge=0)
+
+    @model_validator(mode="after")
+    def _ordered_window(self) -> Self:
+        if self.begin is not None and self.end is not None and self.end <= self.begin:
+            raise ValueError("end must be greater than begin.")
+        return self
+
+
+class AdemQueryRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid", populate_by_name=True, strict=True, frozen=True)
+
+    start_time: int = Field(alias="starttime", ge=0)
+    end_time: int = Field(alias="endtime", ge=0)
+    user: str | None = None
+    device_id: str | None = Field(default=None, alias="deviceId")
+    user_location: list[AdemLocation] | None = Field(default=None, alias="userLocation")
+    aggregation_type: Literal["avg", "p95"] | None = Field(default=None, alias="aggregationType")
+    metric_type: Literal["all", "latency", "packet_loss", "jitter"] | None = Field(
+        default=None, alias="metricType"
+    )
+    npa_host: str | None = Field(default=None, alias="npaHost")
+
+    @model_validator(mode="after")
+    def _ordered_window(self) -> Self:
+        if self.end_time < self.start_time:
+            raise ValueError("end_time must not precede start_time.")
+        return self

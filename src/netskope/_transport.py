@@ -16,7 +16,7 @@ import httpx
 from netskope._config import NetskopeConfig
 from netskope._retry import async_send_with_retries, send_with_retries
 from netskope._version import __version__
-from netskope.exceptions import raise_for_status
+from netskope.exceptions import ClientClosedError, ValidationError, raise_for_status
 
 logger = logging.getLogger("netskope")
 
@@ -24,11 +24,52 @@ _USER_AGENT = f"netskope-python-sdk/{__version__}"
 
 
 def _build_headers(config: NetskopeConfig) -> dict[str, str]:
-    return {
-        "Netskope-Api-Token": config.api_token.get_secret_value(),
+    headers = {
         "User-Agent": _USER_AGENT,
         "Accept": "application/json",
     }
+    if config.api_token is not None:
+        headers["Netskope-Api-Token"] = config.api_token.get_secret_value()
+    return headers
+
+
+def _build_request(
+    config: NetskopeConfig,
+    method: str,
+    path: str,
+    *,
+    params: dict[str, Any] | None,
+    json: Any | None,
+    data: Any | None,
+    files: Any | None,
+) -> httpx.Request:
+    try:
+        base_url = httpx.URL(config.base_url)
+        url = base_url.join(path)
+    except httpx.InvalidURL as exc:
+        raise ValidationError("Invalid Netskope request URL.") from exc
+    if (url.scheme, url.host, url.port) != (base_url.scheme, base_url.host, base_url.port):
+        raise ValidationError("Requests must target the configured Netskope tenant.")
+    if url.userinfo:
+        raise ValidationError("Request URLs must not contain credentials.")
+
+    # Build independently of borrowed clients so their credentials, cookies,
+    # query defaults, and base URL cannot enter a Netskope request.
+    request = httpx.Request(
+        method,
+        url,
+        headers=_build_headers(config),
+        params=params,
+        json=json,
+        data=data,
+        files=files,
+        extensions={"timeout": httpx.Timeout(config.timeout).as_dict()},
+    )
+    if config.ci_session is not None:
+        httpx.Cookies({"ci_session": config.ci_session.get_secret_value()}).set_cookie_header(
+            request
+        )
+    return request
 
 
 def _resolve_verify(config: NetskopeConfig) -> bool | ssl.SSLContext:
@@ -43,7 +84,7 @@ def _resolve_verify(config: NetskopeConfig) -> bool | ssl.SSLContext:
 
 
 def _log_request(request: httpx.Request) -> None:
-    logger.debug("→ %s %s", request.method, request.url)
+    logger.debug("→ %s %s", request.method, request.url.path)
 
 
 def _log_response(response: httpx.Response) -> None:
@@ -60,14 +101,18 @@ def _log_response(response: httpx.Response) -> None:
 class SyncTransport:
     """Synchronous HTTP transport backed by :class:`httpx.Client`."""
 
-    def __init__(self, config: NetskopeConfig) -> None:
+    def __init__(self, config: NetskopeConfig, *, http_client: httpx.Client | None = None) -> None:
         self._config = config
-        self._client = httpx.Client(
-            base_url=config.base_url,
-            headers=_build_headers(config),
-            timeout=httpx.Timeout(config.timeout),
-            follow_redirects=False,
-            verify=_resolve_verify(config),
+        self._owns_client = http_client is None
+        self._closed = False
+        self._client = (
+            http_client
+            if http_client is not None
+            else httpx.Client(
+                timeout=httpx.Timeout(config.timeout),
+                follow_redirects=False,
+                verify=_resolve_verify(config),
+            )
         )
 
     def request(
@@ -79,15 +124,22 @@ class SyncTransport:
         json: Any | None = None,
         data: Any | None = None,
         files: Any | None = None,
+        retry_safe: bool | None = None,
     ) -> httpx.Response:
         """Send an HTTP request and return the validated response.
+
+        ``retry_safe`` overrides the GET/HEAD/OPTIONS retry default. Requests
+        with streaming bodies are sent once even when marked safe.
 
         Raises:
             netskope.exceptions.APIError: On any non-2xx response.
             netskope.exceptions.ConnectionError: On network failure.
             netskope.exceptions.TimeoutError: On request timeout.
         """
-        request = self._client.build_request(
+        if self._closed:
+            raise ClientClosedError("The Netskope client is closed.")
+        request = _build_request(
+            self._config,
             method,
             path,
             params=params,
@@ -96,27 +148,41 @@ class SyncTransport:
             files=files,
         )
         _log_request(request)
-        response = send_with_retries(self._client, request, self._config)
+        response = send_with_retries(self._client, request, self._config, retry_safe=retry_safe)
         _log_response(response)
         raise_for_status(response)
         return response
 
+    @property
+    def closed(self) -> bool:
+        """Whether this transport has been closed."""
+        return self._closed
+
     def close(self) -> None:
-        """Close the underlying HTTP connection pool."""
-        self._client.close()
+        """Close this transport and its connection pool, if owned."""
+        if not self._closed:
+            self._closed = True
+            if self._owns_client:
+                self._client.close()
 
 
 class AsyncTransport:
     """Asynchronous HTTP transport backed by :class:`httpx.AsyncClient`."""
 
-    def __init__(self, config: NetskopeConfig) -> None:
+    def __init__(
+        self, config: NetskopeConfig, *, http_client: httpx.AsyncClient | None = None
+    ) -> None:
         self._config = config
-        self._client = httpx.AsyncClient(
-            base_url=config.base_url,
-            headers=_build_headers(config),
-            timeout=httpx.Timeout(config.timeout),
-            follow_redirects=False,
-            verify=_resolve_verify(config),
+        self._owns_client = http_client is None
+        self._closed = False
+        self._client = (
+            http_client
+            if http_client is not None
+            else httpx.AsyncClient(
+                timeout=httpx.Timeout(config.timeout),
+                follow_redirects=False,
+                verify=_resolve_verify(config),
+            )
         )
 
     async def request(
@@ -128,9 +194,13 @@ class AsyncTransport:
         json: Any | None = None,
         data: Any | None = None,
         files: Any | None = None,
+        retry_safe: bool | None = None,
     ) -> httpx.Response:
         """Send an async HTTP request and return the validated response."""
-        request = self._client.build_request(
+        if self._closed:
+            raise ClientClosedError("The Netskope client is closed.")
+        request = _build_request(
+            self._config,
             method,
             path,
             params=params,
@@ -139,11 +209,21 @@ class AsyncTransport:
             files=files,
         )
         _log_request(request)
-        response = await async_send_with_retries(self._client, request, self._config)
+        response = await async_send_with_retries(
+            self._client, request, self._config, retry_safe=retry_safe
+        )
         _log_response(response)
         raise_for_status(response)
         return response
 
+    @property
+    def closed(self) -> bool:
+        """Whether this transport has been closed."""
+        return self._closed
+
     async def close(self) -> None:
-        """Close the underlying async HTTP connection pool."""
-        await self._client.aclose()
+        """Close this transport and its connection pool, if owned."""
+        if not self._closed:
+            self._closed = True
+            if self._owns_client:
+                await self._client.aclose()

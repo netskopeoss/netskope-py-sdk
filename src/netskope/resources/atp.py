@@ -30,9 +30,11 @@ Example::
 from __future__ import annotations
 
 import base64
+import functools
 from pathlib import Path
 from typing import Any
 
+from netskope.resources._atp_response import AsyncAtpResponses, AtpResponses
 from netskope.resources._base import AsyncResource, SyncResource
 from netskope.resources._extract import quote_id
 
@@ -87,6 +89,10 @@ def _urlscan_artifacts_path(submission_id: str) -> str:
 
 class AtpResource(SyncResource):
     """Synchronous interface to the Advanced Threat Protection API."""
+
+    @functools.cached_property
+    def with_response(self) -> AtpResponses:
+        return AtpResponses(self._transport)
 
     # -- Sandbox on-demand ---------------------------------------------------
 
@@ -186,6 +192,10 @@ class AtpResource(SyncResource):
 
 class AsyncAtpResource(AsyncResource):
     """Asynchronous interface to the Advanced Threat Protection API."""
+
+    @functools.cached_property
+    def with_response(self) -> AsyncAtpResponses:
+        return AsyncAtpResponses(self._transport)
 
     # -- Sandbox on-demand ---------------------------------------------------
 

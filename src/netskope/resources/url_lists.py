@@ -20,14 +20,29 @@ Example::
 from __future__ import annotations
 
 import builtins
-from typing import Any
+from functools import cached_property
+from typing import TYPE_CHECKING, Any
+
+if TYPE_CHECKING:
+    from netskope.resources._url_list_response import AsyncUrlListResponses, UrlListResponses
 
 from netskope._pagination import AsyncPaginatedResponse, SyncPaginatedResponse
+from netskope.exceptions import ResponseValidationError, ValidationError
 from netskope.models.url_lists import UrlList
 from netskope.resources._base import AsyncResource, SyncResource
+from netskope.resources._extract import validate_id
 
 _PATH = "/api/v2/policy/urllist"
 _DEPLOY_PATH = "/api/v2/policy/deploy"
+
+# A record carries its own identity or its payload; an envelope carries neither,
+# so a record whose ``data`` came back empty is still recognized by ``id``/``name``.
+_RECORD_KEYS = frozenset({"id", "name", "urls", "type"})
+
+_LIST_TYPES = ("exact", "regex")
+
+# The fields the API requires on every PUT, so a merge cannot silently drop them.
+_REQUIRED_ON_UPDATE = frozenset({"name", "urls", "type"})
 
 
 def _flatten_url_list(item: dict[str, Any]) -> dict[str, Any]:
@@ -55,29 +70,131 @@ def _extract(body: Any) -> list[dict[str, Any]]:
     return [_flatten_url_list(item) for item in items if isinstance(item, dict)]
 
 
+def _single(items: builtins.list[Any]) -> dict[str, Any]:
+    return items[0] if len(items) == 1 and isinstance(items[0], dict) else {}
+
+
+def _is_record(candidate: dict[str, Any]) -> bool:
+    """Whether a dict is a URL list itself rather than an envelope around one."""
+    return bool(_RECORD_KEYS & candidate.keys())
+
+
+def _as_record(candidate: dict[str, Any]) -> dict[str, Any]:
+    """Flatten one candidate into a record, or state that it is not one."""
+    flat = _flatten_url_list(candidate)
+    return flat if _is_record(flat) else {}
+
+
 def _extract_one(body: Any) -> dict[str, Any]:
     """Extract a single URL list item from any of the response shapes the API returns.
 
-    POST returns ``[{...}]`` while GET/PUT return ``{...}``. The item itself wraps
-    ``urls``/``type`` under a nested ``data`` key, which :func:`_flatten_url_list`
-    merges into the top level so the model receives the fields it expects.
+    POST returns ``[{...}]`` while GET/PUT return the bare record, ``{"data":
+    {...}}``, ``{"data": [{...}]}``, or a ``urllists`` collection nested under
+    ``data`` or at the top level.  :func:`_flatten_url_list` merges a record's
+    nested payload up.  An empty dict means no single record was found;
+    :func:`_require_record` turns that into an error.
     """
     if isinstance(body, list):
-        item = body[0] if body and isinstance(body[0], dict) else {}
-    elif isinstance(body, dict):
-        item = body
-    else:
-        item = {}
-    return _flatten_url_list(item)
+        return _as_record(_single(body))
+    if not isinstance(body, dict):
+        return {}
+    if _is_record(body):
+        return _as_record(body)
+    data = body.get("data")
+    if isinstance(data, list):
+        return _as_record(_single(data))
+    nested = data.get("urllists") if isinstance(data, dict) else None
+    for collection in (nested, body.get("urllists")):
+        if isinstance(collection, list):
+            return _as_record(_single(collection))
+    return _as_record(data) if isinstance(data, dict) else {}
 
 
-def _build_payload(name: str, urls: builtins.list[str], list_type: str) -> dict[str, Any]:
-    """Build the request body the API requires: name at top, urls/type wrapped in ``data``."""
-    return {"name": name, "data": {"urls": urls, "type": list_type}}
+def _require_record(
+    body: Any,
+    *,
+    request_method: str | None = None,
+    request_path: str | None = None,
+) -> dict[str, Any]:
+    """Return the single URL list in *body*, refusing an absent or ambiguous record."""
+    record = _extract_one(body)
+    if not record:
+        raise ResponseValidationError(
+            "The response did not contain exactly one URL list.",
+            request_method=request_method,
+            request_path=request_path,
+        )
+    return record
+
+
+def _list_path(list_id: int) -> str:
+    """Build the single-list path, rejecting an identifier that could alter it."""
+    return f"{_PATH}/{validate_id(list_id, 'list_id')}"
+
+
+def _merge_source(current: UrlList, list_id: int) -> UrlList:
+    """Reject a read that cannot safely seed the full-body PUT ``update`` sends.
+
+    ``UrlList.urls`` defaults to an empty list, so an unrecognized envelope would
+    otherwise merge into a PUT that erases every URL in the list.
+    """
+    missing = _REQUIRED_ON_UPDATE - current.model_fields_set
+    if missing:
+        raise ResponseValidationError(
+            f"The URL list read did not return {', '.join(sorted(missing))}; "
+            "refusing to build an update from it.",
+            request_method="GET",
+            request_path=_list_path(list_id),
+        )
+    if str(current.id) != str(list_id):
+        raise ResponseValidationError(
+            "The URL list read identifies a different list.",
+            request_method="GET",
+            request_path=_list_path(list_id),
+        )
+    return current
+
+
+def _payload(name: str, urls: builtins.list[str], list_type: str) -> dict[str, Any]:
+    """Validate the caller's fields and build the body the API requires.
+
+    ``name`` sits at the top level; ``urls`` and ``type`` are wrapped in ``data``.
+    """
+    if list_type not in _LIST_TYPES:
+        raise ValidationError(f"list_type must be one of: {', '.join(_LIST_TYPES)}.")
+    if (
+        not isinstance(name, str)
+        or not isinstance(urls, list)
+        or any(not isinstance(url, str) for url in urls)
+    ):
+        raise ValidationError("URL lists require a name and a list of URL strings.")
+    return {"name": name, "data": {"urls": list(urls), "type": list_type}}
+
+
+def _update_fields(
+    name: str | None,
+    urls: builtins.list[str] | None,
+    list_type: str | None,
+) -> None:
+    """Reject an update with nothing to change or with values the API refuses."""
+    if name is None and urls is None and list_type is None:
+        raise ValidationError("Provide name, urls, or list_type to update a URL list.")
+    _payload(
+        name if name is not None else "",
+        urls if urls is not None else [],
+        list_type if list_type is not None else "exact",
+    )
 
 
 class UrlListsResource(SyncResource):
     """Synchronous interface to ``/api/v2/policy/urllist``."""
+
+    @cached_property
+    def with_response(self) -> UrlListResponses:
+        """Opt into bounded typed responses with their original wire values."""
+        from netskope.resources._url_list_response import UrlListResponses
+
+        return UrlListResponses(self._transport)
 
     def list(self, *, page_size: int = 100) -> SyncPaginatedResponse[UrlList]:
         """List all URL lists with automatic pagination.
@@ -103,9 +220,18 @@ class UrlListsResource(SyncResource):
 
         Returns:
             A :class:`~netskope.models.url_lists.UrlList` instance.
+
+        Raises:
+            netskope.exceptions.ValidationError: If *list_id* is unsafe to
+                interpolate into the request path.
+            netskope.exceptions.ResponseValidationError: If the response does
+                not carry exactly one URL list.
         """
-        body = self._get(f"{_PATH}/{list_id}")
-        return UrlList.model_validate(_extract_one(body))
+        path = _list_path(list_id)
+        body = self._get(path)
+        return UrlList.model_validate(
+            _require_record(body, request_method="GET", request_path=path)
+        )
 
     def create(
         self,
@@ -123,9 +249,17 @@ class UrlListsResource(SyncResource):
 
         Returns:
             The newly created :class:`~netskope.models.url_lists.UrlList`.
+
+        Raises:
+            netskope.exceptions.ValidationError: If *name*, *urls*, or
+                *list_type* is not a value the API accepts.
+            netskope.exceptions.ResponseValidationError: If the response does
+                not carry exactly one URL list.
         """
-        body = self._post(_PATH, json=_build_payload(name, urls, list_type))
-        return UrlList.model_validate(_extract_one(body))
+        body = self._post(_PATH, json=_payload(name, urls, list_type))
+        return UrlList.model_validate(
+            _require_record(body, request_method="POST", request_path=_PATH)
+        )
 
     def update(
         self,
@@ -150,18 +284,27 @@ class UrlListsResource(SyncResource):
 
         Returns:
             The updated :class:`~netskope.models.url_lists.UrlList`.
+
+        Raises:
+            netskope.exceptions.ValidationError: If no field was provided, or a
+                provided field is not a value the API accepts.
+            netskope.exceptions.ResponseValidationError: If the current list
+                cannot be read back in full, so merging would erase fields.
         """
-        if name is None and urls is None and list_type is None:
-            raise ValueError("update() requires at least one of name, urls, or list_type")
-        current = self.get(list_id)
-        merged_name = name if name is not None else (current.name or "")
-        merged_urls = urls if urls is not None else list(current.urls)
-        merged_type = list_type if list_type is not None else (current.type or "exact")
+        _update_fields(name, urls, list_type)
+        path = _list_path(list_id)
+        current = _merge_source(self.get(list_id), list_id)
         body = self._put(
-            f"{_PATH}/{list_id}",
-            json=_build_payload(merged_name, merged_urls, merged_type),
+            path,
+            json=_payload(
+                name if name is not None else (current.name or ""),
+                urls if urls is not None else list(current.urls),
+                list_type if list_type is not None else (current.type or "exact"),
+            ),
         )
-        return UrlList.model_validate(_extract_one(body))
+        return UrlList.model_validate(
+            _require_record(body, request_method="PUT", request_path=path)
+        )
 
     def delete(self, list_id: int) -> None:
         """Delete a URL list.
@@ -169,7 +312,7 @@ class UrlListsResource(SyncResource):
         Args:
             list_id: The URL list identifier.
         """
-        self._delete(f"{_PATH}/{list_id}")
+        self._delete(_list_path(list_id))
 
     def deploy(self) -> dict[str, Any]:
         """Deploy all pending policy changes.
@@ -182,6 +325,13 @@ class UrlListsResource(SyncResource):
 
 class AsyncUrlListsResource(AsyncResource):
     """Asynchronous interface to ``/api/v2/policy/urllist``."""
+
+    @cached_property
+    def with_response(self) -> AsyncUrlListResponses:
+        """Opt into bounded typed responses with their original wire values."""
+        from netskope.resources._url_list_response import AsyncUrlListResponses
+
+        return AsyncUrlListResponses(self._transport)
 
     def list(self, *, page_size: int = 100) -> AsyncPaginatedResponse[UrlList]:
         """List all URL lists with automatic pagination."""
@@ -196,9 +346,15 @@ class AsyncUrlListsResource(AsyncResource):
         )
 
     async def get(self, list_id: int) -> UrlList:
-        """Get a URL list by ID."""
-        body = await self._get(f"{_PATH}/{list_id}")
-        return UrlList.model_validate(_extract_one(body))
+        """Get a URL list by ID.
+
+        See :meth:`UrlListsResource.get`.
+        """
+        path = _list_path(list_id)
+        body = await self._get(path)
+        return UrlList.model_validate(
+            _require_record(body, request_method="GET", request_path=path)
+        )
 
     async def create(
         self,
@@ -207,9 +363,14 @@ class AsyncUrlListsResource(AsyncResource):
         *,
         list_type: str = "exact",
     ) -> UrlList:
-        """Create a new URL list."""
-        body = await self._post(_PATH, json=_build_payload(name, urls, list_type))
-        return UrlList.model_validate(_extract_one(body))
+        """Create a new URL list.
+
+        See :meth:`UrlListsResource.create`.
+        """
+        body = await self._post(_PATH, json=_payload(name, urls, list_type))
+        return UrlList.model_validate(
+            _require_record(body, request_method="POST", request_path=_PATH)
+        )
 
     async def update(
         self,
@@ -224,23 +385,26 @@ class AsyncUrlListsResource(AsyncResource):
         The API requires ``name``, ``data.urls``, and ``data.type`` on every PUT, so
         this method GETs the current list first and merges the provided fields over
         the existing values. At least one of ``name``, ``urls``, or ``list_type`` must
-        be provided.
+        be provided.  See :meth:`UrlListsResource.update`.
         """
-        if name is None and urls is None and list_type is None:
-            raise ValueError("update() requires at least one of name, urls, or list_type")
-        current = await self.get(list_id)
-        merged_name = name if name is not None else (current.name or "")
-        merged_urls = urls if urls is not None else list(current.urls)
-        merged_type = list_type if list_type is not None else (current.type or "exact")
+        _update_fields(name, urls, list_type)
+        path = _list_path(list_id)
+        current = _merge_source(await self.get(list_id), list_id)
         body = await self._put(
-            f"{_PATH}/{list_id}",
-            json=_build_payload(merged_name, merged_urls, merged_type),
+            path,
+            json=_payload(
+                name if name is not None else (current.name or ""),
+                urls if urls is not None else list(current.urls),
+                list_type if list_type is not None else (current.type or "exact"),
+            ),
         )
-        return UrlList.model_validate(_extract_one(body))
+        return UrlList.model_validate(
+            _require_record(body, request_method="PUT", request_path=path)
+        )
 
     async def delete(self, list_id: int) -> None:
         """Delete a URL list."""
-        await self._delete(f"{_PATH}/{list_id}")
+        await self._delete(_list_path(list_id))
 
     async def deploy(self) -> dict[str, Any]:
         """Deploy all pending policy changes."""

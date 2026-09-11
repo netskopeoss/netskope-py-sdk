@@ -3,10 +3,12 @@
 from __future__ import annotations
 
 from enum import StrEnum
-from typing import Any
+from ipaddress import IPv4Address
+from typing import Any, Literal, Self
 
-from pydantic import Field
+from pydantic import Field, field_validator, model_validator
 
+from netskope.models._npa_requests import NpaRequest
 from netskope.models.common import NetskopeModel
 
 
@@ -99,3 +101,57 @@ class PublisherUpgradeProfile(NetskopeModel):
     will_start: bool | None = None
     created_at: str | None = None
     updated_at: str | None = None
+
+
+class LocalBrokerPatch(NpaRequest):
+    """Local-broker changes, using the gateway's location field names."""
+
+    city: str | None = Field(None, alias="city_name")
+    region: str | None = Field(None, alias="region_name")
+    country: str | None = Field(None, alias="country_name")
+    country_code: str | None = None
+    latitude: float | None = Field(None, ge=-90, le=90)
+    longitude: float | None = Field(None, ge=-180, le=180)
+    custom_public_ip: str | None = None
+    custom_private_ip: str | None = None
+    label_ids: list[str] | None = None
+    access_via_public_ip: Literal["NONE", "OFF_PREM", "ON_PREM", "ON_OFF_PREM"] | None = None
+
+    @field_validator("custom_public_ip", "custom_private_ip")
+    @classmethod
+    def _ipv4(cls, value: str | None) -> str | None:
+        if value is not None:
+            IPv4Address(value)
+        return value
+
+    @model_validator(mode="after")
+    def _not_empty(self) -> Self:
+        if not self.model_fields_set:
+            raise ValueError("Provide at least one local-broker field.")
+        return self
+
+
+class LocalBrokerCreate(LocalBrokerPatch):
+    name: str
+
+
+class UpgradeProfileCreate(NpaRequest):
+    name: str
+    docker_tag: str
+    frequency: str
+    timezone: str
+    release_type: Literal["Beta", "Latest", "Latest-1", "Latest-2"]
+    enabled: bool
+    timezone_id: int | None = None
+
+
+class UpgradeProfileUpdate(UpgradeProfileCreate):
+    """A complete replacement profile, without an implicit pre-write read."""
+
+    id: int
+
+
+class UpgradeProfileAssignment(NetskopeModel):
+    status: str | None = None
+    message: str | None = None
+    updated: bool | None = None

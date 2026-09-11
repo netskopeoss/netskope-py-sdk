@@ -71,9 +71,12 @@ class NetskopeConfig:
         tenant: The Netskope tenant hostname (e.g. ``"mycompany.goskope.com"``).
             Falls back to the ``NETSKOPE_TENANT`` environment variable.
         api_token: A Netskope REST API v2 token. Falls back to the
-            ``NETSKOPE_API_TOKEN`` environment variable.
+            ``NETSKOPE_API_TOKEN`` environment variable unless *ci_session*
+            is supplied.
+        ci_session: A browser session cookie, mutually exclusive with *api_token*.
         timeout: HTTP request timeout in seconds.
-        max_retries: Maximum number of automatic retries for transient errors.
+        max_retries: Maximum automatic retries for transient errors on operations
+            that are safe to repeat.
         backoff_factor: Base multiplier for exponential backoff between retries.
         retry_on_status: HTTP status codes that trigger an automatic retry.
         verify: TLS verification setting. ``True`` (default) verifies against
@@ -84,21 +87,36 @@ class NetskopeConfig:
             ``SSL_CERT_FILE``, or ``CURL_CA_BUNDLE`` environment variables.
 
     Raises:
-        netskope.exceptions.ValidationError: If *tenant* or *api_token*
-            cannot be resolved from any source.
+        netskope.exceptions.ValidationError: If the tenant or credentials
+            cannot be resolved, or both credential types are supplied.
     """
 
     tenant: str
-    api_token: SecretStr
+    api_token: SecretStr | None = None
     timeout: float = _DEFAULT_TIMEOUT
     max_retries: int = _DEFAULT_MAX_RETRIES
     backoff_factor: float = _DEFAULT_BACKOFF_FACTOR
     retry_on_status: frozenset[int] = field(default=_DEFAULT_RETRY_STATUSES)
     verify: bool | str = True
+    ci_session: SecretStr | None = None
+
+    def __post_init__(self) -> None:
+        from netskope.exceptions import ValidationError
+
+        if self.api_token is not None and self.ci_session is not None:
+            raise ValidationError("api_token and ci_session are mutually exclusive.")
+        if not self.api_token and not self.ci_session:
+            raise ValidationError(
+                "An API token or ci_session is required. Pass api_token='...' or "
+                "ci_session='...', or set the NETSKOPE_API_TOKEN environment variable."
+            )
+        if self.max_retries < 0:
+            raise ValidationError("max_retries must be non-negative.")
 
     def __repr__(self) -> str:
         return (
-            f"NetskopeConfig(tenant={self.tenant!r}, api_token=SecretStr('**********'), "
+            f"NetskopeConfig(tenant={self.tenant!r}, api_token={self.api_token!r}, "
+            f"ci_session={self.ci_session!r}, "
             f"timeout={self.timeout}, max_retries={self.max_retries})"
         )
 
@@ -116,6 +134,7 @@ class NetskopeConfig:
         *,
         tenant: str | None = None,
         api_token: str | None = None,
+        ci_session: str | None = None,
         timeout: float = _DEFAULT_TIMEOUT,
         max_retries: int = _DEFAULT_MAX_RETRIES,
         backoff_factor: float = _DEFAULT_BACKOFF_FACTOR,
@@ -143,24 +162,26 @@ class NetskopeConfig:
         from netskope.exceptions import ValidationError
 
         resolved_tenant = tenant or os.environ.get("NETSKOPE_TENANT")
-        resolved_token = api_token or os.environ.get("NETSKOPE_API_TOKEN")
+        if api_token is not None and ci_session is not None:
+            raise ValidationError("api_token and ci_session are mutually exclusive.")
+        resolved_token = (
+            None if ci_session is not None else api_token or os.environ.get("NETSKOPE_API_TOKEN")
+        )
 
         if not resolved_tenant:
             raise ValidationError(
                 "A Netskope tenant is required. Pass tenant='mycompany.goskope.com' "
                 "or set the NETSKOPE_TENANT environment variable."
             )
-        if not resolved_token:
-            raise ValidationError(
-                "An API token is required. Pass api_token='...' "
-                "or set the NETSKOPE_API_TOKEN environment variable."
-            )
-
         # Normalize: strip whitespace, protocol prefix, and trailing slashes.
         resolved_tenant = (
             resolved_tenant.strip().removeprefix("https://").removeprefix("http://").rstrip("/")
         )
         host = resolved_tenant
+        if any(char in host for char in "/?#@\\") or any(char.isspace() for char in host):
+            raise ValidationError(
+                "Tenant must be a hostname without credentials, a path, or a query."
+            )
 
         # Block IP addresses (prevents SSRF to metadata services, RFC 1918, etc.)
         if _IP_RE.match(host):
@@ -203,10 +224,13 @@ class NetskopeConfig:
 
         return cls(
             tenant=resolved_tenant,
-            api_token=SecretStr(resolved_token),
+            api_token=SecretStr(resolved_token) if resolved_token else None,
+            ci_session=SecretStr(ci_session) if ci_session else None,
             timeout=timeout,
             max_retries=max_retries,
             backoff_factor=backoff_factor,
-            retry_on_status=retry_on_status or _DEFAULT_RETRY_STATUSES,
+            retry_on_status=(
+                retry_on_status if retry_on_status is not None else _DEFAULT_RETRY_STATUSES
+            ),
             verify=resolved_verify,
         )

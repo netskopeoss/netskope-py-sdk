@@ -9,18 +9,20 @@ Example::
     for token_set in enrollment.list_token_sets():
         print(f"{token_set.id} created {token_set.created_date}")
 
-    created = enrollment.create_token_set("Engineering Team", max_devices=100)
+    created = enrollment.with_response.create_token_set().parse()
     enrollment.delete_token_set(created.id)
 """
 
 from __future__ import annotations
 
 import builtins
+import functools
 from typing import Any
 
 from netskope.exceptions import ValidationError
 from netskope.models.enrollment import EnrollmentTokenSet
 from netskope.resources._base import AsyncResource, SyncResource
+from netskope.resources._enrollment_response import AsyncEnrollmentResponses, EnrollmentResponses
 from netskope.resources._extract import extract_item, extract_list, validate_id
 
 _TOKENSET_PATH = "/api/v2/enrollment/tokenset"
@@ -94,6 +96,10 @@ def _parse_list(body: Any) -> builtins.list[EnrollmentTokenSet]:
 class EnrollmentResource(SyncResource):
     """Synchronous interface to the Enrollment API."""
 
+    @functools.cached_property
+    def with_response(self) -> EnrollmentResponses:
+        return EnrollmentResponses(self._transport)
+
     def list_token_sets(
         self,
         *,
@@ -119,7 +125,10 @@ class EnrollmentResource(SyncResource):
         *,
         max_devices: int | None = None,
     ) -> EnrollmentTokenSet:
-        """Create an enrollment token set.
+        """Legacy token-set creation with unverified name/device-limit fields.
+
+        Prefer ``with_response.create_token_set()`` for the canonical
+        bodyless POST contract. This method preserves historical behavior.
 
         Args:
             name: Display name for the token set.
@@ -188,6 +197,10 @@ class EnrollmentResource(SyncResource):
 
 class AsyncEnrollmentResource(AsyncResource):
     """Asynchronous interface to the Enrollment API."""
+
+    @functools.cached_property
+    def with_response(self) -> AsyncEnrollmentResponses:
+        return AsyncEnrollmentResponses(self._transport)
 
     async def list_token_sets(
         self,

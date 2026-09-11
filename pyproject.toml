@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "netskope-py-sdk"
-version = "1.1.0"
+version = "1.2.0.dev0"
 description = "The official Netskope Python SDK — a modern, typed, and intuitive interface to the Netskope REST API v2."
 readme = "README.md"
 license = "MIT"
@@ -29,12 +29,12 @@ classifiers = [
     "Development Status :: 5 - Production/Stable",
     "Intended Audience :: Developers",
     "Intended Audience :: System Administrators",
-    "License :: OSI Approved :: MIT License",
     "Operating System :: OS Independent",
     "Programming Language :: Python :: 3",
     "Programming Language :: Python :: 3.11",
     "Programming Language :: Python :: 3.12",
     "Programming Language :: Python :: 3.13",
+    "Programming Language :: Python :: 3.14",
     "Topic :: Security",
     "Topic :: Software Development :: Libraries :: Python Modules",
     "Typing :: Typed",
@@ -44,17 +44,6 @@ dependencies = [
     "pydantic>=2.0,<3.0",
 ]
 
-[project.optional-dependencies]
-dev = [
-    "pytest>=8.0",
-    "pytest-asyncio>=0.24",
-    "pytest-httpx>=0.34",
-    "pytest-cov>=6.0",
-    "respx>=0.22",
-    "mypy>=1.13",
-    "ruff>=0.8",
-]
-
 [project.urls]
 Homepage = "https://github.com/netSkopeoss/netskope-py-sdk"
 Documentation = "https://netSkopeoss.github.io/netskope-py-sdk"
@@ -62,8 +51,24 @@ Repository = "https://github.com/netSkopeoss/netskope-py-sdk"
 Issues = "https://github.com/netSkopeoss/netskope-py-sdk/issues"
 Changelog = "https://github.com/netSkopeoss/netskope-py-sdk/blob/main/CHANGELOG.md"
 
+[dependency-groups]
+dev = [
+    "pytest>=8.0",
+    "pytest-asyncio>=0.24",
+    "pytest-cov>=6.0",
+    "respx>=0.22",
+    "mypy>=1.13",
+    "ruff>=0.15",
+]
+
 [tool.hatch.build.targets.wheel]
 packages = ["src/netskope"]
+
+[tool.hatch.build.targets.sdist]
+exclude = [
+    "CLAUDE.md",
+    "how-to-build-a-great-golang-sdk.md",
+]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

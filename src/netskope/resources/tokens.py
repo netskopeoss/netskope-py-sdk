@@ -23,6 +23,7 @@ Example::
 from __future__ import annotations
 
 import builtins
+import functools
 from collections.abc import Mapping, Sequence
 from datetime import datetime
 from typing import Any
@@ -31,6 +32,7 @@ from netskope.exceptions import ValidationError
 from netskope.models.tokens import ApiToken, ApiTokenEndpoint
 from netskope.resources._base import AsyncResource, SyncResource
 from netskope.resources._extract import extract_item, extract_list, validate_id
+from netskope.resources._token_response import AsyncTokensResponses, TokensResponses
 
 _TOKENS_PATH = "/api/v2/auth/tokens"
 
@@ -117,6 +119,10 @@ def _build_list_params(fields: builtins.list[str] | None) -> dict[str, Any]:
 
 class TokensResource(SyncResource):
     """Synchronous interface to the API Token Management API."""
+
+    @functools.cached_property
+    def with_response(self) -> TokensResponses:
+        return TokensResponses(self._transport)
 
     def list(self, *, fields: builtins.list[str] | None = None) -> builtins.list[ApiToken]:
         """List all API tokens in the tenant.
@@ -228,6 +234,10 @@ class TokensResource(SyncResource):
 
 class AsyncTokensResource(AsyncResource):
     """Asynchronous interface to the API Token Management API."""
+
+    @functools.cached_property
+    def with_response(self) -> AsyncTokensResponses:
+        return AsyncTokensResponses(self._transport)
 
     async def list(self, *, fields: builtins.list[str] | None = None) -> builtins.list[ApiToken]:
         """List all API tokens.  See :meth:`TokensResource.list`."""

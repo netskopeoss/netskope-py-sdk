@@ -4,9 +4,9 @@ Covers the ``/api/v2/ips`` endpoints: feature status, allowlist, signature
 reference list and filtered signature search, Alert Only mode, signature
 overrides, the user notification template, and threat hunting config.
 
-All methods return the raw response body as a ``dict`` — the transport
-raises :class:`~netskope.exceptions.APIError` for error responses, so a
-returned dict always represents a successful call.
+Legacy methods retain their dictionary return values. ``with_response``
+offers typed status, allowlist, and signature-reference contracts alongside
+the original HTTP response.
 
 Example::
 
@@ -20,10 +20,12 @@ Example::
 
 from __future__ import annotations
 
+import functools
 from typing import Any
 
 from netskope.exceptions import ValidationError
 from netskope.resources._base import AsyncResource, SyncResource
+from netskope.resources._ips_response import AsyncIpsResponses, IpsResponses
 
 _STATUS_PATH = "/api/v2/ips/status"
 _ALLOWLIST_PATH = "/api/v2/ips/allowlist"
@@ -177,6 +179,10 @@ def _build_threat_hunting_payload(
 class IpsResource(SyncResource):
     """Synchronous interface to the IPS API."""
 
+    @functools.cached_property
+    def with_response(self) -> IpsResponses:
+        return IpsResponses(self._transport)
+
     def status(self) -> dict[str, Any]:
         """Get the IPS feature status.
 
@@ -298,7 +304,7 @@ class IpsResource(SyncResource):
         payload = _build_signature_search_payload(
             limit, offset, reference, cvss_severity, traffic_type, sig_id, name, keyword
         )
-        return self._post(_SIGNATURE_SEARCH_PATH, json=payload)
+        return self._post(_SIGNATURE_SEARCH_PATH, json=payload, retry_safe=True)
 
     def get_alert_only_mode(self) -> dict[str, Any]:
         """Get the IPS Alert Only mode status."""
@@ -410,6 +416,10 @@ class IpsResource(SyncResource):
 class AsyncIpsResource(AsyncResource):
     """Asynchronous interface to the IPS API."""
 
+    @functools.cached_property
+    def with_response(self) -> AsyncIpsResponses:
+        return AsyncIpsResponses(self._transport)
+
     async def status(self) -> dict[str, Any]:
         """Get the IPS feature status."""
         return await self._get(_STATUS_PATH)
@@ -480,7 +490,7 @@ class AsyncIpsResource(AsyncResource):
         payload = _build_signature_search_payload(
             limit, offset, reference, cvss_severity, traffic_type, sig_id, name, keyword
         )
-        return await self._post(_SIGNATURE_SEARCH_PATH, json=payload)
+        return await self._post(_SIGNATURE_SEARCH_PATH, json=payload, retry_safe=True)
 
     async def get_alert_only_mode(self) -> dict[str, Any]:
         """Get the IPS Alert Only mode status."""

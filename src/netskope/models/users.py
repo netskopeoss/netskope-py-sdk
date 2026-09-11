@@ -10,9 +10,23 @@ from __future__ import annotations
 
 from typing import Any
 
-from pydantic import Field
+from pydantic import BaseModel, ConfigDict, Field, JsonValue
 
 from netskope.models.common import NetskopeModel
+
+
+class UserQuery(BaseModel):
+    """One bounded User Management query, not an implicit traversal.
+
+    Filter operators and extension attributes are API-defined JSON. The SDK
+    owns the query envelope and validates its paging independently.
+    """
+
+    model_config = ConfigDict(extra="forbid", strict=True, frozen=True)
+
+    filter: dict[str, JsonValue] | None = None
+    limit: int = Field(100, ge=0, le=1000)
+    offset: int = Field(0, ge=0)
 
 
 class UmUserAccount(NetskopeModel):

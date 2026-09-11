@@ -12,12 +12,23 @@ Example::
 from __future__ import annotations
 
 import builtins
+from functools import cached_property
 from typing import Any
 
 from netskope.exceptions import NetskopeError, ValidationError
-from netskope.models.infrastructure import BrokerPublicIpAccess, LocalBroker, LocalBrokerConfig
+from netskope.models._npa_requests import request_payload
+from netskope.models.infrastructure import (
+    BrokerPublicIpAccess,
+    LocalBroker,
+    LocalBrokerConfig,
+    LocalBrokerCreate,
+    LocalBrokerPatch,
+)
 from netskope.resources._base import AsyncResource, SyncResource
-from netskope.resources._extract import extract_item, extract_list
+from netskope.resources._extract import extract_item, validate_id
+from netskope.resources._npa_response import parse_item
+from netskope.resources._response_list import parse_response_list
+from netskope.response import ApiResponse
 
 _PATH = "/api/v2/infrastructure/lbrokers"
 
@@ -83,8 +94,138 @@ def _extract_token(body: dict[str, Any]) -> str:
     raise NetskopeError(f"Registration token missing from response: {body!r}")
 
 
+def _parse_registration_token(body: Any) -> str:
+    data = body.get("data", body) if isinstance(body, dict) else None
+    if not isinstance(data, dict) or not isinstance(data.get("token"), str) or not data["token"]:
+        raise ValueError("Registration token missing from response.")
+    return str(data["token"])
+
+
+class LocalBrokerResponses(SyncResource):
+    """Completed responses for local-broker queries."""
+
+    def list(self) -> ApiResponse[builtins.list[LocalBroker]]:
+        """List local brokers with access to their response envelope."""
+        response = self._transport.request("GET", _PATH)
+        return ApiResponse(
+            response, lambda raw: parse_response_list(raw.json(), LocalBroker, "lbrokers")
+        )
+
+    def get(self, broker_id: int | str) -> ApiResponse[LocalBroker]:
+        """Fetch one local broker by id; parses to :class:`LocalBroker`."""
+        response = self._transport.request("GET", f"{_PATH}/{validate_id(broker_id)}")
+        return ApiResponse(response, lambda raw: parse_item(raw.json(), LocalBroker))
+
+    def create_request(self, request: LocalBrokerCreate) -> ApiResponse[LocalBroker]:
+        """Create a local broker from a validated request model.
+
+        Returns the created :class:`LocalBroker` with its response envelope.
+        """
+        payload = request_payload(request, LocalBrokerCreate)
+        response = self._transport.request("POST", _PATH, json=payload)
+        return ApiResponse(response, lambda raw: parse_item(raw.json(), LocalBroker))
+
+    def update_request(
+        self, broker_id: int | str, request: LocalBrokerPatch
+    ) -> ApiResponse[LocalBroker]:
+        """Replace a local broker's fields from a validated patch model.
+
+        Returns the updated :class:`LocalBroker` with its response envelope.
+        """
+        payload = request_payload(request, LocalBrokerPatch)
+        response = self._transport.request("PUT", f"{_PATH}/{validate_id(broker_id)}", json=payload)
+        return ApiResponse(response, lambda raw: parse_item(raw.json(), LocalBroker))
+
+    def get_config(self) -> ApiResponse[LocalBrokerConfig]:
+        """Fetch the tenant-wide broker configuration as :class:`LocalBrokerConfig`."""
+        response = self._transport.request("GET", _CONFIG_PATH)
+        return ApiResponse(response, lambda raw: parse_item(raw.json(), LocalBrokerConfig))
+
+    def update_config(self, hostname: str) -> ApiResponse[LocalBrokerConfig]:
+        """Set the broker-config hostname, rejecting a blank one before the request.
+
+        Returns the updated :class:`LocalBrokerConfig` with its response envelope.
+        """
+        if not isinstance(hostname, str) or not hostname.strip():
+            raise ValidationError("hostname must be a nonempty string.")
+        response = self._transport.request("PUT", _CONFIG_PATH, json={"hostname": hostname})
+        return ApiResponse(response, lambda raw: parse_item(raw.json(), LocalBrokerConfig))
+
+    def create_registration_token(self, broker_id: int | str) -> ApiResponse[str]:
+        """Mint a registration token for one broker; parses to the token string."""
+        response = self._transport.request(
+            "POST", f"{_PATH}/{validate_id(broker_id)}/registrationtoken"
+        )
+        return ApiResponse(response, lambda raw: _parse_registration_token(raw.json()))
+
+
+class AsyncLocalBrokerResponses(AsyncResource):
+    """Completed responses for asynchronous local-broker queries."""
+
+    async def list(self) -> ApiResponse[builtins.list[LocalBroker]]:
+        """List local brokers with access to their response envelope."""
+        response = await self._transport.request("GET", _PATH)
+        return ApiResponse(
+            response, lambda raw: parse_response_list(raw.json(), LocalBroker, "lbrokers")
+        )
+
+    async def get(self, broker_id: int | str) -> ApiResponse[LocalBroker]:
+        """Fetch one local broker by id; parses to :class:`LocalBroker`."""
+        response = await self._transport.request("GET", f"{_PATH}/{validate_id(broker_id)}")
+        return ApiResponse(response, lambda raw: parse_item(raw.json(), LocalBroker))
+
+    async def create_request(self, request: LocalBrokerCreate) -> ApiResponse[LocalBroker]:
+        """Create a local broker from a validated request model.
+
+        Returns the created :class:`LocalBroker` with its response envelope.
+        """
+        payload = request_payload(request, LocalBrokerCreate)
+        response = await self._transport.request("POST", _PATH, json=payload)
+        return ApiResponse(response, lambda raw: parse_item(raw.json(), LocalBroker))
+
+    async def update_request(
+        self, broker_id: int | str, request: LocalBrokerPatch
+    ) -> ApiResponse[LocalBroker]:
+        """Replace a local broker's fields from a validated patch model.
+
+        Returns the updated :class:`LocalBroker` with its response envelope.
+        """
+        payload = request_payload(request, LocalBrokerPatch)
+        response = await self._transport.request(
+            "PUT", f"{_PATH}/{validate_id(broker_id)}", json=payload
+        )
+        return ApiResponse(response, lambda raw: parse_item(raw.json(), LocalBroker))
+
+    async def get_config(self) -> ApiResponse[LocalBrokerConfig]:
+        """Fetch the tenant-wide broker configuration as :class:`LocalBrokerConfig`."""
+        response = await self._transport.request("GET", _CONFIG_PATH)
+        return ApiResponse(response, lambda raw: parse_item(raw.json(), LocalBrokerConfig))
+
+    async def update_config(self, hostname: str) -> ApiResponse[LocalBrokerConfig]:
+        """Set the broker-config hostname, rejecting a blank one before the request.
+
+        Returns the updated :class:`LocalBrokerConfig` with its response envelope.
+        """
+        if not isinstance(hostname, str) or not hostname.strip():
+            raise ValidationError("hostname must be a nonempty string.")
+        response = await self._transport.request("PUT", _CONFIG_PATH, json={"hostname": hostname})
+        return ApiResponse(response, lambda raw: parse_item(raw.json(), LocalBrokerConfig))
+
+    async def create_registration_token(self, broker_id: int | str) -> ApiResponse[str]:
+        """Mint a registration token for one broker; parses to the token string."""
+        response = await self._transport.request(
+            "POST", f"{_PATH}/{validate_id(broker_id)}/registrationtoken"
+        )
+        return ApiResponse(response, lambda raw: _parse_registration_token(raw.json()))
+
+
 class LocalBrokersResource(SyncResource):
     """Synchronous interface to ``/api/v2/infrastructure/lbrokers``."""
+
+    @cached_property
+    def with_response(self) -> LocalBrokerResponses:
+        """Inspect a query's completed response and its typed result."""
+        return LocalBrokerResponses(self._transport)
 
     def list(self) -> builtins.list[LocalBroker]:
         """List all local brokers.
@@ -92,8 +233,7 @@ class LocalBrokersResource(SyncResource):
         Returns:
             A list of :class:`~netskope.models.infrastructure.LocalBroker`.
         """
-        body = self._get(_PATH)
-        return [LocalBroker.model_validate(item) for item in extract_list(body)]
+        return self.with_response.list().parse()
 
     def get(self, broker_id: int) -> LocalBroker:
         """Get a local broker by ID.
@@ -247,10 +387,14 @@ class LocalBrokersResource(SyncResource):
 class AsyncLocalBrokersResource(AsyncResource):
     """Asynchronous interface to ``/api/v2/infrastructure/lbrokers``."""
 
+    @cached_property
+    def with_response(self) -> AsyncLocalBrokerResponses:
+        """Inspect a query's completed response and its typed result."""
+        return AsyncLocalBrokerResponses(self._transport)
+
     async def list(self) -> builtins.list[LocalBroker]:
         """List all local brokers."""
-        body = await self._get(_PATH)
-        return [LocalBroker.model_validate(item) for item in extract_list(body)]
+        return (await self.with_response.list()).parse()
 
     async def get(self, broker_id: int) -> LocalBroker:
         """Get a local broker by ID."""

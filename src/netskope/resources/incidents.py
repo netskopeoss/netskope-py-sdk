@@ -13,14 +13,25 @@ Example::
 from __future__ import annotations
 
 import builtins
+import functools
 from datetime import UTC, datetime, timedelta
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from netskope._pagination import AsyncPaginatedResponse, SyncPaginatedResponse
 from netskope.exceptions import ValidationError
-from netskope.models.incidents import Anomaly, Incident, IncidentNote, UserConfidenceIndex
+from netskope.models.incidents import (
+    Anomaly,
+    Incident,
+    IncidentNote,
+    IncidentUpdateResult,
+    UserConfidenceIndex,
+)
+from netskope.pagination import Page
 from netskope.resources._base import AsyncResource, SyncResource
 from netskope.resources._extract import extract_item, extract_list, quote_id, validate_id
+
+if TYPE_CHECKING:
+    from netskope.resources._incident_response import AsyncIncidentResponses, IncidentResponses
 
 _SEARCH_PATH = "/api/v2/events/datasearch/incident"
 _UPDATE_PATH = "/api/v2/incidents/update"
@@ -29,7 +40,6 @@ _UCI_PATH = "/api/v2/ubadatasvc/user/uci"
 _ANOMALIES_PATH = "/api/v2/incidents/users/getanomalies"
 
 _VALID_UPDATE_FIELDS = ("status", "assignee", "severity")
-_VALID_SEVERITIES = ("Critical", "High", "Medium", "Low", "Informational")
 _UCI_DEFAULT_WINDOW = timedelta(days=7)
 
 # The API rejects note content at 512 characters or more — enforce
@@ -85,6 +95,17 @@ def _build_update_payload(
 
 
 def _build_uci_payload(username: str, from_time: datetime | int | None) -> dict[str, Any]:
+    """Validate one UCI request before HTTP; epoch ``0`` remains a valid window."""
+    if not isinstance(username, str) or not username.strip():
+        raise ValidationError("username must be a nonblank string.")
+    if isinstance(from_time, bool) or (
+        from_time is not None and not isinstance(from_time, (datetime, int))
+    ):
+        raise ValidationError("from_time must be a datetime or epoch milliseconds.")
+    if isinstance(from_time, datetime) and (
+        from_time.tzinfo is None or from_time.utcoffset() is None
+    ):
+        raise ValidationError("from_time must include a timezone.")
     if from_time is None:
         from_time_ms = int((datetime.now(tz=UTC) - _UCI_DEFAULT_WINDOW).timestamp() * 1000)
     elif isinstance(from_time, datetime):
@@ -94,7 +115,7 @@ def _build_uci_payload(username: str, from_time: datetime | int | None) -> dict[
     return {"user": username, "fromTime": from_time_ms}
 
 
-def _build_anomalies_payload(
+def _build_anomalies_request(
     users: builtins.list[str],
     timeframe: int,
     severity: str | builtins.list[str] | None,
@@ -102,31 +123,30 @@ def _build_anomalies_payload(
     offset: int,
     sort_by: str,
     sort_order: str,
-) -> dict[str, Any]:
-    if not 1 <= timeframe <= 90:
+) -> tuple[dict[str, Any], dict[str, Any]]:
+    """Build the verified anomaly search: users/timeframe body, paging in the query."""
+    if severity is not None:
+        raise ValidationError("Anomaly search does not support a server-side severity filter.")
+    if (
+        not isinstance(users, list)
+        or not users
+        or any(not isinstance(user, str) or not user.strip() for user in users)
+    ):
+        raise ValidationError("users must contain at least one nonempty username.")
+    if isinstance(timeframe, bool) or not isinstance(timeframe, int) or not 1 <= timeframe <= 90:
         raise ValidationError(f"Invalid timeframe {timeframe!r}. Must be between 1 and 90 days.")
-    if not 1 <= limit <= 10000:
+    if isinstance(limit, bool) or not isinstance(limit, int) or not 1 <= limit <= 10000:
         raise ValidationError(f"Invalid limit {limit!r}. Must be between 1 and 10000.")
+    if isinstance(offset, bool) or not isinstance(offset, int) or offset < 0:
+        raise ValidationError(f"Invalid offset {offset!r}. Must be >= 0.")
+    if not isinstance(sort_by, str) or not sort_by:
+        raise ValidationError("sort_by must be a nonempty field name.")
     if sort_order not in ("asc", "desc"):
         raise ValidationError(f"Invalid sort_order {sort_order!r}. Must be 'asc' or 'desc'.")
-    payload: dict[str, Any] = {
-        "users": users,
-        "timeframe": timeframe,
-        "limit": limit,
-        "offset": offset,
-        "sortby": sort_by,
-        "sortorder": sort_order,
-    }
-    if severity is not None:
-        severities = [severity] if isinstance(severity, str) else list(severity)
-        invalid = [s for s in severities if s not in _VALID_SEVERITIES]
-        if invalid:
-            raise ValidationError(
-                f"Invalid severity value(s): {', '.join(invalid)}. "
-                f"Must be one of: {', '.join(_VALID_SEVERITIES)}"
-            )
-        payload["severity_filter"] = severities
-    return payload
+    return (
+        {"users": users, "timeframe": timeframe},
+        {"limit": limit, "offset": offset, "sortby": sort_by, "sortorder": sort_order},
+    )
 
 
 def _notes_path(dlp_incident_id: str) -> str:
@@ -142,6 +162,70 @@ def _validate_note_content(content: str) -> None:
 
 class IncidentsResource(SyncResource):
     """Synchronous interface to the Incidents API."""
+
+    @functools.cached_property
+    def with_response(self) -> IncidentResponses:
+        from netskope.resources._incident_response import IncidentResponses
+
+        return IncidentResponses(self._transport)
+
+    def list_page(
+        self,
+        *,
+        query: str | None = None,
+        fields: builtins.list[str] | None = None,
+        start_time: datetime | int | None = None,
+        end_time: datetime | int | None = None,
+        order_by: str | None = None,
+        descending: bool | None = None,
+        offset: int | None = None,
+        limit: int | None = None,
+    ) -> Page[Incident]:
+        """Fetch and validate exactly one incident event page."""
+        return self.with_response.list_page(
+            query=query,
+            fields=fields,
+            start_time=start_time,
+            end_time=end_time,
+            order_by=order_by,
+            descending=descending,
+            offset=offset,
+            limit=limit,
+        ).parse()
+
+    def update_one(
+        self,
+        incident_id: int,
+        *,
+        field: str,
+        new_value: str,
+        user: str,
+    ) -> IncidentUpdateResult:
+        """Update by numeric incident ID; acceptance does not prove a row changed."""
+        return self.with_response.update_one(
+            incident_id,
+            field=field,
+            new_value=new_value,
+            user=user,
+        ).parse()
+
+    def update_object(
+        self,
+        object_id: str,
+        *,
+        field: str,
+        old_value: str,
+        new_value: str,
+        user: str,
+    ) -> IncidentUpdateResult:
+        """Update matching incidents attached to one object. This can change many rows."""
+        return self.with_response.update_object(
+            object_id,
+            field=field,
+            old_value=old_value,
+            new_value=new_value,
+            user=user,
+        ).parse()
 
     def list(
         self,
@@ -218,13 +302,18 @@ class IncidentsResource(SyncResource):
             username: The user's email address.
             from_time: Start of the scoring window.  ``None`` (default)
                 means "now minus 7 days".  A :class:`~datetime.datetime`
-                is converted to epoch milliseconds; an ``int`` is passed
-                through unchanged and must already be epoch milliseconds.
+                must carry a timezone and is converted to epoch
+                milliseconds; an ``int`` is passed through unchanged and
+                must already be epoch milliseconds (``0`` is valid).
 
         Returns:
             A :class:`~netskope.models.incidents.UserConfidenceIndex`.
+
+        Raises:
+            netskope.exceptions.ValidationError: If *username* is blank or
+                *from_time* is a naive datetime.
         """
-        body = self._post(_UCI_PATH, json=_build_uci_payload(username, from_time))
+        body = self._post(_UCI_PATH, json=_build_uci_payload(username, from_time), retry_safe=True)
         data = body.get("data", body)
         if isinstance(data, list) and data:
             data = data[0]
@@ -243,23 +332,27 @@ class IncidentsResource(SyncResource):
     ) -> builtins.list[Anomaly]:
         """Get UBA anomalies for the specified users.
 
+        The request body carries ``users`` and ``timeframe``; paging and sorting
+        travel as query parameters.
+
         Args:
             users: List of user email addresses.
             timeframe: Number of days to look back (1-90, default 30).
-            severity: Severity filter — a single level or a list of levels.
-                Valid levels: Critical, High, Medium, Low, Informational.
+            severity: Unsupported — the endpoint has no server-side severity
+                filter, so a value here is rejected instead of silently dropped.
             limit: Maximum number of results (1-10000, default 100).
             offset: Pagination offset.
             sort_by: Field to sort results by (default ``"time"``).
             sort_order: ``"asc"`` or ``"desc"`` (default ``"desc"``).
 
         Raises:
-            netskope.exceptions.ValidationError: If a parameter is out of range.
+            netskope.exceptions.ValidationError: If *severity* is supplied or a
+                parameter is out of range.
         """
-        payload = _build_anomalies_payload(
+        payload, params = _build_anomalies_request(
             users, timeframe, severity, limit, offset, sort_by, sort_order
         )
-        body = self._post(_ANOMALIES_PATH, json=payload)
+        body = self._post(_ANOMALIES_PATH, json=payload, retry_safe=True, **params)
         return [Anomaly.model_validate(item) for item in extract_list(body)]
 
     def list_notes(self, dlp_incident_id: str) -> builtins.list[IncidentNote]:
@@ -304,6 +397,76 @@ class IncidentsResource(SyncResource):
 
 class AsyncIncidentsResource(AsyncResource):
     """Asynchronous interface to the Incidents API."""
+
+    @functools.cached_property
+    def with_response(self) -> AsyncIncidentResponses:
+        from netskope.resources._incident_response import AsyncIncidentResponses
+
+        return AsyncIncidentResponses(self._transport)
+
+    async def list_page(
+        self,
+        *,
+        query: str | None = None,
+        fields: builtins.list[str] | None = None,
+        start_time: datetime | int | None = None,
+        end_time: datetime | int | None = None,
+        order_by: str | None = None,
+        descending: bool | None = None,
+        offset: int | None = None,
+        limit: int | None = None,
+    ) -> Page[Incident]:
+        """Fetch and validate exactly one incident event page."""
+        return (
+            await self.with_response.list_page(
+                query=query,
+                fields=fields,
+                start_time=start_time,
+                end_time=end_time,
+                order_by=order_by,
+                descending=descending,
+                offset=offset,
+                limit=limit,
+            )
+        ).parse()
+
+    async def update_one(
+        self,
+        incident_id: int,
+        *,
+        field: str,
+        new_value: str,
+        user: str,
+    ) -> IncidentUpdateResult:
+        """Update by numeric incident ID; acceptance does not prove a row changed."""
+        return (
+            await self.with_response.update_one(
+                incident_id,
+                field=field,
+                new_value=new_value,
+                user=user,
+            )
+        ).parse()
+
+    async def update_object(
+        self,
+        object_id: str,
+        *,
+        field: str,
+        old_value: str,
+        new_value: str,
+        user: str,
+    ) -> IncidentUpdateResult:
+        """Update matching incidents attached to one object. This can change many rows."""
+        return (
+            await self.with_response.update_object(
+                object_id,
+                field=field,
+                old_value=old_value,
+                new_value=new_value,
+                user=user,
+            )
+        ).parse()
 
     def list(
         self,
@@ -353,11 +516,12 @@ class AsyncIncidentsResource(AsyncResource):
     ) -> UserConfidenceIndex:
         """Get the User Confidence Index (risk score) for a user.
 
-        ``from_time=None`` (default) means "now minus 7 days"; a
-        :class:`~datetime.datetime` is converted to epoch milliseconds; an
-        ``int`` must already be epoch milliseconds and is passed through.
+        See :meth:`IncidentsResource.get_uci` — a blank username or a naive
+        *from_time* is rejected before the request is sent.
         """
-        body = await self._post(_UCI_PATH, json=_build_uci_payload(username, from_time))
+        body = await self._post(
+            _UCI_PATH, json=_build_uci_payload(username, from_time), retry_safe=True
+        )
         data = body.get("data", body)
         if isinstance(data, list) and data:
             data = data[0]
@@ -378,10 +542,10 @@ class AsyncIncidentsResource(AsyncResource):
 
         See :meth:`IncidentsResource.get_anomalies`.
         """
-        payload = _build_anomalies_payload(
+        payload, params = _build_anomalies_request(
             users, timeframe, severity, limit, offset, sort_by, sort_order
         )
-        body = await self._post(_ANOMALIES_PATH, json=payload)
+        body = await self._post(_ANOMALIES_PATH, json=payload, retry_safe=True, **params)
         return [Anomaly.model_validate(item) for item in extract_list(body)]
 
     async def list_notes(self, dlp_incident_id: str) -> builtins.list[IncidentNote]:

@@ -27,7 +27,7 @@ _SAFE_ID_RE = re.compile(r"^[a-zA-Z0-9_\-]+$")
 
 # Permissive-but-safe check used by quote_id: non-empty, no control characters,
 # no whitespace, and not a dot-only segment (".", "..") that could alter paths.
-_QUOTABLE_ID_RE = re.compile(r"^(?!\.+$)[^\s\x00-\x1f\x7f]+$")
+_QUOTABLE_ID_RE = re.compile(r"^(?!\.+\Z)[^\s\x00-\x1f\x7f]+\Z")
 
 
 def extract_list(body: dict[str, Any] | list[Any], *nested_keys: str) -> list[dict[str, Any]]:
@@ -97,17 +97,32 @@ def extract_item(body: dict[str, Any], *nested_keys: str) -> dict[str, Any]:
 def validate_id(value: str | int, name: str = "id") -> str:
     """Validate *value* for safe use in a URL path segment and return it as ``str``.
 
-    Integers pass through unconditionally (stringified).  Strings must match
-    ``^[a-zA-Z0-9_\\-]+$``.
+    Non-negative integers pass through (stringified); ``True``/``False`` do not,
+    despite being ``int`` subclasses.  Strings must match ``^[a-zA-Z0-9_\\-]+$``.
 
     Raises:
         netskope.exceptions.ValidationError: If the value fails validation.
     """
     if isinstance(value, int) and not isinstance(value, bool):
+        # Netskope identifiers are never negative, and "-3" would otherwise be
+        # spent on a round trip the API can only reject.
+        if value < 0:
+            raise ValidationError(f"Invalid {name} format: {value!r}")
         return str(value)
     if not isinstance(value, str) or not _SAFE_ID_RE.match(value):
         raise ValidationError(f"Invalid {name} format: {value!r}")
     return value
+
+
+def id_strings(ids: list[int] | list[int | str], name: str = "ids") -> list[str]:
+    """Validate a nonempty batch of identifiers and return them as strings.
+
+    Bulk endpoints take their identifiers as strings, and an empty batch would
+    ask the API to act on nothing.
+    """
+    if not ids:
+        raise ValidationError(f"{name} must not be empty.")
+    return [validate_id(item, name) for item in ids]
 
 
 def quote_id(value: str) -> str:

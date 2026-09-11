@@ -113,7 +113,7 @@ class TestSteeringTunnels:
             "srcidentity": "vpn@example.com",
             "bandwidth": 100,
             "encryption": "AES256-CBC",
-            "enabled": True,
+            "enable": True,
         }
         assert isinstance(tunnel, IPSecTunnel)
         assert tunnel.id == 42
@@ -142,7 +142,7 @@ class TestSteeringTunnels:
             "srcidentity": "lab@example.com",
             "bandwidth": 250,
             "encryption": "AES256-GCM",
-            "enabled": False,
+            "enable": False,
             "vendor": "Cisco",
             "notes": "Testing only",
         }
@@ -188,12 +188,12 @@ class TestSteeringTunnels:
 
     @respx.mock
     def test_update_tunnel_enabled_false_is_sent(self, client: NetskopeClient) -> None:
-        """enabled=False must be sent (is-not-None check, not truthiness)."""
+        """enabled=False must be sent, under the API's ``enable`` request key."""
         route = respx.patch(f"{_TUNNELS_URL}/42").mock(
             return_value=httpx.Response(200, json={"data": _TUNNEL})
         )
         client.steering.update_tunnel(42, enabled=False)
-        assert sent_json(route) == {"enabled": False}
+        assert sent_json(route) == {"enable": False}
 
     @respx.mock
     def test_update_tunnel_no_fields_no_http(self, client: NetskopeClient) -> None:
@@ -352,7 +352,7 @@ class TestAsyncSteeringResource:
             "srcidentity": "vpn@example.com",
             "bandwidth": 100,
             "encryption": "AES256-CBC",
-            "enabled": True,
+            "enable": True,
         }
         assert tunnel.id == 42
 

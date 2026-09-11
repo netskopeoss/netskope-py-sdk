@@ -17,8 +17,12 @@ class SyncResource:
         resp = self._transport.request("GET", path, params=params or None)
         return cast(dict[str, Any], resp.json())
 
-    def _post(self, path: str, *, json: Any = None, **params: Any) -> dict[str, Any]:
-        resp = self._transport.request("POST", path, json=json, params=params or None)
+    def _post(
+        self, path: str, *, json: Any = None, retry_safe: bool = False, **params: Any
+    ) -> dict[str, Any]:
+        resp = self._transport.request(
+            "POST", path, json=json, params=params or None, retry_safe=retry_safe
+        )
         return cast(dict[str, Any], resp.json())
 
     def _put(self, path: str, *, json: Any = None) -> dict[str, Any]:
@@ -47,8 +51,12 @@ class AsyncResource:
         resp = await self._transport.request("GET", path, params=params or None)
         return cast(dict[str, Any], resp.json())
 
-    async def _post(self, path: str, *, json: Any = None, **params: Any) -> dict[str, Any]:
-        resp = await self._transport.request("POST", path, json=json, params=params or None)
+    async def _post(
+        self, path: str, *, json: Any = None, retry_safe: bool = False, **params: Any
+    ) -> dict[str, Any]:
+        resp = await self._transport.request(
+            "POST", path, json=json, params=params or None, retry_safe=retry_safe
+        )
         return cast(dict[str, Any], resp.json())
 
     async def _put(self, path: str, *, json: Any = None) -> dict[str, Any]:

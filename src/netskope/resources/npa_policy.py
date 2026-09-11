@@ -22,13 +22,21 @@ from __future__ import annotations
 
 import builtins
 import functools
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from netskope._pagination import AsyncPaginatedResponse, SyncPaginatedResponse
 from netskope.exceptions import ValidationError
 from netskope.models.npa_policy import NpaPolicyGroup, NpaPolicyRule
 from netskope.resources._base import AsyncResource, SyncResource
 from netskope.resources._extract import extract_item, extract_list, validate_id
+
+if TYPE_CHECKING:
+    from netskope.resources._npa_policy_response import (
+        AsyncNpaPolicyGroupResponses,
+        AsyncNpaPolicyRuleResponses,
+        NpaPolicyGroupResponses,
+        NpaPolicyRuleResponses,
+    )
 
 _RULES_PATH = "/api/v2/policy/npa/rules"
 _GROUPS_PATH = "/api/v2/policy/npa/policygroups"
@@ -176,6 +184,12 @@ def _build_group_create_payload(
 class NpaPolicyRulesResource(SyncResource):
     """Synchronous interface to ``/api/v2/policy/npa/rules``."""
 
+    @functools.cached_property
+    def with_response(self) -> NpaPolicyRuleResponses:
+        from netskope.resources._npa_policy_response import NpaPolicyRuleResponses
+
+        return NpaPolicyRuleResponses(self._transport)
+
     def list(
         self,
         *,
@@ -298,6 +312,12 @@ class NpaPolicyRulesResource(SyncResource):
 class NpaPolicyGroupsResource(SyncResource):
     """Synchronous interface to ``/api/v2/policy/npa/policygroups``."""
 
+    @functools.cached_property
+    def with_response(self) -> NpaPolicyGroupResponses:
+        from netskope.resources._npa_policy_response import NpaPolicyGroupResponses
+
+        return NpaPolicyGroupResponses(self._transport)
+
     def list(
         self,
         *,
@@ -402,6 +422,12 @@ class NpaPolicyResource(SyncResource):
 class AsyncNpaPolicyRulesResource(AsyncResource):
     """Async NPA policy rules."""
 
+    @functools.cached_property
+    def with_response(self) -> AsyncNpaPolicyRuleResponses:
+        from netskope.resources._npa_policy_response import AsyncNpaPolicyRuleResponses
+
+        return AsyncNpaPolicyRuleResponses(self._transport)
+
     def list(
         self,
         *,
@@ -464,6 +490,12 @@ class AsyncNpaPolicyRulesResource(AsyncResource):
 
 class AsyncNpaPolicyGroupsResource(AsyncResource):
     """Async NPA policy groups."""
+
+    @functools.cached_property
+    def with_response(self) -> AsyncNpaPolicyGroupResponses:
+        from netskope.resources._npa_policy_response import AsyncNpaPolicyGroupResponses
+
+        return AsyncNpaPolicyGroupResponses(self._transport)
 
     def list(
         self,

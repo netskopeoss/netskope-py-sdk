@@ -18,12 +18,23 @@ Example::
 from __future__ import annotations
 
 import builtins
+from functools import cached_property
 from typing import Any
 
 from netskope.exceptions import ValidationError
-from netskope.models.infrastructure import PublisherUpgradeProfile, ReleaseType
+from netskope.models._npa_requests import request_payload
+from netskope.models.infrastructure import (
+    PublisherUpgradeProfile,
+    ReleaseType,
+    UpgradeProfileAssignment,
+    UpgradeProfileCreate,
+    UpgradeProfileUpdate,
+)
 from netskope.resources._base import AsyncResource, SyncResource
-from netskope.resources._extract import extract_item, extract_list
+from netskope.resources._extract import extract_item, id_strings, validate_id
+from netskope.resources._npa_response import parse_item
+from netskope.resources._response_list import parse_response_list
+from netskope.response import ApiResponse
 
 _PATH = "/api/v2/infrastructure/publisherupgradeprofiles"
 
@@ -96,14 +107,129 @@ def _build_assign_payload(profile_id: int, publisher_ids: builtins.list[int]) ->
     # as *strings* (per the gateway spec and the API's actual behavior).
     return {
         "publishers": {
-            "apply": {"publisher_upgrade_profiles_id": str(profile_id)},
-            "id": [str(publisher_id) for publisher_id in publisher_ids],
+            "apply": {"publisher_upgrade_profiles_id": validate_id(profile_id, "profile_id")},
+            "id": id_strings(publisher_ids, "publisher_ids"),
         }
     }
 
 
+class UpgradeProfileResponses(SyncResource):
+    """Completed responses for publisher upgrade-profile queries."""
+
+    def get(self, profile_id: int) -> ApiResponse[PublisherUpgradeProfile]:
+        """Fetch one upgrade profile by id; parses to :class:`PublisherUpgradeProfile`."""
+        response = self._transport.request("GET", f"{_PATH}/{validate_id(profile_id)}")
+        return ApiResponse(response, lambda raw: parse_item(raw.json(), PublisherUpgradeProfile))
+
+    def create_request(self, request: UpgradeProfileCreate) -> ApiResponse[PublisherUpgradeProfile]:
+        """Create an upgrade profile from a validated request model.
+
+        Returns the created :class:`PublisherUpgradeProfile` with its response envelope.
+        """
+        payload = request_payload(request, UpgradeProfileCreate)
+        response = self._transport.request("POST", _PATH, json=payload)
+        return ApiResponse(response, lambda raw: parse_item(raw.json(), PublisherUpgradeProfile))
+
+    def update_request(
+        self, profile_id: int, request: UpgradeProfileUpdate
+    ) -> ApiResponse[PublisherUpgradeProfile]:
+        """Replace an upgrade profile; the request id must match *profile_id*.
+
+        Returns the updated :class:`PublisherUpgradeProfile` with its response envelope.
+        """
+        payload = request_payload(request, UpgradeProfileUpdate)
+        if request.id != profile_id:
+            raise ValidationError("The profile request id must match profile_id.")
+        response = self._transport.request(
+            "PUT", f"{_PATH}/{validate_id(profile_id)}", json=payload
+        )
+        return ApiResponse(response, lambda raw: parse_item(raw.json(), PublisherUpgradeProfile))
+
+    def assign(
+        self, profile_id: int, publisher_ids: builtins.list[int]
+    ) -> ApiResponse[UpgradeProfileAssignment]:
+        """Assign publishers to one upgrade profile through the bulk endpoint.
+
+        Returns the :class:`UpgradeProfileAssignment` acknowledgement.
+        """
+        payload = _build_assign_payload(profile_id, publisher_ids)
+        response = self._transport.request("PUT", _BULK_PATH, json=payload)
+        return ApiResponse(response, lambda raw: parse_item(raw.json(), UpgradeProfileAssignment))
+
+    def list(self) -> ApiResponse[builtins.list[PublisherUpgradeProfile]]:
+        """List upgrade profiles with access to their response envelope."""
+        response = self._transport.request("GET", _PATH)
+        return ApiResponse(
+            response,
+            lambda raw: parse_response_list(
+                raw.json(), PublisherUpgradeProfile, "upgrade_profiles"
+            ),
+        )
+
+
+class AsyncUpgradeProfileResponses(AsyncResource):
+    """Completed responses for asynchronous upgrade-profile queries."""
+
+    async def get(self, profile_id: int) -> ApiResponse[PublisherUpgradeProfile]:
+        """Fetch one upgrade profile by id; parses to :class:`PublisherUpgradeProfile`."""
+        response = await self._transport.request("GET", f"{_PATH}/{validate_id(profile_id)}")
+        return ApiResponse(response, lambda raw: parse_item(raw.json(), PublisherUpgradeProfile))
+
+    async def create_request(
+        self, request: UpgradeProfileCreate
+    ) -> ApiResponse[PublisherUpgradeProfile]:
+        """Create an upgrade profile from a validated request model.
+
+        Returns the created :class:`PublisherUpgradeProfile` with its response envelope.
+        """
+        payload = request_payload(request, UpgradeProfileCreate)
+        response = await self._transport.request("POST", _PATH, json=payload)
+        return ApiResponse(response, lambda raw: parse_item(raw.json(), PublisherUpgradeProfile))
+
+    async def update_request(
+        self, profile_id: int, request: UpgradeProfileUpdate
+    ) -> ApiResponse[PublisherUpgradeProfile]:
+        """Replace an upgrade profile; the request id must match *profile_id*.
+
+        Returns the updated :class:`PublisherUpgradeProfile` with its response envelope.
+        """
+        payload = request_payload(request, UpgradeProfileUpdate)
+        if request.id != profile_id:
+            raise ValidationError("The profile request id must match profile_id.")
+        response = await self._transport.request(
+            "PUT", f"{_PATH}/{validate_id(profile_id)}", json=payload
+        )
+        return ApiResponse(response, lambda raw: parse_item(raw.json(), PublisherUpgradeProfile))
+
+    async def assign(
+        self, profile_id: int, publisher_ids: builtins.list[int]
+    ) -> ApiResponse[UpgradeProfileAssignment]:
+        """Assign publishers to one upgrade profile through the bulk endpoint.
+
+        Returns the :class:`UpgradeProfileAssignment` acknowledgement.
+        """
+        payload = _build_assign_payload(profile_id, publisher_ids)
+        response = await self._transport.request("PUT", _BULK_PATH, json=payload)
+        return ApiResponse(response, lambda raw: parse_item(raw.json(), UpgradeProfileAssignment))
+
+    async def list(self) -> ApiResponse[builtins.list[PublisherUpgradeProfile]]:
+        """List upgrade profiles with access to their response envelope."""
+        response = await self._transport.request("GET", _PATH)
+        return ApiResponse(
+            response,
+            lambda raw: parse_response_list(
+                raw.json(), PublisherUpgradeProfile, "upgrade_profiles"
+            ),
+        )
+
+
 class UpgradeProfilesResource(SyncResource):
     """Synchronous interface to ``/api/v2/infrastructure/publisherupgradeprofiles``."""
+
+    @cached_property
+    def with_response(self) -> UpgradeProfileResponses:
+        """Inspect a query's completed response and its typed result."""
+        return UpgradeProfileResponses(self._transport)
 
     def list(self) -> builtins.list[PublisherUpgradeProfile]:
         """List all publisher upgrade profiles.
@@ -112,11 +238,7 @@ class UpgradeProfilesResource(SyncResource):
             A list of
             :class:`~netskope.models.infrastructure.PublisherUpgradeProfile`.
         """
-        body = self._get(_PATH)
-        return [
-            PublisherUpgradeProfile.model_validate(item)
-            for item in extract_list(body, "upgrade_profiles")
-        ]
+        return self.with_response.list().parse()
 
     def get(self, profile_id: int) -> PublisherUpgradeProfile:
         """Get an upgrade profile by ID.
@@ -217,6 +339,10 @@ class UpgradeProfilesResource(SyncResource):
 
         Returns:
             The raw API response body.
+
+        Raises:
+            netskope.exceptions.ValidationError: If *publisher_ids* is empty or
+                any identifier is unsafe to send.
         """
         body = self._put(_BULK_PATH, json=_build_assign_payload(profile_id, publisher_ids))
         return body
@@ -225,13 +351,14 @@ class UpgradeProfilesResource(SyncResource):
 class AsyncUpgradeProfilesResource(AsyncResource):
     """Asynchronous interface to ``/api/v2/infrastructure/publisherupgradeprofiles``."""
 
+    @cached_property
+    def with_response(self) -> AsyncUpgradeProfileResponses:
+        """Inspect a query's completed response and its typed result."""
+        return AsyncUpgradeProfileResponses(self._transport)
+
     async def list(self) -> builtins.list[PublisherUpgradeProfile]:
         """List all publisher upgrade profiles."""
-        body = await self._get(_PATH)
-        return [
-            PublisherUpgradeProfile.model_validate(item)
-            for item in extract_list(body, "upgrade_profiles")
-        ]
+        return (await self.with_response.list()).parse()
 
     async def get(self, profile_id: int) -> PublisherUpgradeProfile:
         """Get an upgrade profile by ID."""

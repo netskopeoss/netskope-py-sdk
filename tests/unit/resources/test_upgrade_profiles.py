@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import inspect
+
 import httpx
 import pytest
 import respx
@@ -239,3 +241,57 @@ class TestAsyncUpgradeProfilesResource:
                 "id": ["1"],
             }
         }
+
+
+ASSIGN_BODIES = [
+    pytest.param({"status": "success", "updated": True}, id="flat"),
+    pytest.param({"data": {"status": "success", "updated": True}}, id="data"),
+]
+
+
+@pytest.mark.parametrize("asynchronous", [False, True])
+@pytest.mark.parametrize("body", ASSIGN_BODIES)
+@respx.mock
+async def test_typed_assign_unwraps_either_envelope(
+    client: NetskopeClient,
+    aclient: AsyncNetskopeClient,
+    asynchronous: bool,
+    body: dict[str, object],
+) -> None:
+    route = respx.put(_BULK_URL).mock(return_value=httpx.Response(200, json=body))
+    profiles = (aclient if asynchronous else client).npa.upgrade_profiles.with_response
+    response = profiles.assign(5, [10])
+    if inspect.isawaitable(response):
+        response = await response
+    assignment = response.parse()
+
+    assert assignment.status == "success"
+    assert assignment.updated is True
+    assert response.json() == body
+    assert route.call_count == 1
+
+
+@pytest.mark.parametrize("typed", [False, True])
+@pytest.mark.parametrize("asynchronous", [False, True])
+@pytest.mark.parametrize(
+    "profile_id,publisher_ids",
+    [(5, []), (5, ["../bulk"]), ("../bulk", [10])],
+    ids=["no-publishers", "unsafe-publisher", "unsafe-profile"],
+)
+@respx.mock
+async def test_assign_rejects_empty_or_unsafe_identifiers(
+    client: NetskopeClient,
+    aclient: AsyncNetskopeClient,
+    asynchronous: bool,
+    typed: bool,
+    profile_id,
+    publisher_ids,
+) -> None:
+    sdk = aclient if asynchronous else client
+    profiles = sdk.npa.upgrade_profiles
+    resource = profiles.with_response if typed else profiles
+    with pytest.raises(ValidationError):
+        result = resource.assign(profile_id, publisher_ids)
+        if inspect.isawaitable(result):
+            await result
+    assert len(respx.calls) == 0

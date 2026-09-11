@@ -35,3 +35,11 @@ class UrlList(NetskopeModel):
     modify_time: int | str | None = None
     modify_type: str | None = None
     json_version: int | None = None
+
+
+class PolicyDeployment(NetskopeModel):
+    """Acknowledgment of a policy deployment request."""
+
+    status: str | int | None = None
+    message: str | None = None
+    id: int | str | None = None

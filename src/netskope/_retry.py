@@ -14,8 +14,11 @@ import time
 import httpx
 
 from netskope._config import NetskopeConfig
+from netskope.exceptions import ConnectionError, TimeoutError, parse_retry_after
 
 logger = logging.getLogger("netskope")
+_SAFE_METHODS = frozenset({"GET", "HEAD", "OPTIONS"})
+_RETRYABLE_ERRORS = (httpx.TimeoutException, httpx.NetworkError, httpx.RemoteProtocolError)
 
 
 def _sleep_duration(
@@ -38,13 +41,7 @@ def _should_retry(response: httpx.Response, config: NetskopeConfig) -> bool:
 
 
 def _get_retry_after(response: httpx.Response) -> float | None:
-    raw = response.headers.get("retry-after")
-    if raw is None:
-        return None
-    try:
-        return float(raw)
-    except (ValueError, TypeError):
-        return None
+    return parse_retry_after(response.headers.get("retry-after"))
 
 
 def _copy_request(request: httpx.Request) -> httpx.Request:
@@ -54,24 +51,41 @@ def _copy_request(request: httpx.Request) -> httpx.Request:
         url=request.url,
         headers=request.headers,
         content=request.content,
+        extensions=dict(request.extensions),
     )
+
+
+def _retry_limit(request: httpx.Request, config: NetskopeConfig, retry_safe: bool | None) -> int:
+    safe = request.method in _SAFE_METHODS if retry_safe is None else retry_safe
+    if not safe:
+        return 0
+    try:
+        _ = request.content
+    except httpx.RequestNotRead:
+        # Uploads and other streams may be single-use or too large to buffer.
+        return 0
+    return config.max_retries
 
 
 def send_with_retries(
     client: httpx.Client,
     request: httpx.Request,
     config: NetskopeConfig,
+    *,
+    retry_safe: bool | None = None,
 ) -> httpx.Response:
-    """Send *request* through *client*, retrying on transient failures."""
-    last_response: httpx.Response | None = None
-    for attempt in range(config.max_retries + 1):
+    """Retry transient failures only for safe requests with replayable bodies."""
+    retry_limit = _retry_limit(request, config, retry_safe)
+    for attempt in range(retry_limit + 1):
         try:
-            response = client.send(_copy_request(request))
-        except (httpx.ConnectError, httpx.ReadTimeout, httpx.WriteTimeout) as exc:
-            if attempt >= config.max_retries:
-                from netskope.exceptions import ConnectionError, TimeoutError
-
-                if isinstance(exc, (httpx.ReadTimeout, httpx.WriteTimeout)):
+            response = client.send(
+                request if attempt == 0 else _copy_request(request),
+                auth=None,
+                follow_redirects=False,
+            )
+        except httpx.TransportError as exc:
+            if attempt >= retry_limit or not isinstance(exc, _RETRYABLE_ERRORS):
+                if isinstance(exc, httpx.TimeoutException):
                     raise TimeoutError(str(exc)) from exc
                 raise ConnectionError(str(exc)) from exc
             sleep = _sleep_duration(attempt, config, None)
@@ -80,15 +94,14 @@ def send_with_retries(
                 exc,
                 sleep,
                 attempt + 1,
-                config.max_retries,
+                retry_limit,
             )
             time.sleep(sleep)
             continue
 
-        if not _should_retry(response, config) or attempt >= config.max_retries:
+        if not _should_retry(response, config) or attempt >= retry_limit:
             return response
 
-        last_response = response
         retry_after = _get_retry_after(response)
         sleep = _sleep_duration(attempt, config, retry_after)
         logger.warning(
@@ -96,31 +109,33 @@ def send_with_retries(
             response.status_code,
             sleep,
             attempt + 1,
-            config.max_retries,
+            retry_limit,
         )
+        response.close()
         time.sleep(sleep)
 
-    # Should be unreachable, but satisfy the type checker.
-    if last_response is None:  # pragma: no cover
-        raise RuntimeError("retry loop exited without a response")
-    return last_response
+    raise RuntimeError("retry loop exited without a response")  # pragma: no cover
 
 
 async def async_send_with_retries(
     client: httpx.AsyncClient,
     request: httpx.Request,
     config: NetskopeConfig,
+    *,
+    retry_safe: bool | None = None,
 ) -> httpx.Response:
     """Async variant of :func:`send_with_retries`."""
-    last_response: httpx.Response | None = None
-    for attempt in range(config.max_retries + 1):
+    retry_limit = _retry_limit(request, config, retry_safe)
+    for attempt in range(retry_limit + 1):
         try:
-            response = await client.send(_copy_request(request))
-        except (httpx.ConnectError, httpx.ReadTimeout, httpx.WriteTimeout) as exc:
-            if attempt >= config.max_retries:
-                from netskope.exceptions import ConnectionError, TimeoutError
-
-                if isinstance(exc, (httpx.ReadTimeout, httpx.WriteTimeout)):
+            response = await client.send(
+                request if attempt == 0 else _copy_request(request),
+                auth=None,
+                follow_redirects=False,
+            )
+        except httpx.TransportError as exc:
+            if attempt >= retry_limit or not isinstance(exc, _RETRYABLE_ERRORS):
+                if isinstance(exc, httpx.TimeoutException):
                     raise TimeoutError(str(exc)) from exc
                 raise ConnectionError(str(exc)) from exc
             sleep = _sleep_duration(attempt, config, None)
@@ -129,15 +144,14 @@ async def async_send_with_retries(
                 exc,
                 sleep,
                 attempt + 1,
-                config.max_retries,
+                retry_limit,
             )
             await asyncio.sleep(sleep)
             continue
 
-        if not _should_retry(response, config) or attempt >= config.max_retries:
+        if not _should_retry(response, config) or attempt >= retry_limit:
             return response
 
-        last_response = response
         retry_after = _get_retry_after(response)
         sleep = _sleep_duration(attempt, config, retry_after)
         logger.warning(
@@ -145,9 +159,9 @@ async def async_send_with_retries(
             response.status_code,
             sleep,
             attempt + 1,
-            config.max_retries,
+            retry_limit,
         )
+        await response.aclose()
         await asyncio.sleep(sleep)
 
-    assert last_response is not None
-    return last_response
+    raise RuntimeError("retry loop exited without a response")  # pragma: no cover

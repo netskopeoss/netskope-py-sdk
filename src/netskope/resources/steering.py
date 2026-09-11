@@ -20,15 +20,20 @@ Example::
 
 from __future__ import annotations
 
-from typing import Any
+from functools import cached_property
+from typing import TYPE_CHECKING, Any
 
 from netskope._pagination import AsyncPaginatedResponse, SyncPaginatedResponse
 from netskope.exceptions import ValidationError
+from netskope.models._npa_requests import request_payload
 from netskope.models.devices import Device
 from netskope.models.infrastructure import IPSecTunnel, Pop
-from netskope.models.steering import SteeringConfig
+from netskope.models.steering import IPSecTunnelCreate, IPSecTunnelPatch, SteeringConfig
 from netskope.resources._base import AsyncResource, SyncResource
 from netskope.resources._extract import extract_item, extract_list
+
+if TYPE_CHECKING:
+    from netskope.resources._steering_response import AsyncSteeringResponses, SteeringResponses
 
 _CLIENT_CONFIG_PATH = "/api/v2/steering/globalconfig/clientconfiguration"
 
@@ -136,7 +141,7 @@ def _build_create_tunnel_payload(
     _validate_encryption(encryption)
     if not pops:
         raise ValidationError("pops must contain at least one PoP name.")
-    payload: dict[str, Any] = {
+    fields: dict[str, Any] = {
         "site": site,
         "pops": list(pops),
         "psk": psk,
@@ -146,10 +151,10 @@ def _build_create_tunnel_payload(
         "enabled": enabled,
     }
     if vendor is not None:
-        payload["vendor"] = vendor
+        fields["vendor"] = vendor
     if notes is not None:
-        payload["notes"] = notes
-    return payload
+        fields["notes"] = notes
+    return request_payload(fields, IPSecTunnelCreate)
 
 
 def _build_update_tunnel_payload(
@@ -165,33 +170,38 @@ def _build_update_tunnel_payload(
         _validate_bandwidth(bandwidth)
     if encryption is not None:
         _validate_encryption(encryption)
-    payload: dict[str, Any] = {}
-    if site is not None:
-        payload["site"] = site
-    if pops is not None:
-        if not pops:
-            raise ValidationError("pops must contain at least one PoP name.")
-        payload["pops"] = list(pops)
-    if psk is not None:
-        payload["psk"] = psk
-    if bandwidth is not None:
-        payload["bandwidth"] = bandwidth
-    if encryption is not None:
-        payload["encryption"] = encryption
-    if enabled is not None:
-        payload["enabled"] = enabled
-    if notes is not None:
-        payload["notes"] = notes
-    if not payload:
+    if pops is not None and not pops:
+        raise ValidationError("pops must contain at least one PoP name.")
+    fields: dict[str, Any] = {
+        name: value
+        for name, value in (
+            ("site", site),
+            ("pops", list(pops) if pops is not None else None),
+            ("psk", psk),
+            ("bandwidth", bandwidth),
+            ("encryption", encryption),
+            ("enabled", enabled),
+            ("notes", notes),
+        )
+        if value is not None
+    }
+    if not fields:
         raise ValidationError(
             "No update fields provided. Specify at least one of: site, pops, psk, "
             "bandwidth, encryption, enabled, notes."
         )
-    return payload
+    return request_payload(fields, IPSecTunnelPatch)
 
 
 class SteeringResource(SyncResource):
     """Synchronous interface to steering configuration, IPSec, and device APIs."""
+
+    @cached_property
+    def with_response(self) -> SteeringResponses:
+        """Opt into typed, same-request response access."""
+        from netskope.resources._steering_response import SteeringResponses
+
+        return SteeringResponses(self._transport)
 
     def get_config(self, scope: str = "npa") -> SteeringConfig:
         """Get global steering configuration.
@@ -386,6 +396,13 @@ class SteeringResource(SyncResource):
 
 class AsyncSteeringResource(AsyncResource):
     """Asynchronous interface to steering configuration, IPSec, and device APIs."""
+
+    @cached_property
+    def with_response(self) -> AsyncSteeringResponses:
+        """Opt into typed, same-request response access."""
+        from netskope.resources._steering_response import AsyncSteeringResponses
+
+        return AsyncSteeringResponses(self._transport)
 
     async def get_config(self, scope: str = "npa") -> SteeringConfig:
         """Get global steering configuration.

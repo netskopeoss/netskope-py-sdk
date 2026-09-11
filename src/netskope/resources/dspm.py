@@ -4,11 +4,9 @@ Query data-security posture resources (datastores, databases, schemas, tables,
 columns, scans, policy violations, and more), retrieve analytics metrics, and
 connect or scan datastores.
 
-Because each DSPM resource type returns a different, resource-specific payload,
-these methods return the raw response ``dict`` rather than typed models.  The
-:class:`~netskope.models.dspm.DspmResourceType` enum pins the set of routable
-resource types; passing an unknown type raises
-:class:`~netskope.exceptions.ValidationError` before any HTTP request.
+The legacy methods retain their raw response types and historical paths.
+``list_page`` and ``with_response`` use verified public routes and return
+endpoint-specific models; ``supported_resource_types`` names that surface.
 
 Example::
 
@@ -26,12 +24,17 @@ Example::
 
 from __future__ import annotations
 
-from typing import Any
+import functools
+from typing import TYPE_CHECKING, Any
 
 from netskope.exceptions import ValidationError
-from netskope.models.dspm import DspmResourceType, SortOrder
+from netskope.models.dspm import DspmRecord, DspmResourceType, SortOrder
+from netskope.pagination import Page
 from netskope.resources._base import AsyncResource, SyncResource
 from netskope.resources._extract import quote_id
+
+if TYPE_CHECKING:
+    from netskope.resources._dspm_response import AsyncDspmResponses, DspmResponses
 
 _BASE_PATH = "/api/v2/dspm"
 _ANALYTICS_PATH = f"{_BASE_PATH}/analytics"
@@ -90,6 +93,43 @@ def _ids_payload(ids: list[str]) -> dict[str, Any]:
 
 class DspmResource(SyncResource):
     """Synchronous interface to the DSPM API."""
+
+    @functools.cached_property
+    def with_response(self) -> DspmResponses:
+        from netskope.resources._dspm_response import DspmResponses
+
+        return DspmResponses(self._transport)
+
+    @staticmethod
+    def supported_resource_types() -> tuple[DspmResourceType, ...]:
+        """Resource names with verified routes in the typed read surface."""
+        from netskope.resources._dspm_response import supported_resource_types
+
+        return supported_resource_types()
+
+    def list_page(
+        self,
+        resource_type: DspmResourceType | str,
+        *,
+        filter_expr: str | None = None,
+        sort_by: str | None = None,
+        sort_order: SortOrder | str | None = None,
+        limit: int | None = None,
+        offset: int | None = None,
+    ) -> Page[DspmRecord]:
+        """Fetch exactly one typed page from a verified public DSPM resource."""
+        return self.with_response.list_page(
+            resource_type,
+            filter_expr=filter_expr,
+            sort_by=sort_by,
+            sort_order=sort_order,
+            limit=limit,
+            offset=offset,
+        ).parse()
+
+    def start_scan(self, datastore_id: str) -> None:
+        """Request a scan for one datastore. HTTP 202 does not mean it finished."""
+        self.with_response.start_scan(datastore_id).parse()
 
     def list_resources(
         self,
@@ -171,6 +211,43 @@ class DspmResource(SyncResource):
 
 class AsyncDspmResource(AsyncResource):
     """Asynchronous interface to the DSPM API."""
+
+    @functools.cached_property
+    def with_response(self) -> AsyncDspmResponses:
+        from netskope.resources._dspm_response import AsyncDspmResponses
+
+        return AsyncDspmResponses(self._transport)
+
+    @staticmethod
+    def supported_resource_types() -> tuple[DspmResourceType, ...]:
+        """Resource names with verified routes in the typed read surface."""
+        return DspmResource.supported_resource_types()
+
+    async def list_page(
+        self,
+        resource_type: DspmResourceType | str,
+        *,
+        filter_expr: str | None = None,
+        sort_by: str | None = None,
+        sort_order: SortOrder | str | None = None,
+        limit: int | None = None,
+        offset: int | None = None,
+    ) -> Page[DspmRecord]:
+        """Fetch exactly one typed page from a verified public DSPM resource."""
+        return (
+            await self.with_response.list_page(
+                resource_type,
+                filter_expr=filter_expr,
+                sort_by=sort_by,
+                sort_order=sort_order,
+                limit=limit,
+                offset=offset,
+            )
+        ).parse()
+
+    async def start_scan(self, datastore_id: str) -> None:
+        """Request a scan for one datastore. HTTP 202 does not mean it finished."""
+        (await self.with_response.start_scan(datastore_id)).parse()
 
     async def list_resources(
         self,

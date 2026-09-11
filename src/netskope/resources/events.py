@@ -16,15 +16,32 @@ Example::
 
 from __future__ import annotations
 
+import builtins
+import functools
 import re
 from datetime import datetime
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from netskope._pagination import AsyncPaginatedResponse, SyncPaginatedResponse
 from netskope.exceptions import NotFoundError, ValidationError
-from netskope.models.events import AuditEvent, Event, EventType, NetworkEvent, PageEvent
+from netskope.models.alerts import DatasearchBucket
+from netskope.models.events import (
+    AuditEvent,
+    ClientStatusEvent,
+    Event,
+    EventQueryCapabilities,
+    EventType,
+    IncidentEvent,
+    NetworkEvent,
+    PageEvent,
+    TransactionMetrics,
+)
+from netskope.pagination import Page
 from netskope.resources._base import AsyncResource, SyncResource
 from netskope.resources._extract import extract_list
+
+if TYPE_CHECKING:
+    from netskope.resources._event_response import AsyncEventResponses, EventResponses
 
 _DATASEARCH_BASE = "/api/v2/events/datasearch"
 _AUDIT_PATH = "/api/v2/events/data/audit"
@@ -33,10 +50,14 @@ _TRANSACTION_PATH = "/api/v2/events/metrics/transactionevents"
 
 _HEX_ID_RE = re.compile(r"^[a-fA-F0-9]+$")
 
+# The single record-model table: the legacy iterator and the typed page share it,
+# so one event type never decodes into two different models.
 _MODEL_MAP: dict[str, type[Event]] = {
     "network": NetworkEvent,
     "page": PageEvent,
     "audit": AuditEvent,
+    "clientstatus": ClientStatusEvent,
+    "incident": IncidentEvent,
 }
 
 # Event types not served by /events/datasearch/{type}:
@@ -50,6 +71,17 @@ _PATH_OVERRIDES: dict[str, str] = {
     EventType.TRANSACTION.value: _TRANSACTION_PATH,
 }
 
+_DATASEARCH_TYPES = frozenset(e.value for e in EventType) - set(_PATH_OVERRIDES)
+
+
+def _event_path(event_type: str | EventType) -> str:
+    """Resolve one event type's endpoint from the single path table."""
+    return _PATH_OVERRIDES.get(str(event_type), f"{_DATASEARCH_BASE}/{event_type}")
+
+
+def _event_model(event_type: str | EventType) -> type[Event]:
+    return _MODEL_MAP.get(str(event_type), Event)
+
 
 def _validate_event_type(event_type: str | EventType) -> str:
     et = str(event_type)
@@ -61,10 +93,10 @@ def _validate_event_type(event_type: str | EventType) -> str:
 
 def _build_params(
     query: str | None = None,
-    fields: list[str] | None = None,
+    fields: builtins.list[str] | None = None,
     start_time: datetime | int | None = None,
     end_time: datetime | int | None = None,
-    group_by: str | list[str] | None = None,
+    group_by: str | builtins.list[str] | None = None,
     order_by: str | None = None,
     descending: bool = True,
 ) -> dict[str, Any]:
@@ -91,10 +123,10 @@ def _build_params(
 def _prepare_list(
     event_type: str | EventType,
     query: str | None,
-    fields: list[str] | None,
+    fields: builtins.list[str] | None,
     start_time: datetime | int | None,
     end_time: datetime | int | None,
-    group_by: str | list[str] | None,
+    group_by: str | builtins.list[str] | None,
     order_by: str | None,
     descending: bool,
     audit_type: str | None,
@@ -112,8 +144,7 @@ def _prepare_list(
             params["type"] = audit_type
     else:
         params = _build_params(query, fields, start_time, end_time, group_by, order_by, descending)
-    path = _PATH_OVERRIDES.get(et, f"{_DATASEARCH_BASE}/{et}")
-    return path, _MODEL_MAP.get(et, Event), params
+    return _event_path(et), _event_model(et), params
 
 
 def _prepare_get(event_id: str, event_type: str | EventType) -> tuple[str, type[Event]]:
@@ -123,21 +154,98 @@ def _prepare_get(event_id: str, event_type: str | EventType) -> tuple[str, type[
         raise ValidationError(f"Event type {et!r} does not support lookup by ID (no JQL support).")
     if not _HEX_ID_RE.match(event_id):
         raise ValidationError(f"Invalid event_id format: {event_id!r}. Expected a hex string.")
-    return f"{_DATASEARCH_BASE}/{et}", _MODEL_MAP.get(et, Event)
+    return _event_path(et), _event_model(et)
 
 
 class EventsResource(SyncResource):
     """Synchronous interface to the ``/api/v2/events`` endpoints."""
+
+    @functools.cached_property
+    def with_response(self) -> EventResponses:
+        """Retain the original response of one typed event operation."""
+        from netskope.resources._event_response import EventResponses
+
+        return EventResponses(self._transport)
+
+    def capabilities(
+        self, event_type: str | EventType = EventType.APPLICATION
+    ) -> EventQueryCapabilities:
+        """Return verified capabilities without issuing a request."""
+        from netskope.resources._event_response import event_capabilities
+
+        return event_capabilities(event_type)
+
+    def list_page(
+        self,
+        event_type: str | EventType = EventType.APPLICATION,
+        *,
+        query: str | None = None,
+        fields: builtins.list[str] | None = None,
+        start_time: datetime | int | None = None,
+        end_time: datetime | int | None = None,
+        order_by: str | None = None,
+        descending: bool | None = None,
+        offset: int | None = None,
+        limit: int | None = None,
+        audit_type: str | None = None,
+    ) -> Page[Event]:
+        """Fetch one validated page, preserving omitted request parameters.
+
+        *audit_type* is the ``audit`` endpoint's ``type`` filter; it is rejected
+        for the event types that accept JQL queries instead.
+        """
+        return self.with_response.list_page(
+            event_type,
+            query=query,
+            fields=fields,
+            start_time=start_time,
+            end_time=end_time,
+            order_by=order_by,
+            descending=descending,
+            offset=offset,
+            limit=limit,
+            audit_type=audit_type,
+        ).parse()
+
+    def aggregate_page(
+        self,
+        event_type: str | EventType = EventType.APPLICATION,
+        *,
+        group_by: str | builtins.list[str],
+        query: str | None = None,
+        fields: builtins.list[str] | None = None,
+        start_time: datetime | int | None = None,
+        end_time: datetime | int | None = None,
+        order_by: str | None = None,
+        descending: bool | None = None,
+        limit: int | None = None,
+    ) -> Page[DatasearchBucket]:
+        """Fetch one aggregate page without claiming a source-event total."""
+        return self.with_response.aggregate_page(
+            event_type,
+            group_by=group_by,
+            query=query,
+            fields=fields,
+            start_time=start_time,
+            end_time=end_time,
+            order_by=order_by,
+            descending=descending,
+            limit=limit,
+        ).parse()
+
+    def transaction_metrics(self, *, hours: int = 24) -> TransactionMetrics:
+        """Fetch hourly backlog metrics, not individual transaction events."""
+        return self.with_response.transaction_metrics(hours=hours).parse()
 
     def list(
         self,
         event_type: str | EventType = EventType.APPLICATION,
         *,
         query: str | None = None,
-        fields: list[str] | None = None,
+        fields: builtins.list[str] | None = None,
         start_time: datetime | int | None = None,
         end_time: datetime | int | None = None,
-        group_by: str | list[str] | None = None,
+        group_by: str | builtins.list[str] | None = None,
         order_by: str | None = None,
         descending: bool = True,
         audit_type: str | None = None,
@@ -231,15 +339,92 @@ class EventsResource(SyncResource):
 class AsyncEventsResource(AsyncResource):
     """Asynchronous interface to the ``/api/v2/events`` endpoints."""
 
+    @functools.cached_property
+    def with_response(self) -> AsyncEventResponses:
+        """Retain the original response of one typed event operation."""
+        from netskope.resources._event_response import AsyncEventResponses
+
+        return AsyncEventResponses(self._transport)
+
+    def capabilities(
+        self, event_type: str | EventType = EventType.APPLICATION
+    ) -> EventQueryCapabilities:
+        """Return verified capabilities without issuing a request."""
+        from netskope.resources._event_response import event_capabilities
+
+        return event_capabilities(event_type)
+
+    async def list_page(
+        self,
+        event_type: str | EventType = EventType.APPLICATION,
+        *,
+        query: str | None = None,
+        fields: builtins.list[str] | None = None,
+        start_time: datetime | int | None = None,
+        end_time: datetime | int | None = None,
+        order_by: str | None = None,
+        descending: bool | None = None,
+        offset: int | None = None,
+        limit: int | None = None,
+        audit_type: str | None = None,
+    ) -> Page[Event]:
+        """Fetch one validated page. See :meth:`EventsResource.list_page`."""
+        return (
+            await self.with_response.list_page(
+                event_type,
+                query=query,
+                fields=fields,
+                start_time=start_time,
+                end_time=end_time,
+                order_by=order_by,
+                descending=descending,
+                offset=offset,
+                limit=limit,
+                audit_type=audit_type,
+            )
+        ).parse()
+
+    async def aggregate_page(
+        self,
+        event_type: str | EventType = EventType.APPLICATION,
+        *,
+        group_by: str | builtins.list[str],
+        query: str | None = None,
+        fields: builtins.list[str] | None = None,
+        start_time: datetime | int | None = None,
+        end_time: datetime | int | None = None,
+        order_by: str | None = None,
+        descending: bool | None = None,
+        limit: int | None = None,
+    ) -> Page[DatasearchBucket]:
+        """Fetch one aggregate page without claiming a source-event total."""
+        return (
+            await self.with_response.aggregate_page(
+                event_type,
+                group_by=group_by,
+                query=query,
+                fields=fields,
+                start_time=start_time,
+                end_time=end_time,
+                order_by=order_by,
+                descending=descending,
+                limit=limit,
+            )
+        ).parse()
+
+    async def transaction_metrics(self, *, hours: int = 24) -> TransactionMetrics:
+        """Fetch hourly backlog metrics, not individual transaction events."""
+        return (await self.with_response.transaction_metrics(hours=hours)).parse()
+
     def list(
         self,
         event_type: str | EventType = EventType.APPLICATION,
         *,
         query: str | None = None,
-        fields: list[str] | None = None,
+        fields: builtins.list[str] | None = None,
         start_time: datetime | int | None = None,
         end_time: datetime | int | None = None,
-        group_by: str | list[str] | None = None,
+        group_by: str | builtins.list[str] | None = None,
         order_by: str | None = None,
         descending: bool = True,
         audit_type: str | None = None,

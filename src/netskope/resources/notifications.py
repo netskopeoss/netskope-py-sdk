@@ -16,12 +16,17 @@ Example::
 from __future__ import annotations
 
 import builtins
+import functools
 from typing import Any
 
 from netskope.exceptions import ValidationError
 from netskope.models.notifications import LogoSize, NotificationTemplate, TemplateActionType
 from netskope.resources._base import AsyncResource, SyncResource
 from netskope.resources._extract import extract_item, extract_list, validate_id
+from netskope.resources._notification_response import (
+    AsyncNotificationsResponses,
+    NotificationsResponses,
+)
 
 _TEMPLATES_PATH = "/api/v2/notifications/user/templates"
 _DELIVERY_SETTINGS_PATH = "/api/v2/notifications/user/deliverysettings"
@@ -92,6 +97,10 @@ def _template_path(template_id: str | int) -> str:
 
 class NotificationsResource(SyncResource):
     """Synchronous interface to the user notifications API."""
+
+    @functools.cached_property
+    def with_response(self) -> NotificationsResponses:
+        return NotificationsResponses(self._transport)
 
     def list_templates(
         self,
@@ -266,6 +275,10 @@ class NotificationsResource(SyncResource):
 
 class AsyncNotificationsResource(AsyncResource):
     """Asynchronous interface to the user notifications API."""
+
+    @functools.cached_property
+    def with_response(self) -> AsyncNotificationsResponses:
+        return AsyncNotificationsResponses(self._transport)
 
     async def list_templates(
         self,

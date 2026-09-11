@@ -17,9 +17,12 @@ from __future__ import annotations
 
 from typing import Any
 
+import httpx
+
 from netskope._config import NetskopeConfig
 from netskope._transport import AsyncTransport, SyncTransport
 from netskope._version import __version__
+from netskope.resources.aicc import AiccResource, AsyncAiccResource
 from netskope.resources.alerts import AlertsResource, AsyncAlertsResource
 from netskope.resources.atp import AsyncAtpResource, AtpResource
 from netskope.resources.cci import AsyncCciResource, CciResource
@@ -119,11 +122,19 @@ class NetskopeClient:
     Args:
         tenant: The Netskope tenant hostname (e.g. ``"mycompany.goskope.com"``).
             Falls back to ``NETSKOPE_TENANT`` env var.
-        api_token: A REST API v2 token. Falls back to ``NETSKOPE_API_TOKEN``.
+        api_token: A REST API v2 token. Falls back to ``NETSKOPE_API_TOKEN``
+            unless *ci_session* is supplied.
+        ci_session: A browser session cookie, mutually exclusive with *api_token*.
+        http_client: An HTTPX client providing connection settings. It remains
+            caller-owned and is not closed by this SDK client. The SDK supplies
+            request URLs, credentials, headers, and timeouts independently of
+            that client's defaults. Configure TLS on the supplied HTTPX client.
         timeout: HTTP request timeout in seconds (default 30).
         max_retries: Max automatic retries for transient errors (default 3).
         backoff_factor: Exponential backoff multiplier (default 0.5).
         retry_on_status: HTTP status codes that trigger retries.
+        allow_custom_tenant: Skip the tenant domain check for a private or
+            preproduction hostname.
         verify: TLS verification — ``True`` (default), ``False`` to disable,
             or a path to a CA bundle file (see
             :func:`netskope.find_netskope_ca_cert`). Falls back to the
@@ -136,22 +147,27 @@ class NetskopeClient:
         tenant: str | None = None,
         api_token: str | None = None,
         *,
+        ci_session: str | None = None,
+        http_client: httpx.Client | None = None,
         timeout: float = 30.0,
         max_retries: int = 3,
         backoff_factor: float = 0.5,
         retry_on_status: frozenset[int] | None = None,
+        allow_custom_tenant: bool = False,
         verify: bool | str = True,
     ) -> None:
         self._config = NetskopeConfig.resolve(
             tenant=tenant,
             api_token=api_token,
+            ci_session=ci_session,
             timeout=timeout,
             max_retries=max_retries,
             backoff_factor=backoff_factor,
             retry_on_status=retry_on_status,
+            allow_custom_tenant=allow_custom_tenant,
             verify=verify,
         )
-        self._transport = SyncTransport(self._config)
+        self._transport = SyncTransport(self._config, http_client=http_client)
 
         # Initialize resource namespaces
         self.alerts = AlertsResource(self._transport)
@@ -175,6 +191,7 @@ class NetskopeClient:
         self.dem = DemResource(self._transport)
         self.atp = AtpResource(self._transport)
         self.nsiq = NsiqResource(self._transport)
+        self.aicc = AiccResource(self._transport)
         self.rbi = RbiResource(self._transport)
         self.dspm = DspmResource(self._transport)
         self.spm = SpmResource(self._transport)
@@ -194,8 +211,41 @@ class NetskopeClient:
         """The fully-qualified API base URL."""
         return self._config.base_url
 
+    @property
+    def closed(self) -> bool:
+        """Whether this client has been closed."""
+        return self._transport.closed
+
+    def request(
+        self,
+        method: str,
+        path: str,
+        *,
+        params: dict[str, Any] | None = None,
+        json: Any | None = None,
+        data: Any | None = None,
+        files: Any | None = None,
+        retry_safe: bool | None = None,
+    ) -> httpx.Response:
+        """Access a tenant endpoint that is not covered by a typed resource.
+
+        Returns the HTTP response after the usual authentication and error
+        handling. ``path`` must resolve to the configured tenant. GET, HEAD,
+        and OPTIONS can retry automatically; other methods require an explicit
+        ``retry_safe=True`` for an operation known to be safe to repeat.
+        """
+        return self._transport.request(
+            method,
+            path,
+            params=params,
+            json=json,
+            data=data,
+            files=files,
+            retry_safe=retry_safe,
+        )
+
     def close(self) -> None:
-        """Close the underlying HTTP connection pool.
+        """Close the SDK client and its connection pool, if owned.
 
         It is good practice to call this when you are done, or use the
         client as a context manager::
@@ -228,10 +278,15 @@ class AsyncNetskopeClient:
     Args:
         tenant: The Netskope tenant hostname.
         api_token: A REST API v2 token.
+        ci_session: A browser session cookie, mutually exclusive with *api_token*.
+        http_client: A caller-owned HTTPX async client. See
+            :class:`NetskopeClient` for request defaults and ownership.
         timeout: HTTP request timeout in seconds.
         max_retries: Max automatic retries.
         backoff_factor: Exponential backoff multiplier.
         retry_on_status: HTTP status codes that trigger retries.
+        allow_custom_tenant: Skip the tenant domain check for a private or
+            preproduction hostname.
         verify: TLS verification — ``True``, ``False``, or a CA bundle path.
     """
 
@@ -240,22 +295,27 @@ class AsyncNetskopeClient:
         tenant: str | None = None,
         api_token: str | None = None,
         *,
+        ci_session: str | None = None,
+        http_client: httpx.AsyncClient | None = None,
         timeout: float = 30.0,
         max_retries: int = 3,
         backoff_factor: float = 0.5,
         retry_on_status: frozenset[int] | None = None,
+        allow_custom_tenant: bool = False,
         verify: bool | str = True,
     ) -> None:
         self._config = NetskopeConfig.resolve(
             tenant=tenant,
             api_token=api_token,
+            ci_session=ci_session,
             timeout=timeout,
             max_retries=max_retries,
             backoff_factor=backoff_factor,
             retry_on_status=retry_on_status,
+            allow_custom_tenant=allow_custom_tenant,
             verify=verify,
         )
-        self._transport = AsyncTransport(self._config)
+        self._transport = AsyncTransport(self._config, http_client=http_client)
 
         self.alerts = AsyncAlertsResource(self._transport)
         self.events = AsyncEventsResource(self._transport)
@@ -278,6 +338,7 @@ class AsyncNetskopeClient:
         self.dem = AsyncDemResource(self._transport)
         self.atp = AsyncAtpResource(self._transport)
         self.nsiq = AsyncNsiqResource(self._transport)
+        self.aicc = AsyncAiccResource(self._transport)
         self.rbi = AsyncRbiResource(self._transport)
         self.dspm = AsyncDspmResource(self._transport)
         self.spm = AsyncSpmResource(self._transport)
@@ -294,8 +355,35 @@ class AsyncNetskopeClient:
     def base_url(self) -> str:
         return self._config.base_url
 
+    @property
+    def closed(self) -> bool:
+        """Whether this client has been closed."""
+        return self._transport.closed
+
+    async def request(
+        self,
+        method: str,
+        path: str,
+        *,
+        params: dict[str, Any] | None = None,
+        json: Any | None = None,
+        data: Any | None = None,
+        files: Any | None = None,
+        retry_safe: bool | None = None,
+    ) -> httpx.Response:
+        """Async counterpart of :meth:`NetskopeClient.request`."""
+        return await self._transport.request(
+            method,
+            path,
+            params=params,
+            json=json,
+            data=data,
+            files=files,
+            retry_safe=retry_safe,
+        )
+
     async def close(self) -> None:
-        """Close the underlying async HTTP connection pool."""
+        """Close the SDK client and its async connection pool, if owned."""
         await self._transport.close()
 
     async def __aenter__(self) -> AsyncNetskopeClient:
