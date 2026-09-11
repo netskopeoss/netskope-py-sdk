@@ -52,22 +52,28 @@ Issues = "https://github.com/netSkopeoss/netskope-py-sdk/issues"
 Changelog = "https://github.com/netSkopeoss/netskope-py-sdk/blob/main/CHANGELOG.md"
 
 [dependency-groups]
+# ruff and ty are pinned exactly: both are pre-1.0 and add diagnostics in patch
+# releases, so an unpinned range turns an unrelated pull request red. Bump the
+# pin deliberately, run `uv lock` and fix what the new version reports.
 dev = [
     "pytest>=8.0",
     "pytest-asyncio>=0.24",
     "pytest-cov>=6.0",
     "respx>=0.22",
-    "mypy>=1.13",
-    "ruff>=0.15",
+    "ruff==0.15.5",
+    "ty==0.0.79",
 ]
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/netskope"]
 
 [tool.hatch.build.targets.sdist]
+# Repository infrastructure: useful in a checkout, noise in a published artifact.
 exclude = [
     "CLAUDE.md",
     "how-to-build-a-great-golang-sdk.md",
+    ".claude",
+    ".github",
 ]
 
 [tool.pytest.ini_options]
@@ -101,12 +107,10 @@ known-first-party = ["netskope"]
 [tool.ruff.lint.per-file-ignores]
 "__init__.py" = ["RUF022"]
 
-[tool.mypy]
-python_version = "3.11"
-strict = true
-warn_return_any = true
-warn_unused_configs = true
-plugins = ["pydantic.mypy"]
+# Python version is inferred from requires-python. Type-check the package;
+# tests are exercised by pytest.
+[tool.ty.src]
+include = ["src"]
 
 [tool.coverage.run]
 source = ["netskope"]

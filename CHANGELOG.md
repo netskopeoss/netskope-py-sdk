@@ -204,6 +204,9 @@ expansion from 8 to 24 resource namespaces.
 - SPM `inventory` takes the aggregation the API requires; its `filter` argument is a deprecated alias for the operation's own `ngl_query`. DSPM has no bulk connect-by-id operation, so `connect_datastores` explains that and the new `connect_datastore` sends a single datastore request.
 - NSIQ `lookup_iocs` is no longer replayed after a network failure, because the operation is declared read-write.
 - AICC queries validate the risk-level, extension-type, model-deployment and violation-severity enumerations before sending, including inside array parameters.
+- The repository is built and tested with uv and now commits `uv.lock`, so every environment resolves to the same versions; `ruff` is pinned to 0.15.5, and `ty` 0.0.79 replaces mypy and its pydantic plugin as the type checker (scoped to `src/` through `[tool.ty.src]`).
+- CI (`.github/workflows/ci.yml`) runs lint, format, type check and the test suite on Python 3.11 and 3.14 with `uv sync --locked`, then builds the wheel and sdist and installs each into a clean environment through `scripts/smoke-dist.sh`.
+- A `v*` tag now drives the release (`.github/workflows/release.yml`): it verifies the tag matches the project version and is on `main`, repeats the CI checks, smoke-tests the artifacts, publishes to PyPI through Trusted Publishing with no stored token, and creates the GitHub Release from that version's CHANGELOG section.
 
 ### Fixed
 

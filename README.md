@@ -802,6 +802,23 @@ logging.getLogger("netskope").setLevel(logging.DEBUG)
 - `httpx` >= 0.27
 - `pydantic` >= 2.0
 
+## Development
+
+The repository is managed with [uv](https://docs.astral.sh/uv/) and ships a
+committed `uv.lock`, so every environment resolves to the same versions.
+
+```bash
+uv sync                              # Create .venv with runtime + dev dependencies
+uv run pytest                        # Run the test suite
+uv run ruff check . --fix            # Lint
+uv run ruff format .                 # Format
+uv run ty check                      # Type check src/
+uv build && ./scripts/smoke-dist.sh  # Build the wheel and sdist, install each into a clean venv
+```
+
+CI runs the same checks on Python 3.11 and 3.14 for every pull request. Without
+uv, `pip install -e . --group dev` installs the same dependency group.
+
 ## License
 
 MIT

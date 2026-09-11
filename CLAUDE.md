@@ -5,48 +5,76 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 ## Build & Test Commands
 
 ```bash
-# Run all tests
-uv run pytest tests/
+uv sync                                 # Create .venv and install runtime + dev dependencies
+uv sync --locked                        # What CI runs; fails if uv.lock is stale
 
-# Run unit tests only
-uv run pytest tests/unit/
+# Testing
+uv run pytest                           # All tests
+uv run pytest tests/unit/               # Unit tests only
+uv run pytest tests/unit/test_config.py::TestNetskopeConfig::test_explicit_params  # One test
+uv run pytest -m "not integration"      # Skip tests that need live API credentials
+uv run pytest --cov=netskope --cov-report=html  # With coverage
 
-# Run a single test
-uv run pytest tests/unit/test_config.py::TestNetskopeConfig::test_explicit_params
+# Lint, format, type-check (run before commits/PRs)
+uv run ruff check .                     # Lint
+uv run ruff check . --fix               # Auto-fix lint issues
+uv run ruff format .                    # Format (ruff format --check . to verify only)
+uv run ty check                         # Type check src/ (scope in [tool.ty.src])
 
-# Run with coverage
-uv run pytest --cov=netskope --cov-report=html
+# Packaging
+uv build && ./scripts/smoke-dist.sh     # Build both artifacts, install each into a clean venv and import it
 
-# Skip integration tests (require live API credentials)
-uv run pytest -m "not integration"
-
-# Lint and format
-uv run ruff check . --fix
-uv run ruff format .
-
-# Type check
-uv run mypy
+# CI (.github/workflows/ci.yml) runs the same four checks on Python 3.11 and 3.14 for every
+# pull request and push to main, then builds the wheel and sdist and smoke-tests both from a
+# clean install (scripts/smoke-dist.sh, which release.yml runs on the artifacts it publishes).
 ```
 
 Dev tools live in `[dependency-groups] dev`, which uv installs by default, so
-`uv run <cmd>` needs no extra flags. With pip: `pip install -e . --group dev`.
+`uv run <cmd>` needs no extra flags. `uv.lock` is committed: a dependency change
+edits `pyproject.toml` and then runs `uv lock`, and both files land in the same
+commit. With pip: `pip install -e . --group dev`.
 
-## Releasing
+## Releasing to PyPI
 
-The version is a literal in both `pyproject.toml` and `src/netskope/_version.py`;
-`tests/unit/test_version.py` fails if the two drift. `_version.__version__` also
-builds the `User-Agent` the SDK sends, so a stale literal misreports the SDK to
-the API.
+The full runbook is `.claude/commands/release.md`. The short version:
 
-Before tagging:
+```bash
+# 1. Bump the version in BOTH literals (tests/unit/test_version.py fails if they drift),
+#    then refresh the lockfile
+#    - pyproject.toml           →  version = "X.Y.Z"
+#    - src/netskope/_version.py →  __version__ = "X.Y.Z"
+uv lock                     # uv.lock records the project version; uv sync --locked fails until this runs
 
-- Drop the `.dev0` suffix in both files.
-- Remove the "unpublished" and "development version" wording:
-  `grep -rn 'unpublished\|\.dev0' README.md CHANGELOG.md docs/`.
-- Update `docs/index.html`: the nav badge, the footer, and the version strings
-  in the "Verify Installation" and "Client Properties" samples.
-- Update the CLI's `netskope-py-sdk==` pin to the released version and re-run
-  `uv lock` there. A `.dev0` pin does not match the final release.
+# 2. docs/index.html carries the version in four places (nav badge, the
+#    print(netskope.__version__) sample, the client.version sample, the footer).
+#    grep -n '<old-version>' docs/index.html afterwards to confirm none survived.
+
+# 3. Rotate CHANGELOG.md: [Unreleased] becomes [X.Y.Z] - YYYY-MM-DD, a fresh empty
+#    [Unreleased] goes above it, and the compare links at the bottom are updated.
+
+# 4. Check, commit, tag, push
+uv run ruff check . --fix && uv run ruff format . && uv run ty check && uv run pytest
+git add pyproject.toml uv.lock src/netskope/_version.py CHANGELOG.md docs/index.html
+git commit -m "Release vX.Y.Z - <short summary>"
+git push origin main
+git tag -a vX.Y.Z -m "vX.Y.Z - <short summary>" && git push origin vX.Y.Z
+```
+
+`_version.__version__` builds the `User-Agent` the SDK sends, so a stale literal
+misreports the SDK to the API on every request.
+
+Pushing the tag runs `.github/workflows/release.yml`, which refuses a tag that is
+not on `main` or does not match the project version, runs the same checks as CI,
+builds, smoke-tests both artifacts, publishes through PyPI's Trusted Publisher
+for this repository (no token is stored anywhere), and only then creates the
+GitHub Release from that version's CHANGELOG section. Watch it with
+`gh run watch`. The local `UV_PUBLISH_TOKEN` path is a fallback for when Actions
+cannot run, and the token comes from the macOS keychain for that one command:
+never echo it or commit it.
+
+Until `1.2.0` ships, the README and CHANGELOG describe `1.2.0.dev0` as
+unpublished. The release that publishes it removes that wording:
+`grep -rn 'unpublished\|\.dev0' README.md CHANGELOG.md docs/`.
 
 ## Architecture
 
@@ -98,6 +126,7 @@ workflow that builds both packages from clean wheels.
 - `retry_on_status=frozenset()` disables status-based retries; `None` selects the
   defaults (`_config.py` distinguishes the two with `is not None`)
 - ruff line-length: 100, target: py311
-- mypy strict mode with pydantic v2 plugin
+- Toolchain: uv for the environment, the lockfile and packaging; ruff for lint (rules E, W, F, I, N, UP, B, SIM, RUF) and formatting; ty for type checking `src/`. All of it is configured in `pyproject.toml`. Suppress a ty diagnostic with `# ty: ignore[rule]` and say why on the line above; bare `# type: ignore` also works. Inside a class that defines a `list` method, spell the builtin `builtins.list[...]` in annotations — the method shadows the name in class scope
 - Tests use `respx` for HTTP mocking, `pytest-asyncio` (auto mode) for async tests
+- Changelog: `CHANGELOG.md` follows Keep a Changelog 1.1.0 throughout. Every user-visible change lands in the same PR under `### Added` / `Changed` / `Deprecated` / `Removed` / `Fixed` / `Security` in the Unreleased section, one or two sentences per entry on one unwrapped line; the release runbook turns that section into the version entry and the GitHub Release notes. A release that removes a public method, renames a model field, or changes an existing response contract also opens with a `### Breaking` subsection listing each one, so the size of the version bump can be read off the changelog
 - Wire shapes are checked against a pinned revision of the Netskope API gateway contract, whose definitions are not public. `tests/unit/resources/test_spec_*.py` holds those checks; each assertion's docstring cites the contract file and line it came from, and response fixtures use the contract's own example values. Cite the same way when adding one, and do not copy contract text into the repository

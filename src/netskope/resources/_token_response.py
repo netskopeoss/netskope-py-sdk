@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import builtins
+
 from netskope.models.tokens import ApiToken, ApiTokenWrite
 from netskope.resources._admin_response import item, request_payload
 from netskope.resources._base import AsyncResource, SyncResource
@@ -24,7 +26,7 @@ class TokensResponses(SyncResource):
         )
         return ApiResponse(response, lambda raw: item(raw, ApiToken))
 
-    def list(self) -> ApiResponse[list[ApiToken]]:
+    def list(self) -> ApiResponse[builtins.list[ApiToken]]:
         response = self._transport.request("GET", "/api/v2/auth/tokens")
         return ApiResponse(response, lambda raw: parse_response_list(raw.json(), ApiToken))
 
@@ -48,7 +50,7 @@ class AsyncTokensResponses(AsyncResource):
         )
         return ApiResponse(response, lambda raw: item(raw, ApiToken))
 
-    async def list(self) -> ApiResponse[list[ApiToken]]:
+    async def list(self) -> ApiResponse[builtins.list[ApiToken]]:
         response = await self._transport.request("GET", "/api/v2/auth/tokens")
         return ApiResponse(response, lambda raw: parse_response_list(raw.json(), ApiToken))
 
