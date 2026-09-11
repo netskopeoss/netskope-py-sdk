@@ -5,7 +5,7 @@ from __future__ import annotations
 from enum import StrEnum
 from typing import Any, Literal, Self
 
-from pydantic import Field, JsonValue, field_validator, model_validator
+from pydantic import AliasChoices, Field, JsonValue, field_validator, model_validator
 
 from netskope.models._npa_requests import NpaRequest
 from netskope.models.common import NetskopeModel
@@ -32,8 +32,46 @@ class PrivateAppTag(NetskopeModel):
     tag_name: str | None = None
 
 
+def _protocol_ports(protocols: Any) -> list[str]:
+    """Collect the ports the response carries inside its protocol entries.
+
+    ``private_apps_item.protocols`` (``npa_apps_private.yaml:180-183``) holds
+    ``protocol_response_item`` objects whose port is a scalar ``port``
+    (``:402-422``), while the same-named schema in ``npa_generic.yaml:38-46``
+    and ``npa_private_publisher.yaml:16-24`` holds a ``ports`` array.  Both
+    shapes are read, in the order the API listed them, without duplicates.
+    """
+    ports: list[str] = []
+    if not isinstance(protocols, list):
+        return ports
+    for entry in protocols:
+        if not isinstance(entry, dict):
+            continue
+        listed = entry.get("ports")
+        candidates: list[Any] = listed if isinstance(listed, list) else [entry.get("port")]
+        for candidate in candidates:
+            if isinstance(candidate, (str, int)) and not isinstance(candidate, bool):
+                text = str(candidate)
+                if text and text not in ports:
+                    ports.append(text)
+    return ports
+
+
 class PrivateApp(NetskopeModel):
     """A Netskope Private Application (ZTNA).
+
+    ``private_apps_item`` (``npa_apps_private.yaml:133-231``) has no top-level
+    ``port`` — every port lives inside a ``protocols`` entry — so ``port`` is
+    filled in from those entries (comma-joined when the app exposes several)
+    rather than left empty.  The publisher assignments the API returns are
+    ``service_publisher_assignments`` (``:201-204``); ``publishers`` is the
+    SDK's older name for the same value.
+
+    NPA search answers with ``private_apps_response_item``
+    (``npa_generic.yaml:70-117``), which names the record ``id`` and ``name``
+    rather than ``app_id`` and ``app_name``; both spellings reach the same two
+    attributes, and the steering list's own ``app_id``/``app_name`` still win
+    where a record carries both.
 
     Example::
 
@@ -41,18 +79,30 @@ class PrivateApp(NetskopeModel):
             print(f"{app.app_name} → {app.host}:{app.port}")
     """
 
-    app_id: int | None = None
-    app_name: str | None = None
+    app_id: int | None = Field(None, validation_alias=AliasChoices("app_id", "id"))
+    app_name: str | None = Field(None, validation_alias=AliasChoices("app_name", "name"))
     host: str | None = None
     port: str | None = None
+    private_app_protocol: str | None = None
     protocols: list[Any] | None = None
-    publishers: list[dict[str, Any]] | None = None
+    publishers: list[dict[str, Any]] | None = Field(
+        None, validation_alias=AliasChoices("publishers", "service_publisher_assignments")
+    )
+    service_publisher_assignments: list[dict[str, Any]] | None = None
     use_publisher_dns: bool | None = None
     clientless_access: bool | None = None
     trust_self_signed_certs: bool | None = None
     tags: list[dict[str, Any]] | None = Field(default_factory=list)
-    service_publisher_assignment: str | None = None
     reachability: Any | None = None
+
+    @model_validator(mode="before")
+    @classmethod
+    def _port_from_protocols(cls, data: Any) -> Any:
+        if isinstance(data, dict) and data.get("port") is None:
+            ports = _protocol_ports(data.get("protocols"))
+            if ports:
+                return {**data, "port": ",".join(ports)}
+        return data
 
 
 class PrivateAppProtocolSpec(NpaRequest):

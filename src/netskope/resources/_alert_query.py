@@ -10,7 +10,11 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator, model_valida
 from pydantic import ValidationError as PydanticValidationError
 
 from netskope._pagination import _make_page
-from netskope.datasearch import DATASEARCH_PAGE_CAP, DatasearchWindow
+from netskope.datasearch import (
+    DATASEARCH_PAGE_CAP,
+    DATASEARCH_TIMEOUT_DEFAULT,
+    DatasearchWindow,
+)
 from netskope.exceptions import ValidationError
 from netskope.models.alerts import Alert, DatasearchBucket
 from netskope.pagination import Page
@@ -31,6 +35,7 @@ class _AlertQuery(BaseModel):
     descending: bool | None = None
     offset: int | None = Field(None, ge=0)
     limit: int | None = Field(None, gt=0, le=DATASEARCH_PAGE_CAP)
+    timeout: int | None = Field(DATASEARCH_TIMEOUT_DEFAULT, gt=0)
 
     @field_validator("start_time", "end_time", mode="before")
     @classmethod
@@ -52,6 +57,15 @@ class _AlertQuery(BaseModel):
         return self
 
 
+def _validate_timeout(timeout: int | None) -> int | None:
+    """Accept a positive query timeout in seconds, or ``None`` to omit it."""
+    if timeout is None:
+        return None
+    if isinstance(timeout, bool) or not isinstance(timeout, int) or timeout < 1:
+        raise ValidationError("timeout must be a positive number of seconds, or None to omit it.")
+    return timeout
+
+
 def _build_params(
     query: str | None = None,
     fields: list[str] | None = None,
@@ -60,9 +74,14 @@ def _build_params(
     group_by: str | list[str] | None = None,
     order_by: str | None = None,
     descending: bool | None = True,
+    *,
+    timeout: int | None = DATASEARCH_TIMEOUT_DEFAULT,
 ) -> dict[str, Any]:
     """Preserve legacy parameter behavior, including its default DESC direction."""
     params: dict[str, Any] = {}
+    resolved_timeout = _validate_timeout(timeout)
+    if resolved_timeout is not None:
+        params["timeout"] = resolved_timeout
     if query:
         params["query"] = query
     if fields:
@@ -73,8 +92,11 @@ def _build_params(
     if group_by:
         params["groupbys"] = group_by if isinstance(group_by, str) else ",".join(group_by)
     if order_by:
+        # search_alert.yaml:363-368 names this parameter orderbys; its example
+        # `instance_id+desc,timestamp+desc` is "field desc" URL-encoded, so a
+        # space before the direction is the same wire value.
         direction = "" if descending is None else (" DESC" if descending else " ASC")
-        params["sortby"] = f"{order_by}{direction}"
+        params["orderbys"] = f"{order_by}{direction}"
     return params
 
 
@@ -89,6 +111,7 @@ def _build_page_params(
     limit: int | None,
     *,
     group_by: str | list[str] | None = None,
+    timeout: int | None = DATASEARCH_TIMEOUT_DEFAULT,
 ) -> dict[str, Any]:
     try:
         request = _AlertQuery.model_validate(
@@ -102,6 +125,7 @@ def _build_page_params(
                 "descending": descending,
                 "offset": offset,
                 "limit": limit,
+                "timeout": timeout,
             }
         )
     except PydanticValidationError as exc:
@@ -117,11 +141,8 @@ def _build_page_params(
         request.group_by,
         request.order_by,
         request.descending,
+        timeout=request.timeout,
     )
-    if "sortby" in params:
-        # search_alert.yaml defines orderbys. Legacy list() keeps its existing
-        # sortby wire contract through _build_params directly.
-        params["orderbys"] = params.pop("sortby")
     if request.offset is not None:
         params["offset"] = request.offset
     if request.limit is not None:
@@ -138,9 +159,20 @@ def _build_aggregate_params(
     order_by: str | None,
     descending: bool | None,
     limit: int | None,
+    *,
+    timeout: int | None = DATASEARCH_TIMEOUT_DEFAULT,
 ) -> dict[str, Any]:
     params = _build_page_params(
-        query, fields, start_time, end_time, order_by, descending, None, limit, group_by=group_by
+        query,
+        fields,
+        start_time,
+        end_time,
+        order_by,
+        descending,
+        None,
+        limit,
+        group_by=group_by,
+        timeout=timeout,
     )
     if "groupbys" not in params:
         raise ValidationError("group_by must select at least one grouping field.")
@@ -153,11 +185,21 @@ def _build_scan_params(
     fields: list[str] | None,
     order_by: str | None,
     descending: bool | None,
+    *,
+    timeout: int | None = DATASEARCH_TIMEOUT_DEFAULT,
 ) -> dict[str, Any]:
     if not isinstance(window, DatasearchWindow):
         raise ValidationError("window must be a DatasearchWindow with explicit epoch bounds.")
     params = _build_page_params(
-        query, fields, window.start_time, window.end_time, order_by, descending, None, None
+        query,
+        fields,
+        window.start_time,
+        window.end_time,
+        order_by,
+        descending,
+        None,
+        None,
+        timeout=timeout,
     )
     if "fields" in params:
         names = params["fields"].split(",")

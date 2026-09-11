@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import Any, Literal, Self
+from typing import Any, Self
 
 from pydantic import ConfigDict, Field, RootModel, field_validator, model_validator
 
@@ -11,14 +11,23 @@ from netskope.models.common import NetskopeModel
 
 
 class IPSecTunnelPatch(NpaRequest):
-    """Supported IPsec changes. The request key is enable, not response enabled."""
+    """Supported IPsec changes. The request key is enable, not response enabled.
+
+    ``ipsec_tunnel_request_patch`` (``steering/ipsec.yaml:185-234``) declares
+    ``bandwidth`` as a bare integer (``:187-188``) and ``encryption`` as a bare
+    string (``:191-192``) with no enum on either, so a tenant on a tier outside
+    the usual set is not shut out.
+    :data:`~netskope.resources.steering.TUNNEL_BANDWIDTHS` and
+    :data:`~netskope.resources.steering.TUNNEL_ENCRYPTIONS` name the values
+    Netskope commonly provisions.
+    """
 
     site: str | None = None
     pops: list[str] | None = Field(None, min_length=1)
     psk: str | None = Field(None, min_length=1, repr=False)
     srcidentity: str | None = None
-    bandwidth: Literal[50, 100, 150, 200, 250, 1000] | None = None
-    encryption: Literal["AES128-CBC", "AES256-CBC", "AES256-GCM"] | None = None
+    bandwidth: int | None = Field(None, gt=0)
+    encryption: str | None = Field(None, min_length=1)
     enabled: bool | None = Field(None, alias="enable")
     vendor: str | None = None
     notes: str | None = None

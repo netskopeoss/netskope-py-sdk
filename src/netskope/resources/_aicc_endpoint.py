@@ -53,7 +53,13 @@ class AiccEndpoint(Generic[T, Q]):
         for name, required, _, choices in rules:
             if required and name not in params:
                 raise ValidationError(f"This AICC operation requires {name}.")
-            if choices and name in params and params[name] not in choices:
+            if not choices or name not in params:
+                continue
+            value = params[name]
+            # Several of these parameters are arrays in the gateway contract,
+            # so the enumeration constrains each element, not the list.
+            supplied = value if isinstance(value, list) else [value]
+            if any(entry not in choices for entry in supplied):
                 raise ValidationError(f"Invalid AICC {name}; expected one of {', '.join(choices)}.")
         return params
 

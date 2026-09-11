@@ -45,6 +45,14 @@ _TAGS_PATH = "/api/v2/devices/device/tags"
 _TAGS_QUERY_PATH = f"{_TAGS_PATH}/gettags"
 
 # gettags paging bounds per the gateway spec (default limit 20, max 100).
+#
+# tag.yaml is internally inconsistent about the ceiling: TagQueryDto (:933-937)
+# declares ``minimum: 1, maximum: 100`` with no special case, while the prose at
+# :125 says "limit - Maximum items to retrieve (default: 20, max: 100, query
+# with count's max: 10)". The counts-bearing queries are exactly the ones the
+# traversal here issues — empty body and name filter (:109-116, :131). Schema
+# validation accepts 100 either way, so the page-size default follows the
+# schema; lower it to 10 if a tenant rejects larger counts-bearing pages.
 _TAGS_DEFAULT_LIMIT = 20
 _TAGS_MAX_LIMIT = 100
 

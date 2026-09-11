@@ -220,7 +220,10 @@ async def test_bulk_upgrade_accessor_types_acknowledgment_and_preserves_payload(
     assert result.message == "Upgrade requested"
     assert result.model_extra == {"total": 2, "future": {"job": 7}}
     assert response.json() == body
-    assert sent_json(route) == {"publishers": {"apply": {"upgrade_request": True}, "id": [7, 8]}}
+    # publishers_bulk_request ids are strings (npa_publishers.yaml:294-299).
+    assert sent_json(route) == {
+        "publishers": {"apply": {"upgrade_request": True}, "id": ["7", "8"]}
+    }
     assert route.call_count == 1
 
 

@@ -9,7 +9,12 @@ from netskope.models._npa_requests import (
     NpaRequest,
 )
 from netskope.models.administration import (
+    AdminApiAccessToken,
     AdminRequest,
+    AdminRole,
+    AdminUser,
+    AdminUserExtension,
+    AdminUserMetadata,
     OperationStatus,
 )
 from netskope.models.aicc import (
@@ -208,6 +213,7 @@ from netskope.models.incidents import (
     UserConfidenceIndex,
 )
 from netskope.models.infrastructure import (
+    PUBLISHER_UPGRADE_TIMEZONES,
     BrokerPublicIpAccess,
     IPSecTunnel,
     LocalBroker,
@@ -248,6 +254,7 @@ from netskope.models.npa_policy import (
     NpaRuleData,
     NpaRuleOrder,
     NpaSearchType,
+    NpaTagType,
     NpaUserConfidence,
 )
 from netskope.models.nsiq import (
@@ -375,6 +382,13 @@ from netskope.models.users import (
 )
 
 __all__ = [
+    "NpaTagType",
+    "PUBLISHER_UPGRADE_TIMEZONES",
+    "AdminApiAccessToken",
+    "AdminRole",
+    "AdminUser",
+    "AdminUserExtension",
+    "AdminUserMetadata",
     "AdemAggregatedScores",
     "AdemApplication",
     "AdemCause",

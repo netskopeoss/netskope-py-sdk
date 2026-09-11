@@ -76,7 +76,7 @@ class TestCciLookupApp:
             category="Cloud Storage",
             ccl="excellent",
             tag="Finance",
-            connector="api",
+            connector=True,
             discovered=True,
             limit=5,
             offset=10,
@@ -88,11 +88,37 @@ class TestCciLookupApp:
             "category": "Cloud Storage",
             "ccl": "excellent",
             "tag": "Finance",
-            "connector": "api",
+            "connector": "true",
             "discovered": "true",
             "limit": "5",
             "offset": "10",
         }
+
+    @respx.mock
+    def test_presence_flags_are_omitted_when_false(self, client: NetskopeClient) -> None:
+        """``discovered`` and ``connector`` enumerate only 1/true
+        (services/cci.yaml:2911-2942) — there is no sanctioned-only mode."""
+        route = respx.get(_APP_URL).mock(return_value=httpx.Response(200, json={"data": []}))
+        _cci(client).lookup_app("Box", discovered=False, connector=False)
+
+        assert dict(route.calls.last.request.url.params) == {"apps": "Box"}
+
+    @respx.mock
+    @pytest.mark.parametrize(
+        ("kwargs", "message"),
+        [
+            ({"discovered": "false"}, "discovered is a presence flag"),
+            ({"connector": "api"}, "connector is a presence flag"),
+            ({"ccl": "terrible"}, "ccl must be one of"),
+        ],
+    )
+    def test_rejected_query_values(
+        self, client: NetskopeClient, kwargs: dict[str, object], message: str
+    ) -> None:
+        route = respx.get(url__regex=r".*").mock(return_value=httpx.Response(200, json={}))
+        with pytest.raises(ValidationError, match=message):
+            _cci(client).lookup_app("Box", **kwargs)  # type: ignore[arg-type]
+        assert route.call_count == 0
 
     @respx.mock
     def test_lookup_app_omits_unset_filters(self, client: NetskopeClient) -> None:
@@ -296,10 +322,10 @@ class TestAsyncCciLookupApp:
     @respx.mock
     async def test_lookup_app_sends_optional_filters(self, aclient: AsyncNetskopeClient) -> None:
         route = respx.get(_APP_URL).mock(return_value=httpx.Response(200, json={"data": []}))
-        await _acci(aclient).lookup_app("Box", ccl="low", discovered=False, offset=3)
+        await _acci(aclient).lookup_app("Box", ccl="low", discovered=True, offset=3)
 
         params = dict(route.calls.last.request.url.params)
-        assert params == {"apps": "Box", "ccl": "low", "discovered": "false", "offset": "3"}
+        assert params == {"apps": "Box", "ccl": "low", "discovered": "true", "offset": "3"}
 
 
 class TestAsyncCciTags:

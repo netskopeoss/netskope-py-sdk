@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from typing import Any
+
 from pydantic import ValidationError as ModelValidationError
 
 from netskope.exceptions import ValidationError
@@ -28,14 +30,38 @@ def _file_request(request: AtpFileScan) -> AtpFileScan:
         ) from None
 
 
+def file_request_from_parts(filename: str, content: bytes, scan_type: str) -> AtpFileScan:
+    """Build the sandbox upload contract from the legacy positional arguments."""
+    try:
+        return AtpFileScan.model_validate(
+            {"filename": filename, "content": content, "scan_type": scan_type}
+        )
+    except ModelValidationError:
+        raise ValidationError(
+            "Invalid sandbox upload: provide a supported, encrypted ZIP archive "
+            'and scan_type="sandbox".'
+        ) from None
+
+
+def filescan_parts(request: AtpFileScan) -> tuple[dict[str, str], dict[str, Any]]:
+    """Return the ``scantype`` query and the binary ``file`` part.
+
+    ``POST /scans/filescan`` (atp/atpsvc.yaml:86-105) is a
+    ``multipart/form-data`` upload with a required ``scantype`` query
+    parameter; there is no JSON body form.
+    """
+    return (
+        {"scantype": request.scan_type},
+        {"file": (request.filename, request.content, "application/zip")},
+    )
+
+
 class AtpResponses(SyncResource):
     def scan_file(self, request: AtpFileScan) -> ApiResponse[AtpFileSubmission]:
         request = _file_request(request)
+        params, files = filescan_parts(request)
         response = self._transport.request(
-            "POST",
-            "/api/v2/atp/scans/filescan",
-            params={"scantype": request.scan_type},
-            files={"file": (request.filename, request.content, "application/zip")},
+            "POST", "/api/v2/atp/scans/filescan", params=params, files=files
         )
         return ApiResponse(response, lambda raw: item(raw, AtpFileSubmission))
 
@@ -61,11 +87,9 @@ class AtpResponses(SyncResource):
 class AsyncAtpResponses(AsyncResource):
     async def scan_file(self, request: AtpFileScan) -> ApiResponse[AtpFileSubmission]:
         request = _file_request(request)
+        params, files = filescan_parts(request)
         response = await self._transport.request(
-            "POST",
-            "/api/v2/atp/scans/filescan",
-            params={"scantype": request.scan_type},
-            files={"file": (request.filename, request.content, "application/zip")},
+            "POST", "/api/v2/atp/scans/filescan", params=params, files=files
         )
         return ApiResponse(response, lambda raw: item(raw, AtpFileSubmission))
 

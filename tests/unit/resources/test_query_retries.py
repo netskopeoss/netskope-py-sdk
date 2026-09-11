@@ -14,6 +14,15 @@ from netskope.exceptions import APIError, TimeoutError
 
 _BASE = "https://t.goskope.com"
 
+# The minimum an app probe needs (AppProbeUpdateCreateCommon, demconfig.yaml:2666-2707).
+_PROBE_ARGS = {
+    "app_name": "Slack",
+    "frequency": 5,
+    "entity": {"user": ["user1"]},
+    "os": ["windows"],
+    "device_classification": ["managed"],
+}
+
 
 @pytest.fixture
 def retry_client() -> Iterator[NetskopeClient]:
@@ -89,17 +98,16 @@ def test_dem_query_retries_preserving_url_and_body_filters(retry_client: Netskop
 def test_inventory_query_retries_with_or_without_body(
     retry_client: NetskopeClient, filter_expr: str | None
 ) -> None:
-    route = respx.post(f"{_BASE}/api/v2/spm/inventory").mock(
+    route = respx.post(f"{_BASE}/api/v2/spm/inventory/getresources").mock(
         side_effect=[httpx.Response(503), httpx.Response(200, json={"data": []})]
     )
 
     assert retry_client.spm.inventory(filter=filter_expr) == {"data": []}
 
     _assert_same_query_retried(route)
-    if filter_expr is None:
-        assert route.calls[0].request.content == b""
-    else:
-        assert json.loads(route.calls[0].request.content) == {"filter": filter_expr}
+    body = json.loads(route.calls[0].request.content)
+    assert body["group_by"] == "resource_name"
+    assert body.get("ngl_query") == filter_expr
 
 
 @respx.mock
@@ -211,9 +219,7 @@ def test_response_helper_gets_keep_their_method_default(
             id="add-note",
         ),
         pytest.param(
-            lambda client: client.dem.probes.with_response.create(
-                "Probe", "https://app.example.com"
-            ),
+            lambda client: client.dem.probes.with_response.create("Probe", **_PROBE_ARGS),
             "/api/v2/dem/appprobes",
             id="typed-create-probe",
         ),
@@ -243,7 +249,7 @@ async def test_async_response_helpers_split_reads_from_writes(
 
     await async_retry_client.incidents.with_response.get_uci("a", from_time=0)
     with pytest.raises(APIError):
-        await async_retry_client.dem.probes.with_response.create("P", "https://app.example.com")
+        await async_retry_client.dem.probes.with_response.create("P", **_PROBE_ARGS)
 
     _assert_same_query_retried(read)
     assert write.call_count == 1
@@ -259,7 +265,7 @@ async def test_async_response_helpers_split_reads_from_writes(
             id="create-tag",
         ),
         pytest.param(
-            lambda client: client.dem.probes.create("Probe", "https://app.example.com"),
+            lambda client: client.dem.probes.create("Probe", **_PROBE_ARGS),
             "/api/v2/dem/appprobes",
             id="create-probe",
         ),
@@ -301,7 +307,7 @@ def test_mutations_in_query_capable_resources_are_not_retried(
             id="create-tag",
         ),
         pytest.param(
-            lambda client: client.dem.probes.create("Probe", "https://app.example.com"),
+            lambda client: client.dem.probes.create("Probe", **_PROBE_ARGS),
             "/api/v2/dem/appprobes",
             id="create-probe",
         ),

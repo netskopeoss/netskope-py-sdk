@@ -2,7 +2,7 @@
 
 Example::
 
-    for app in client.private_apps.list():
+    for app in client.private_apps.list(in_policy=True):
         print(f"{app.app_name} → {app.host}:{app.port}")
 
     new_app = client.private_apps.create(
@@ -74,6 +74,50 @@ def _extract_tags(body: dict[str, Any]) -> list[dict[str, Any]]:
     return extract_list(body, "tags")
 
 
+def _query_term(name: str, operator: str, value: Any) -> str:
+    """Render one ``<column> <operator> <value>`` term of a query expression."""
+    return f"{name} {operator} {value}"
+
+
+def _filter_terms(
+    app_name: str | None,
+    publisher_name: str | None,
+    reachable: bool | None,
+    clientless_access: bool | None,
+    host: str | None,
+    in_policy: bool | None,
+    protocol: str | None,
+) -> builtins.list[str]:
+    """Translate the convenience filters into the query terms the API names.
+
+    ``listNPAPrivateApps`` declares exactly ``fields``, ``query``, ``offset``
+    and ``limit`` (npa_apps_private.yaml:490-524); every attribute below is a
+    *term inside* ``query``, with the operators and value spellings documented
+    in npa_generic.yaml:495-504 — ``yes``/``no`` for ``reachable`` and
+    ``in_policy``, ``true``/``false`` for ``clientless_access``.  Sent as bare
+    parameters they were dropped on arrival and the caller silently got an
+    unfiltered collection.
+    """
+    terms: builtins.list[str] = []
+    if app_name is not None:
+        terms.append(_query_term("name", "sw", app_name))
+    if publisher_name is not None:
+        terms.append(_query_term("publisher_name", "eq", publisher_name))
+    if host is not None:
+        terms.append(_query_term("host", "eq", host))
+    if protocol is not None:
+        terms.append(_query_term("private_app_protocol", "eq", protocol))
+    if reachable is not None:
+        terms.append(_query_term("reachable", "eq", "yes" if reachable else "no"))
+    if in_policy is not None:
+        terms.append(_query_term("in_policy", "eq", "yes" if in_policy else "no"))
+    if clientless_access is not None:
+        terms.append(
+            _query_term("clientless_access", "eq", "true" if clientless_access else "false")
+        )
+    return terms
+
+
 def _build_list_params(
     query: str | None,
     app_name: str | None,
@@ -86,25 +130,17 @@ def _build_list_params(
     filter_expr: str | None,
     fields: builtins.list[str] | None,
 ) -> dict[str, Any]:
+    """Build the four query parameters the private-apps list endpoint declares.
+
+    A caller's own *query* and *filter_expr* expressions lead, in that order,
+    and the convenience filters are appended as further ``and`` terms.
+    """
+    expressions = [expression for expression in (query, filter_expr) if expression] + _filter_terms(
+        app_name, publisher_name, reachable, clientless_access, host, in_policy, protocol
+    )
     params: dict[str, Any] = {}
-    if query is not None:
-        params["query"] = query
-    if app_name is not None:
-        params["app_name"] = app_name
-    if publisher_name is not None:
-        params["publisher_name"] = publisher_name
-    if reachable is not None:
-        params["reachable"] = reachable
-    if clientless_access is not None:
-        params["clientless_access"] = clientless_access
-    if host is not None:
-        params["host"] = host
-    if in_policy is not None:
-        params["in_policy"] = in_policy
-    if protocol is not None:
-        params["protocol"] = protocol
-    if filter_expr:
-        params["filter"] = filter_expr
+    if expressions:
+        params["query"] = " and ".join(expressions)
     if fields:
         params["fields"] = ",".join(fields)
     return params
@@ -435,16 +471,28 @@ class PrivateAppsResource(SyncResource):
     ) -> SyncPaginatedResponse[PrivateApp]:
         """List all private applications.
 
+        Every filter below is one term of the single ``query`` expression the
+        endpoint takes (``npa_apps_private.yaml:490-524``); the terms are joined
+        with ``and``, so ``app_name="dash", in_policy=True`` is sent as
+        ``query=name sw dash and in_policy eq yes``.  Supply *query* (or
+        *filter_expr*) to write the expression yourself; it leads, and the
+        convenience filters are appended to it.
+
         Args:
-            query: Search query string to filter applications.
-            app_name: Filter by application name.
-            publisher_name: Filter by publisher name.
-            reachable: Filter by reachability status.
-            clientless_access: Filter by clientless access enabled/disabled.
-            host: Filter by host name.
-            in_policy: Filter by whether the app is in a policy.
-            protocol: Filter by protocol (e.g. ``"tcp"``, ``"udp"``).
-            filter_expr: Optional filter expression.
+            query: A filter expression, e.g. ``'name sw dash'``.  Operators and
+                columns: ``npa_generic.yaml:495-504``.
+            app_name: Applications whose name starts with this (``name sw``).
+            publisher_name: Applications served by this publisher
+                (``publisher_name eq``).
+            reachable: Reachable or unreachable applications
+                (``reachable eq yes|no``).
+            clientless_access: Browser-access enabled or disabled
+                (``clientless_access eq true|false``).
+            host: Applications on this host (``host eq``).
+            in_policy: Applications referenced by a policy, or not
+                (``in_policy eq yes|no``).
+            protocol: Browser-access protocol (``private_app_protocol eq``).
+            filter_expr: A second expression, appended to *query* with ``and``.
             fields: Specific fields to include.
             page_size: Results per page.
         """

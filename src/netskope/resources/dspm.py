@@ -1,12 +1,14 @@
 """DSPM (Data Security Posture Management) resource.
 
 Query data-security posture resources (datastores, databases, schemas, tables,
-columns, scans, policy violations, and more), retrieve analytics metrics, and
-connect or scan datastores.
+columns, classification metadata, sidecar pools and infrastructure
+connections), read the two connected-datastore analytics reports, and start
+classification scans.
 
-The legacy methods retain their raw response types and historical paths.
-``list_page`` and ``with_response`` use verified public routes and return
-endpoint-specific models; ``supported_resource_types`` names that surface.
+``list_resources`` and ``list_page`` address the same verified public routes
+(``_dspm_response._ROUTES``); ``list_resources`` returns the raw body and
+``list_page`` returns typed records.  ``supported_resource_types`` names that
+surface.
 
 Example::
 
@@ -18,8 +20,8 @@ Example::
         limit=20,
     )
 
-    # Retrieve an analytics metric
-    summary = client.dspm.analytics("summary")
+    # Retrieve an analytics report
+    distribution = client.dspm.analytics("sensitivity_score_distribution")
 """
 
 from __future__ import annotations
@@ -31,15 +33,19 @@ from netskope.exceptions import ValidationError
 from netskope.models.dspm import DspmRecord, DspmResourceType, SortOrder
 from netskope.pagination import Page
 from netskope.resources._base import AsyncResource, SyncResource
-from netskope.resources._extract import quote_id
 
 if TYPE_CHECKING:
     from netskope.resources._dspm_response import AsyncDspmResponses, DspmResponses
 
 _BASE_PATH = "/api/v2/dspm"
-_ANALYTICS_PATH = f"{_BASE_PATH}/analytics"
-_CONNECTED_DATASTORES_PATH = f"{_BASE_PATH}/connected_datastores"
-_SCANS_PATH = f"{_BASE_PATH}/scans"
+_CONNECTED_DATASTORES_PATH = f"{_BASE_PATH}/datastores/connected"
+
+# The only two connected-datastore analytics reports the gateway declares
+# (dspm_external.yaml:6508 and :8039).  There is no /analytics path family.
+_ANALYTICS_ROUTES: dict[str, str] = {
+    "sensitivity_score_distribution": f"{_CONNECTED_DATASTORES_PATH}/sensitivityscoresdistribution",
+    "privilege_risks": f"{_CONNECTED_DATASTORES_PATH}/privilegerisks",
+}
 
 
 def _validate_resource_type(resource_type: DspmResourceType | str) -> str:
@@ -79,16 +85,24 @@ def _build_list_params(
     return params
 
 
-def _resource_path(resource_type: DspmResourceType | str) -> str:
-    return f"{_BASE_PATH}/{_validate_resource_type(resource_type)}"
-
-
 def _analytics_path(metric_type: str) -> str:
-    return f"{_ANALYTICS_PATH}/{quote_id(metric_type)}"
+    """Resolve a DSPM analytics report name to its declared path."""
+    path = _ANALYTICS_ROUTES.get(metric_type)
+    if path is None:
+        valid = ", ".join(sorted(_ANALYTICS_ROUTES))
+        raise ValidationError(
+            f"Unknown DSPM analytics report {metric_type!r}. Must be one of: {valid}"
+        )
+    return path
 
 
-def _ids_payload(ids: list[str]) -> dict[str, Any]:
-    return {"ids": ids}
+def _connect_unsupported() -> ValidationError:
+    """The gateway offers no bulk connect-by-id operation."""
+    return ValidationError(
+        "DSPM has no bulk connect-by-id operation. Connect one datastore at a time with "
+        "connect_datastore(request), whose body is a DataStoreRequest "
+        "(service_id, name, endpoint, authentication_method, and its credentials)."
+    )
 
 
 class DspmResource(SyncResource):
@@ -143,13 +157,16 @@ class DspmResource(SyncResource):
     ) -> dict[str, Any]:
         """List DSPM resources of the given type.
 
-        Queries ``GET /api/v2/dspm/{resource_type}`` with optional filtering,
-        sorting, and offset pagination.
+        Queries the route the gateway declares for *resource_type* (e.g.
+        ``connected_datastores`` reads ``GET /api/v2/dspm/datastores/connected``),
+        with optional filtering, sorting and offset pagination.  The route
+        table is shared with :meth:`list_page`.
 
         Args:
             resource_type: The DSPM resource type to query.  A
                 :class:`~netskope.models.dspm.DspmResourceType` or its string
-                value.
+                value.  ``supported_resource_types()`` lists the names with a
+                declared route.
             filter_expr: DSPM filter expression, e.g. ``name eq 'prod-db'``.
             sort_by: Field name to sort by (e.g. ``name``).
             sort_order: ``"asc"`` or ``"desc"`` — only applies with *sort_by*.
@@ -157,56 +174,97 @@ class DspmResource(SyncResource):
             offset: Number of records to skip.
 
         Returns:
-            The raw response body.
+            The raw ``{"success": ..., "data": {"total": ..., "results": [...]}}``
+            body.
 
         Raises:
-            netskope.exceptions.ValidationError: If *resource_type* is unknown.
+            netskope.exceptions.ValidationError: If *resource_type* is unknown
+                or has no declared route.
         """
-        params = _build_list_params(filter_expr, sort_by, sort_order, limit, offset)
-        return self._get(_resource_path(resource_type), **params)
+        from netskope.resources._dspm_response import _prepare
 
-    def analytics(self, metric_type: str) -> dict[str, Any]:
-        """Retrieve a DSPM analytics metric.
+        path, _model, params = _prepare(
+            resource_type, filter_expr, sort_by, sort_order, limit, offset
+        )
+        return self._get(path, **params)
 
-        Queries ``GET /api/v2/dspm/analytics/{metric_type}`` for aggregated
-        statistics or trend data.  Available metric types depend on the
-        tenant's DSPM configuration.
+    def analytics(
+        self,
+        metric_type: str,
+        *,
+        filter_expr: str | None = None,
+        sort_by: str | None = None,
+        sort_order: SortOrder | str | None = None,
+        limit: int | None = None,
+        offset: int | None = None,
+    ) -> dict[str, Any]:
+        """Read a connected-datastore analytics report.
+
+        Two reports are declared:
+
+        ``"sensitivity_score_distribution"``
+            ``GET /api/v2/dspm/datastores/connected/sensitivityscoresdistribution``
+            — takes no parameters.
+        ``"privilege_risks"``
+            ``GET /api/v2/dspm/datastores/connected/privilegerisks`` — takes
+            ``filter``, ``sortby``, ``sortorder``, ``limit`` and ``offset``.
 
         Args:
-            metric_type: The analytics metric to retrieve (e.g. ``summary``).
+            metric_type: The report name, one of the two above.
+            filter_expr: Filter expression (``privilege_risks`` only).
+            sort_by: Field to sort by (``privilege_risks`` only).
+            sort_order: ``"asc"`` or ``"desc"`` (``privilege_risks`` only).
+            limit: Maximum number of records (``privilege_risks`` only).
+            offset: Records to skip (``privilege_risks`` only).
 
-        Returns:
-            The raw response body.
+        Raises:
+            netskope.exceptions.ValidationError: If *metric_type* is not one of
+                the declared reports, or a parameter is passed to the report
+                that does not accept it.
         """
-        return self._get(_analytics_path(metric_type))
+        path = _analytics_path(metric_type)
+        params = _build_list_params(filter_expr, sort_by, sort_order, limit, offset)
+        if params and metric_type != "privilege_risks":
+            raise ValidationError(f"The DSPM {metric_type} report takes no query parameters.")
+        return self._get(path, **params)
+
+    def connect_datastore(self, request: dict[str, Any]) -> dict[str, Any]:
+        """Connect one discovered datastore for DSPM monitoring.
+
+        Sends ``POST /api/v2/dspm/datastores/connected`` with *request* as the
+        ``DataStoreRequest`` body (``service_id``, ``name``, ``endpoint``,
+        ``authentication_method`` and the credentials the method needs).  The
+        body is passed through unchanged so tenant-specific fields survive.
+
+        Args:
+            request: The ``DataStoreRequest`` body.
+        """
+        if not isinstance(request, dict) or not request:
+            raise ValidationError("connect_datastore requires a DataStoreRequest body.")
+        return self._post(_CONNECTED_DATASTORES_PATH, json=request)
 
     def connect_datastores(self, ids: list[str]) -> dict[str, Any]:
-        """Connect discovered datastores for DSPM monitoring.
+        """Not available — DSPM has no bulk connect-by-id operation.
 
-        Sends ``POST /api/v2/dspm/connected_datastores`` with the given
-        discovered-datastore ids.
-
-        Args:
-            ids: Discovered-datastore identifiers to connect.
-
-        Returns:
-            The raw response body.
+        Raises:
+            netskope.exceptions.ValidationError: Always.  Use
+                :meth:`connect_datastore` with a ``DataStoreRequest`` body.
         """
-        return self._post(_CONNECTED_DATASTORES_PATH, json=_ids_payload(ids))
+        raise _connect_unsupported()
 
-    def scan_datastores(self, ids: list[str]) -> dict[str, Any]:
-        """Trigger classification scans on connected datastores.
+    def scan_datastores(self, ids: list[str]) -> None:
+        """Start a classification scan on each connected datastore in *ids*.
 
-        Sends ``POST /api/v2/dspm/scans`` with the given connected-datastore
-        ids.
+        The gateway's start-scan operation takes exactly one datastore, so this
+        issues one ``POST /api/v2/dspm/datastores/connected/startscan`` per id,
+        in order, and stops at the first failure.  HTTP 202 acknowledges the
+        request; it does not mean the scan finished.
 
         Args:
             ids: Connected-datastore identifiers to scan.
-
-        Returns:
-            The raw response body.
         """
-        return self._post(_SCANS_PATH, json=_ids_payload(ids))
+        for datastore_id in ids:
+            self.start_scan(datastore_id)
 
 
 class AsyncDspmResource(AsyncResource):
@@ -263,26 +321,53 @@ class AsyncDspmResource(AsyncResource):
 
         See :meth:`DspmResource.list_resources`.
         """
-        params = _build_list_params(filter_expr, sort_by, sort_order, limit, offset)
-        return await self._get(_resource_path(resource_type), **params)
+        from netskope.resources._dspm_response import _prepare
 
-    async def analytics(self, metric_type: str) -> dict[str, Any]:
-        """Retrieve a DSPM analytics metric.
+        path, _model, params = _prepare(
+            resource_type, filter_expr, sort_by, sort_order, limit, offset
+        )
+        return await self._get(path, **params)
+
+    async def analytics(
+        self,
+        metric_type: str,
+        *,
+        filter_expr: str | None = None,
+        sort_by: str | None = None,
+        sort_order: SortOrder | str | None = None,
+        limit: int | None = None,
+        offset: int | None = None,
+    ) -> dict[str, Any]:
+        """Read a connected-datastore analytics report.
 
         See :meth:`DspmResource.analytics`.
         """
-        return await self._get(_analytics_path(metric_type))
+        path = _analytics_path(metric_type)
+        params = _build_list_params(filter_expr, sort_by, sort_order, limit, offset)
+        if params and metric_type != "privilege_risks":
+            raise ValidationError(f"The DSPM {metric_type} report takes no query parameters.")
+        return await self._get(path, **params)
+
+    async def connect_datastore(self, request: dict[str, Any]) -> dict[str, Any]:
+        """Connect one discovered datastore for DSPM monitoring.
+
+        See :meth:`DspmResource.connect_datastore`.
+        """
+        if not isinstance(request, dict) or not request:
+            raise ValidationError("connect_datastore requires a DataStoreRequest body.")
+        return await self._post(_CONNECTED_DATASTORES_PATH, json=request)
 
     async def connect_datastores(self, ids: list[str]) -> dict[str, Any]:
-        """Connect discovered datastores for DSPM monitoring.
+        """Not available — DSPM has no bulk connect-by-id operation.
 
         See :meth:`DspmResource.connect_datastores`.
         """
-        return await self._post(_CONNECTED_DATASTORES_PATH, json=_ids_payload(ids))
+        raise _connect_unsupported()
 
-    async def scan_datastores(self, ids: list[str]) -> dict[str, Any]:
-        """Trigger classification scans on connected datastores.
+    async def scan_datastores(self, ids: list[str]) -> None:
+        """Start a classification scan on each connected datastore in *ids*.
 
         See :meth:`DspmResource.scan_datastores`.
         """
-        return await self._post(_SCANS_PATH, json=_ids_payload(ids))
+        for datastore_id in ids:
+            await self.start_scan(datastore_id)

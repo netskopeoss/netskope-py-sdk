@@ -28,7 +28,13 @@ class UrlListMatch(NetskopeModel):
 
 
 class UrlLookupReport(NetskopeModel):
-    url: str
+    """``url-lookup-report`` (nsiq/url_lookup.yaml).
+
+    The schema declares no required properties, so a sparse row must not
+    reject the page it sits in.
+    """
+
+    url: str | None = None
     categories: list[UrlCategory] = Field(default_factory=list)
     url_lists: list[UrlListMatch] = Field(default_factory=list)
     dynamic_classification: bool | None = None
@@ -79,10 +85,14 @@ class UrlFalsePositiveRequest(AdminRequest):
 
 
 class FalsePositiveTicket(NetskopeModel):
-    system: str
-    ticket_id: str
+    """``FPTicketInfo`` (nsiq/fp_submission.yaml:45-55) — nothing is required."""
+
+    system: str | None = None
+    ticket_id: str | None = None
 
 
 class FalsePositiveReceipt(NetskopeModel):
-    incident_id: str
+    """``FPCaseInfo`` (nsiq/fp_submission.yaml:30-36) — nothing is required."""
+
+    incident_id: str | None = None
     tickets: list[FalsePositiveTicket] = Field(default_factory=list)

@@ -35,13 +35,19 @@ _VALID_ACTION_TYPES = tuple(t.value for t in TemplateActionType)
 _VALID_LOGO_SIZES = tuple(s.value for s in LogoSize)
 
 
-def _build_list_params(limit: int | None, offset: int | None) -> dict[str, Any]:
-    params: dict[str, Any] = {}
-    if limit is not None:
-        params["limit"] = limit
-    if offset is not None:
-        params["offset"] = offset
-    return params
+def _slice_templates(
+    templates: builtins.list[NotificationTemplate], limit: int | None, offset: int | None
+) -> builtins.list[NotificationTemplate]:
+    """Apply an SDK-side slice to an unpaginated template collection.
+
+    ``GET /user/templates`` (user-notifications-templates.yaml:206-239)
+    declares no parameters and returns every template, so *limit*/*offset* are
+    honoured here rather than sent as query values the operation would ignore.
+    """
+    if limit is None and offset is None:
+        return templates
+    start = offset or 0
+    return templates[start : None if limit is None else start + limit]
 
 
 def _build_template_payload(
@@ -110,15 +116,20 @@ class NotificationsResource(SyncResource):
     ) -> builtins.list[NotificationTemplate]:
         """List user notification templates.
 
+        ``GET /api/v2/notifications/user/templates`` is unpaginated and takes
+        no query parameters, so *limit* and *offset* slice the decoded list in
+        the SDK.
+
         Args:
-            limit: Maximum number of templates to return.
-            offset: Number of records to skip (pagination).
+            limit: Templates to keep, applied after decoding.
+            offset: Templates to skip, applied after decoding.
 
         Returns:
             A list of :class:`~netskope.models.notifications.NotificationTemplate`.
         """
-        body = self._get(_TEMPLATES_PATH, **_build_list_params(limit, offset))
-        return [NotificationTemplate.model_validate(item) for item in extract_list(body)]
+        body = self._get(_TEMPLATES_PATH)
+        templates = [NotificationTemplate.model_validate(item) for item in extract_list(body)]
+        return _slice_templates(templates, limit, offset)
 
     def get_template(self, template_id: str | int) -> NotificationTemplate:
         """Get a single notification template by ID.
@@ -290,8 +301,9 @@ class AsyncNotificationsResource(AsyncResource):
 
         See :meth:`NotificationsResource.list_templates`.
         """
-        body = await self._get(_TEMPLATES_PATH, **_build_list_params(limit, offset))
-        return [NotificationTemplate.model_validate(item) for item in extract_list(body)]
+        body = await self._get(_TEMPLATES_PATH)
+        templates = [NotificationTemplate.model_validate(item) for item in extract_list(body)]
+        return _slice_templates(templates, limit, offset)
 
     async def get_template(self, template_id: str | int) -> NotificationTemplate:
         """Get a single notification template by ID."""

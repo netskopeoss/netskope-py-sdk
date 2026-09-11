@@ -218,18 +218,32 @@ class TokensResource(SyncResource):
         body = self._patch(_token_path(token_id), json={"operation": "reissue"})
         return ApiToken.model_validate(extract_item(body))
 
-    def delete(self, token_id: str | int) -> None:
-        """Revoke (delete) an API token permanently.  Irreversible.
+    def revoke(self, token_id: str | int) -> ApiToken:
+        """Revoke a token, leaving the record in place.
 
-        Any integration using the token immediately loses access.
+        Sends the spec's revoke operation — ``PATCH`` with
+        ``{"operation": "revoke"}`` (api-tokens.yaml:86-94).  That operation
+        forbids ``name``, ``expires``, and ``endpoints`` in the same body, so
+        nothing else is sent.  Use :meth:`delete` to remove the token record
+        entirely.
+
+        Args:
+            token_id: The token identifier.
+        """
+        body = self._patch(_token_path(token_id), json={"operation": "revoke"})
+        return ApiToken.model_validate(extract_item(body))
+
+    def delete(self, token_id: str | int) -> None:
+        """Delete an API token permanently.  Irreversible.
+
+        Any integration using the token immediately loses access.  This is
+        ``DELETE /tokens/{id}`` (api-tokens.yaml:212-226), a separate
+        operation from :meth:`revoke`.
 
         Args:
             token_id: The token identifier.
         """
         self._delete(_token_path(token_id))
-
-    # The Netskope console and CLI call deletion "revoke".
-    revoke = delete
 
 
 class AsyncTokensResource(AsyncResource):
@@ -282,9 +296,14 @@ class AsyncTokensResource(AsyncResource):
         body = await self._patch(_token_path(token_id), json={"operation": "reissue"})
         return ApiToken.model_validate(extract_item(body))
 
-    async def delete(self, token_id: str | int) -> None:
-        """Revoke (delete) an API token permanently.  Irreversible."""
-        await self._delete(_token_path(token_id))
+    async def revoke(self, token_id: str | int) -> ApiToken:
+        """Revoke a token without deleting it.  See :meth:`TokensResource.revoke`."""
+        body = await self._patch(_token_path(token_id), json={"operation": "revoke"})
+        return ApiToken.model_validate(extract_item(body))
 
-    # The Netskope console and CLI call deletion "revoke".
-    revoke = delete
+    async def delete(self, token_id: str | int) -> None:
+        """Delete an API token permanently.  Irreversible.
+
+        See :meth:`TokensResource.delete`.
+        """
+        await self._delete(_token_path(token_id))

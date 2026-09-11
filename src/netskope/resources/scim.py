@@ -14,7 +14,11 @@ Example::
 
     # List groups
     for group in client.scim.groups.list():
-        print(f"{group.display_name}: {len(group.members)} members")
+        print(group.display_name)
+
+    # Group members are excluded unless asked for by name
+    group = client.scim.groups.get("grp-1", attributes="members")
+    print(f"{group.display_name}: {len(group.members)} members")
 """
 
 from __future__ import annotations
@@ -36,11 +40,23 @@ from netskope.resources._scim_response import (
     AsyncScimUsersResponses,
     ScimGroupsResponses,
     ScimUsersResponses,
+    patch_result,
+    user_patch_operations,
     validate_page_size,
 )
 
 _USERS_PATH = "/api/v2/scim/Users"
 _GROUPS_PATH = "/api/v2/scim/Groups"
+
+
+def _attribute_params(attributes: str | None, excluded_attributes: str | None) -> dict[str, str]:
+    """Build the ``attributes`` / ``excludedAttributes`` query for a group read."""
+    params: dict[str, str] = {}
+    if attributes is not None:
+        params["attributes"] = attributes
+    if excluded_attributes is not None:
+        params["excludedAttributes"] = excluded_attributes
+    return params
 
 
 def _extract_scim(body: dict[str, Any]) -> list[dict[str, Any]]:
@@ -138,20 +154,26 @@ class ScimUsersResource(SyncResource):
         body = self._post(_USERS_PATH, json=payload)
         return ScimUser.model_validate(body)
 
-    def update(self, user_id: str, fields: dict[str, Any]) -> ScimUser:
-        """Partial-update a SCIM user (PATCH).
+    def update(self, user_id: str, fields: dict[str, Any]) -> ScimUser | None:
+        """Partial-update a SCIM user (PATCH), one replace operation per field.
 
         Args:
             user_id: The SCIM user ID.
-            fields: Key-value pairs to update.
+            fields: Attribute paths to replace, e.g. ``{"active": False}``.
+
+        Returns:
+            ``None`` on the documented success, which is ``204`` with an empty
+            body (scim-apis.yaml:2265-2266); the decoded user when a tenant
+            answers with one anyway.
         """
-        operations = [{"op": "replace", "value": fields}]
         payload = {
             "schemas": ["urn:ietf:params:scim:api:messages:2.0:PatchOp"],
-            "Operations": operations,
+            "Operations": user_patch_operations(fields),
         }
-        body = self._patch(f"{_USERS_PATH}/{quote_id(user_id)}", json=payload)
-        return ScimUser.model_validate(body)
+        response = self._transport.request(
+            "PATCH", f"{_USERS_PATH}/{quote_id(user_id)}", json=payload
+        )
+        return patch_result(response, ScimUser)
 
     def delete(self, user_id: str) -> None:
         """Delete a SCIM user."""
@@ -195,9 +217,28 @@ class ScimGroupsResource(SyncResource):
             extract=_extract_scim,
         )
 
-    def get(self, group_id: str) -> ScimGroup:
-        """Get a SCIM group by ID."""
-        body = self._get(f"{_GROUPS_PATH}/{quote_id(group_id)}")
+    def get(
+        self,
+        group_id: str,
+        *,
+        attributes: str | None = None,
+        excluded_attributes: str | None = None,
+    ) -> ScimGroup:
+        """Get a SCIM group by ID.
+
+        Members are excluded by default; pass ``attributes="members"`` to
+        include them (scim-apis.yaml:462, with the two query parameters at
+        :464-479).
+
+        Args:
+            group_id: The SCIM group ID.
+            attributes: Attributes to include, e.g. ``"members"``.
+            excluded_attributes: Attributes to leave out of the response.
+        """
+        body = self._get(
+            f"{_GROUPS_PATH}/{quote_id(group_id)}",
+            **_attribute_params(attributes, excluded_attributes),
+        )
         return ScimGroup.model_validate(body)
 
     def create(
@@ -338,15 +379,16 @@ class AsyncScimUsersResource(AsyncResource):
         body = await self._post(_USERS_PATH, json=payload)
         return ScimUser.model_validate(body)
 
-    async def update(self, user_id: str, fields: dict[str, Any]) -> ScimUser:
-        """Partial-update a SCIM user (PATCH) from *fields*, returning the updated user."""
-        operations = [{"op": "replace", "value": fields}]
+    async def update(self, user_id: str, fields: dict[str, Any]) -> ScimUser | None:
+        """Partial-update a SCIM user (PATCH).  See :meth:`ScimUsersResource.update`."""
         payload = {
             "schemas": ["urn:ietf:params:scim:api:messages:2.0:PatchOp"],
-            "Operations": operations,
+            "Operations": user_patch_operations(fields),
         }
-        body = await self._patch(f"{_USERS_PATH}/{quote_id(user_id)}", json=payload)
-        return ScimUser.model_validate(body)
+        response = await self._transport.request(
+            "PATCH", f"{_USERS_PATH}/{quote_id(user_id)}", json=payload
+        )
+        return patch_result(response, ScimUser)
 
     async def delete(self, user_id: str) -> None:
         """Delete a SCIM user."""
@@ -387,9 +429,18 @@ class AsyncScimGroupsResource(AsyncResource):
             extract=_extract_scim,
         )
 
-    async def get(self, group_id: str) -> ScimGroup:
-        """Get a SCIM group by ID."""
-        body = await self._get(f"{_GROUPS_PATH}/{quote_id(group_id)}")
+    async def get(
+        self,
+        group_id: str,
+        *,
+        attributes: str | None = None,
+        excluded_attributes: str | None = None,
+    ) -> ScimGroup:
+        """Get a SCIM group by ID.  See :meth:`ScimGroupsResource.get`."""
+        body = await self._get(
+            f"{_GROUPS_PATH}/{quote_id(group_id)}",
+            **_attribute_params(attributes, excluded_attributes),
+        )
         return ScimGroup.model_validate(body)
 
     async def create(

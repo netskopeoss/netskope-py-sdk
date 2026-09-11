@@ -264,18 +264,25 @@ def test_zero_acceptance_does_not_claim_a_change(client):
 
 @pytest.mark.parametrize("asynchronous", [False, True], ids=["sync", "async"])
 @pytest.mark.parametrize(
-    "payload,count",
+    "payload,count,accepted",
     [
-        ({"ok": 1, "result": "Update Successful"}, None),
-        ({"ok": 1, "result": "no incident matched"}, None),
-        ({"ok": 1}, None),
-        ({"ok": 1, "result": 3}, 3),
+        ({"ok": 1, "result": "Update Successful"}, None, True),
+        ({"ok": 1}, None, True),
+        ({"ok": 1, "result": 3}, 3, True),
+        ({"ok": 1, "result": "0"}, 0, False),
     ],
-    ids=["message", "no-match", "omitted", "count"],
+    ids=["message", "omitted", "count", "zero-count"],
 )
 @respx.mock
-async def test_acceptance_requires_a_reported_count(client, aclient, asynchronous, payload, count):
-    """A message-only or absent ``result`` parses but never claims a change."""
+async def test_acceptance_follows_the_ok_flag(
+    client, aclient, asynchronous, payload, count, accepted
+):
+    """incident_update.yaml:8-14 types result as a string, so ok carries the outcome.
+
+    The documented success body is {"result": [{"ok": 1, "result": "Update
+    Successful"}]} (incident_update.yaml:69-75): a message is an acknowledgement,
+    not a refusal. A reported count of zero still contradicts acceptance.
+    """
     route = respx.patch(BASE + "/api/v2/incidents/update").respond(200, json=payload)
     resource = (aclient if asynchronous else client).incidents
     result = resource.update_one(ID, field="status", new_value="new", user="a")
@@ -283,9 +290,19 @@ async def test_acceptance_requires_a_reported_count(client, aclient, asynchronou
         result = await result
     assert result.outcomes[0].ok == 1
     assert result.outcomes[0].count == count
-    assert result.accepted is (count is not None)
+    assert result.accepted is accepted
     assert result.accepted_entries == (count or 0)
     assert route.call_count == 1
+
+
+@respx.mock
+def test_a_failed_entry_withdraws_acceptance(client):
+    """incident_update.yaml:83-89 wraps failure items in the same {result: [...]} envelope."""
+    respx.patch(BASE + "/api/v2/incidents/update").respond(
+        200, json={"result": [{"ok": 0, "result": "Update Failed"}]}
+    )
+    result = client.incidents.update_one(ID, field="status", new_value="new", user="a")
+    assert not result.accepted and result.accepted_entries == 0
 
 
 @respx.mock

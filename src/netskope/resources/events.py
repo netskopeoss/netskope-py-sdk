@@ -23,6 +23,7 @@ from datetime import datetime
 from typing import TYPE_CHECKING, Any
 
 from netskope._pagination import AsyncPaginatedResponse, SyncPaginatedResponse
+from netskope.datasearch import DATASEARCH_TIMEOUT_DEFAULT
 from netskope.exceptions import NotFoundError, ValidationError
 from netskope.models.alerts import DatasearchBucket
 from netskope.models.events import (
@@ -37,6 +38,8 @@ from netskope.models.events import (
     TransactionMetrics,
 )
 from netskope.pagination import Page
+from netskope.resources._alert_query import _build_params as _build_datasearch_params
+from netskope.resources._alert_query import _validate_timeout
 from netskope.resources._base import AsyncResource, SyncResource
 from netskope.resources._extract import extract_list
 
@@ -61,10 +64,14 @@ _MODEL_MAP: dict[str, type[Event]] = {
 }
 
 # Event types not served by /events/datasearch/{type}:
-# - audit uses /events/data/audit with a ``type`` filter instead of JQL;
-# - infrastructure uses /events/data/infrastructure (same params as datasearch);
-# - transaction uses /events/metrics/transactionevents (aggregated metrics only —
-#   individual transaction events are delivered via PubSub streaming, not REST).
+# - audit uses /events/data/audit, which takes query/limit/offset/starttime/
+#   endtime/insertionstarttime/insertionendtime and nothing else
+#   (events/audit.yaml:12-72);
+# - infrastructure uses /events/data/infrastructure with the same parameter set
+#   (events/infrastructure.yaml:12-72);
+# - transaction uses /events/metrics/transactionevents, which takes only `hours`
+#   and answers with a metrics object rather than records
+#   (events/transaction_metrics.yaml:65-90).
 _PATH_OVERRIDES: dict[str, str] = {
     EventType.AUDIT.value: _AUDIT_PATH,
     EventType.INFRASTRUCTURE.value: _INFRASTRUCTURE_PATH,
@@ -72,6 +79,14 @@ _PATH_OVERRIDES: dict[str, str] = {
 }
 
 _DATASEARCH_TYPES = frozenset(e.value for e in EventType) - set(_PATH_OVERRIDES)
+
+# audit and infrastructure are the only endpoints that declare the insertion-time
+# window (events/audit.yaml:51-72, events/infrastructure.yaml:51-72).
+_INSERTION_TIME_TYPES = frozenset({EventType.AUDIT.value, EventType.INFRASTRUCTURE.value})
+
+_TRANSACTION_IS_METRICS = (
+    "Transaction events are hourly metrics; use transaction_metrics(hours=...)."
+)
 
 
 def _event_path(event_type: str | EventType) -> str:
@@ -88,7 +103,45 @@ def _validate_event_type(event_type: str | EventType) -> str:
     valid = {e.value for e in EventType}
     if et not in valid:
         raise ValidationError(f"Invalid event_type: {et!r}. Must be one of {sorted(valid)}")
+    if et == EventType.TRANSACTION.value:
+        raise ValidationError(_TRANSACTION_IS_METRICS)
     return et
+
+
+def audit_type_query(query: str | None, audit_type: str | None) -> str | None:
+    """Fold the SDK's *audit_type* convenience into the endpoint's ``query``.
+
+    ``/events/data/audit`` has no ``type`` parameter (events/audit.yaml:12-72);
+    it filters through the same ``query`` expression every other category uses,
+    so the audit type travels as a JQL clause.
+    """
+    if audit_type is None:
+        return query
+    if not isinstance(audit_type, str) or not audit_type.strip() or '"' in audit_type:
+        raise ValidationError("audit_type must be a nonblank string without a double quote.")
+    clause = f'type eq "{audit_type}"'
+    return f"({query}) and {clause}" if query else clause
+
+
+def _insertion_params(
+    event_type: str,
+    insertion_start_time: datetime | int | None,
+    insertion_end_time: datetime | int | None,
+) -> dict[str, Any]:
+    supplied = insertion_start_time is not None or insertion_end_time is not None
+    if supplied and event_type not in _INSERTION_TIME_TYPES:
+        raise ValidationError(
+            f"{event_type} events do not support insertion-time bounds; "
+            f"they are declared only for {', '.join(sorted(_INSERTION_TIME_TYPES))}."
+        )
+    params: dict[str, Any] = {}
+    for key, bound in (
+        ("insertionstarttime", insertion_start_time),
+        ("insertionendtime", insertion_end_time),
+    ):
+        if bound is not None:
+            params[key] = int(bound.timestamp()) if isinstance(bound, datetime) else bound
+    return params
 
 
 def _build_params(
@@ -99,25 +152,13 @@ def _build_params(
     group_by: str | builtins.list[str] | None = None,
     order_by: str | None = None,
     descending: bool = True,
+    *,
+    timeout: int | None = DATASEARCH_TIMEOUT_DEFAULT,
 ) -> dict[str, Any]:
-    params: dict[str, Any] = {}
-    if query:
-        params["query"] = query
-    if fields:
-        params["fields"] = ",".join(fields)
-    if start_time is not None:
-        params["starttime"] = (
-            int(start_time.timestamp()) if isinstance(start_time, datetime) else start_time
-        )
-    if end_time is not None:
-        params["endtime"] = (
-            int(end_time.timestamp()) if isinstance(end_time, datetime) else end_time
-        )
-    if group_by:
-        params["groupbys"] = group_by if isinstance(group_by, str) else ",".join(group_by)
-    if order_by:
-        params["sortby"] = f"{order_by} {'DESC' if descending else 'ASC'}"
-    return params
+    """Build datasearch query parameters; the alert builder owns the wire names."""
+    return _build_datasearch_params(
+        query, fields, start_time, end_time, group_by, order_by, descending, timeout=timeout
+    )
 
 
 def _prepare_list(
@@ -130,31 +171,44 @@ def _prepare_list(
     order_by: str | None,
     descending: bool,
     audit_type: str | None,
+    timeout: int | None = DATASEARCH_TIMEOUT_DEFAULT,
+    insertion_start_time: datetime | int | None = None,
+    insertion_end_time: datetime | int | None = None,
 ) -> tuple[str, type[Event], dict[str, Any]]:
     """Resolve the endpoint path, model, and query params for a list() call."""
     et = _validate_event_type(event_type)
-    if et == EventType.AUDIT.value:
-        if query is not None:
-            raise ValidationError(
-                "The audit event type does not support JQL queries; "
-                "use audit_type to filter instead."
-            )
-        params = _build_params(None, fields, start_time, end_time, group_by, order_by, descending)
-        if audit_type is not None:
-            params["type"] = audit_type
-    else:
-        params = _build_params(query, fields, start_time, end_time, group_by, order_by, descending)
+    if audit_type is not None and et != EventType.AUDIT.value:
+        raise ValidationError(f"{et} events do not support the audit_type filter.")
+    params = _build_params(
+        audit_type_query(query, audit_type),
+        fields,
+        start_time,
+        end_time,
+        group_by,
+        order_by,
+        descending,
+        # Only /events/datasearch/* declares a query timeout.
+        timeout=timeout if et in _DATASEARCH_TYPES else None,
+    )
+    params.update(_insertion_params(et, insertion_start_time, insertion_end_time))
     return _event_path(et), _event_model(et), params
 
 
-def _prepare_get(event_id: str, event_type: str | EventType) -> tuple[str, type[Event]]:
-    """Resolve the endpoint path and model for a get() call, validating inputs."""
+def _prepare_get(
+    event_id: str,
+    event_type: str | EventType,
+    timeout: int | None = DATASEARCH_TIMEOUT_DEFAULT,
+) -> tuple[str, type[Event], dict[str, Any]]:
+    """Resolve the endpoint path, model, and params for a get() call."""
     et = _validate_event_type(event_type)
-    if et in (EventType.AUDIT.value, EventType.TRANSACTION.value):
-        raise ValidationError(f"Event type {et!r} does not support lookup by ID (no JQL support).")
     if not _HEX_ID_RE.match(event_id):
         raise ValidationError(f"Invalid event_id format: {event_id!r}. Expected a hex string.")
-    return _event_path(et), _event_model(et)
+    params: dict[str, Any] = {"query": f'_id eq "{event_id}"', "limit": 1}
+    if et in _DATASEARCH_TYPES:
+        resolved = _validate_timeout(timeout)
+        if resolved is not None:
+            params["timeout"] = resolved
+    return _event_path(et), _event_model(et), params
 
 
 class EventsResource(SyncResource):
@@ -188,11 +242,19 @@ class EventsResource(SyncResource):
         offset: int | None = None,
         limit: int | None = None,
         audit_type: str | None = None,
+        timeout: int | None = DATASEARCH_TIMEOUT_DEFAULT,
+        insertion_start_time: datetime | int | None = None,
+        insertion_end_time: datetime | int | None = None,
     ) -> Page[Event]:
         """Fetch one validated page, preserving omitted request parameters.
 
-        *audit_type* is the ``audit`` endpoint's ``type`` filter; it is rejected
-        for the event types that accept JQL queries instead.
+        *audit_type* narrows ``audit`` events to one audit category and is
+        rejected for every other event type. *timeout* is the datasearch query
+        timeout in seconds (``None`` omits it); it is never sent to the
+        ``audit``, ``infrastructure``, or transaction-metrics endpoints, which
+        do not declare it. *insertion_start_time* / *insertion_end_time* bound
+        ingestion time and are accepted only by ``audit`` and
+        ``infrastructure``.
         """
         return self.with_response.list_page(
             event_type,
@@ -205,6 +267,9 @@ class EventsResource(SyncResource):
             offset=offset,
             limit=limit,
             audit_type=audit_type,
+            timeout=timeout,
+            insertion_start_time=insertion_start_time,
+            insertion_end_time=insertion_end_time,
         ).parse()
 
     def aggregate_page(
@@ -219,6 +284,7 @@ class EventsResource(SyncResource):
         order_by: str | None = None,
         descending: bool | None = None,
         limit: int | None = None,
+        timeout: int | None = DATASEARCH_TIMEOUT_DEFAULT,
     ) -> Page[DatasearchBucket]:
         """Fetch one aggregate page without claiming a source-event total."""
         return self.with_response.aggregate_page(
@@ -231,6 +297,7 @@ class EventsResource(SyncResource):
             order_by=order_by,
             descending=descending,
             limit=limit,
+            timeout=timeout,
         ).parse()
 
     def transaction_metrics(self, *, hours: int = 24) -> TransactionMetrics:
@@ -250,40 +317,52 @@ class EventsResource(SyncResource):
         descending: bool = True,
         audit_type: str | None = None,
         page_size: int = 100,
+        timeout: int | None = DATASEARCH_TIMEOUT_DEFAULT,
+        insertion_start_time: datetime | int | None = None,
+        insertion_end_time: datetime | int | None = None,
     ) -> SyncPaginatedResponse[Event]:
         """List events of a given type with optional JQL filtering.
 
         Most event types query ``/api/v2/events/datasearch/{type}``.
         Exceptions:
 
-        - ``audit`` queries ``/api/v2/events/data/audit`` and filters with
-          *audit_type* (the endpoint's ``type`` param) instead of *query*;
+        - ``audit`` queries ``/api/v2/events/data/audit``, which filters with
+          the same ``query`` expression and accepts no field projection,
+          grouping, or ordering;
         - ``infrastructure`` queries ``/api/v2/events/data/infrastructure``;
-        - ``transaction`` queries ``/api/v2/events/metrics/transactionevents``,
-          which returns aggregated metrics only (individual transaction
-          events are delivered via PubSub streaming, not REST).
+        - ``transaction`` is not a record endpoint at all — it is rejected
+          here, and :meth:`transaction_metrics` serves its hourly metrics.
 
         Args:
             event_type: The event category (e.g. ``"application"``,
                 ``"network"``, ``"page"``, ``"alert"``).
-            query: A JQL filter expression (not supported for ``audit``).
+            query: A JQL filter expression.
             fields: Specific fields to return.
             start_time: Start of the time range.
             end_time: End of the time range.
             group_by: Field(s) to aggregate results by.
             order_by: Field to sort by.
             descending: Sort direction.
-            audit_type: Audit event type filter (``audit`` only), e.g.
-                ``"admin"`` or ``"user"``.
+            audit_type: Audit category filter (``audit`` only), e.g.
+                ``"admin"`` or ``"user"``. It is folded into *query* as
+                ``type eq "<audit_type>"``.
             page_size: Number of results per API call.
+            timeout: Datasearch query timeout in seconds; ``None`` omits it.
+                It is not sent to ``audit`` or ``infrastructure``, which do
+                not declare it.
+            insertion_start_time: Lower ingestion-time bound (``audit`` and
+                ``infrastructure`` only).
+            insertion_end_time: Upper ingestion-time bound (same two types).
 
         Returns:
             A lazy paginated iterator of :class:`~netskope.models.events.Event`
             (or a type-specific subclass).
 
         Raises:
-            netskope.exceptions.ValidationError: If *event_type* is unknown,
-                or if *query* is supplied for the ``audit`` event type.
+            netskope.exceptions.ValidationError: If *event_type* is unknown or
+                ``"transaction"``, if *audit_type* is supplied for a non-audit
+                type, or if an insertion-time bound is supplied for a type that
+                does not accept one.
         """
         path, model, params = _prepare_list(
             event_type,
@@ -295,6 +374,9 @@ class EventsResource(SyncResource):
             order_by,
             descending,
             audit_type,
+            timeout,
+            insertion_start_time,
+            insertion_end_time,
         )
         return SyncPaginatedResponse(
             transport=self._transport,
@@ -311,12 +393,14 @@ class EventsResource(SyncResource):
         event_id: str,
         *,
         event_type: str | EventType = EventType.APPLICATION,
+        timeout: int | None = DATASEARCH_TIMEOUT_DEFAULT,
     ) -> Event:
         """Get a single event by ID.
 
         Args:
             event_id: The ``_id`` of the event (a hex string).
             event_type: The event category to search in.
+            timeout: Datasearch query timeout in seconds; ``None`` omits it.
 
         Returns:
             An :class:`~netskope.models.events.Event` (or type-specific
@@ -325,11 +409,11 @@ class EventsResource(SyncResource):
         Raises:
             netskope.exceptions.NotFoundError: If the event does not exist.
             netskope.exceptions.ValidationError: If *event_id* is not a hex
-                string, or *event_type* is ``audit``/``transaction`` (which
-                do not support JQL lookup by ID).
+                string, or *event_type* is ``"transaction"``, which serves
+                hourly metrics rather than records.
         """
-        path, model = _prepare_get(event_id, event_type)
-        body = self._get(path, query=f'_id eq "{event_id}"', limit=1)
+        path, model, params = _prepare_get(event_id, event_type, timeout)
+        body = self._get(path, **params)
         items = extract_list(body)
         if not items:
             raise NotFoundError(f"Event {event_id!r} not found", status_code=404)
@@ -367,6 +451,9 @@ class AsyncEventsResource(AsyncResource):
         offset: int | None = None,
         limit: int | None = None,
         audit_type: str | None = None,
+        timeout: int | None = DATASEARCH_TIMEOUT_DEFAULT,
+        insertion_start_time: datetime | int | None = None,
+        insertion_end_time: datetime | int | None = None,
     ) -> Page[Event]:
         """Fetch one validated page. See :meth:`EventsResource.list_page`."""
         return (
@@ -381,6 +468,9 @@ class AsyncEventsResource(AsyncResource):
                 offset=offset,
                 limit=limit,
                 audit_type=audit_type,
+                timeout=timeout,
+                insertion_start_time=insertion_start_time,
+                insertion_end_time=insertion_end_time,
             )
         ).parse()
 
@@ -396,6 +486,7 @@ class AsyncEventsResource(AsyncResource):
         order_by: str | None = None,
         descending: bool | None = None,
         limit: int | None = None,
+        timeout: int | None = DATASEARCH_TIMEOUT_DEFAULT,
     ) -> Page[DatasearchBucket]:
         """Fetch one aggregate page without claiming a source-event total."""
         return (
@@ -409,6 +500,7 @@ class AsyncEventsResource(AsyncResource):
                 order_by=order_by,
                 descending=descending,
                 limit=limit,
+                timeout=timeout,
             )
         ).parse()
 
@@ -429,6 +521,9 @@ class AsyncEventsResource(AsyncResource):
         descending: bool = True,
         audit_type: str | None = None,
         page_size: int = 100,
+        timeout: int | None = DATASEARCH_TIMEOUT_DEFAULT,
+        insertion_start_time: datetime | int | None = None,
+        insertion_end_time: datetime | int | None = None,
     ) -> AsyncPaginatedResponse[Event]:
         """List events of a given type with optional JQL filtering.
 
@@ -444,6 +539,9 @@ class AsyncEventsResource(AsyncResource):
             order_by,
             descending,
             audit_type,
+            timeout,
+            insertion_start_time,
+            insertion_end_time,
         )
         return AsyncPaginatedResponse(
             transport=self._transport,
@@ -460,13 +558,14 @@ class AsyncEventsResource(AsyncResource):
         event_id: str,
         *,
         event_type: str | EventType = EventType.APPLICATION,
+        timeout: int | None = DATASEARCH_TIMEOUT_DEFAULT,
     ) -> Event:
         """Get a single event by ID.
 
         See :meth:`EventsResource.get`.
         """
-        path, model = _prepare_get(event_id, event_type)
-        body = await self._get(path, query=f'_id eq "{event_id}"', limit=1)
+        path, model, params = _prepare_get(event_id, event_type, timeout)
+        body = await self._get(path, **params)
         items = extract_list(body)
         if not items:
             raise NotFoundError(f"Event {event_id!r} not found", status_code=404)

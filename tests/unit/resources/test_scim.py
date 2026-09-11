@@ -208,17 +208,20 @@ class TestScimUsersResource:
         assert sent_json(route)["name"] == expected
 
     @respx.mock
-    def test_update_wraps_fields_in_a_single_replace_operation(
-        self, client: NetskopeClient
-    ) -> None:
+    def test_update_sends_one_path_scoped_operation_per_field(self, client: NetskopeClient) -> None:
+        """Every PATCH /Users/{id} operation is path-scoped (scim-apis.yaml:1955-2015)."""
         route = respx.patch(f"{_USERS_URL}/8f2c4a1b").mock(
             return_value=httpx.Response(200, json=dict(_USER, active=False))
         )
-        user = client.scim.users.update("8f2c4a1b", {"active": False})
+        user = client.scim.users.update("8f2c4a1b", {"active": False, "userName": "a@b.example"})
         assert sent_json(route) == {
             "schemas": ["urn:ietf:params:scim:api:messages:2.0:PatchOp"],
-            "Operations": [{"op": "replace", "value": {"active": False}}],
+            "Operations": [
+                {"op": "replace", "path": "active", "value": False},
+                {"op": "replace", "path": "userName", "value": "a@b.example"},
+            ],
         }
+        assert user is not None
         assert user.active is False
 
     @respx.mock
@@ -520,8 +523,9 @@ class TestAsyncScimUsersResource:
         )
         user = await aclient.scim.users.update("8f2c4a1b", {"displayName": "Alice E"})
         assert sent_json(route)["Operations"] == [
-            {"op": "replace", "value": {"displayName": "Alice E"}}
+            {"op": "replace", "path": "displayName", "value": "Alice E"}
         ]
+        assert user is not None
         assert user.display_name == "Alice E"
 
     @respx.mock

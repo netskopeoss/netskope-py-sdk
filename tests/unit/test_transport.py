@@ -667,3 +667,27 @@ class TestVerify:
         transport = AsyncTransport(_config_with_verify(_ca_bundle_path()))
         assert isinstance(captured["verify"], ssl.SSLContext)
         await transport.close()
+
+
+class TestScimMediaType:
+    """SCIM bodies are application/scim+json (scim/scim-apis.yaml:230, :780, :1936)."""
+
+    @respx.mock
+    def test_scim_requests_carry_the_scim_media_type(self, config: NetskopeConfig) -> None:
+        route = respx.patch("https://test.goskope.com/api/v2/scim/Users/u1").mock(
+            return_value=httpx.Response(204)
+        )
+        transport = SyncTransport(config)
+        transport.request("PATCH", "/api/v2/scim/Users/u1", json={"Operations": []})
+        headers = route.calls.last.request.headers
+        assert headers["Accept"] == "application/scim+json;charset=utf-8"
+        assert headers["Content-Type"] == "application/scim+json;charset=utf-8"
+
+    @respx.mock
+    def test_platform_admin_scim_route_keeps_plain_json(self, config: NetskopeConfig) -> None:
+        route = respx.get(
+            "https://test.goskope.com/api/v2/platform/administration/scim/Users"
+        ).mock(return_value=httpx.Response(200, json={"Resources": []}))
+        transport = SyncTransport(config)
+        transport.request("GET", "/api/v2/platform/administration/scim/Users")
+        assert route.calls.last.request.headers["Accept"] == "application/json"

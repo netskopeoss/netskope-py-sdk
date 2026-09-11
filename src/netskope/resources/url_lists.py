@@ -13,7 +13,7 @@ Example::
         list_type="exact",
     )
 
-    # Deploy all pending changes
+    # Apply every pending URL-list change
     client.url_lists.deploy()
 """
 
@@ -33,7 +33,15 @@ from netskope.resources._base import AsyncResource, SyncResource
 from netskope.resources._extract import validate_id
 
 _PATH = "/api/v2/policy/urllist"
-_DEPLOY_PATH = "/api/v2/policy/deploy"
+
+# The only deploy operation the gateway declares for URL lists is
+# ``POST /urllist/deploy`` (policy/urllist.yaml:201-227); there is no bare
+# ``/policy/deploy`` path anywhere in the spec.
+_DEPLOY_PATH = f"{_PATH}/deploy"
+
+# ``GET /urllist`` accepts ``pending`` (0 or 1) and ``field`` — singular, one
+# value — and nothing else (policy/urllist.yaml:133-156).
+_LIST_FIELDS = ("id", "name", "data", "modify_type", "modify_time", "modify_by", "pending")
 
 # A record carries its own identity or its payload; an envelope carries neither,
 # so a record whose ``data`` came back empty is still recognized by ``id``/``name``.
@@ -171,6 +179,22 @@ def _payload(name: str, urls: builtins.list[str], list_type: str) -> dict[str, A
     return {"name": name, "data": {"urls": list(urls), "type": list_type}}
 
 
+def _build_list_params(pending: int | bool | None, field: str | None) -> dict[str, Any]:
+    """Validate and build the two query parameters ``GET /urllist`` declares."""
+    params: dict[str, Any] = {}
+    if pending is not None:
+        if isinstance(pending, bool):
+            pending = int(pending)
+        if pending not in (0, 1):
+            raise ValidationError("pending must be 0 (applied) or 1 (pending).")
+        params["pending"] = pending
+    if field is not None:
+        if field not in _LIST_FIELDS:
+            raise ValidationError(f"field must be one of: {', '.join(_LIST_FIELDS)}.")
+        params["field"] = field
+    return params
+
+
 def _update_fields(
     name: str | None,
     urls: builtins.list[str] | None,
@@ -196,17 +220,41 @@ class UrlListsResource(SyncResource):
 
         return UrlListResponses(self._transport)
 
-    def list(self, *, page_size: int = 100) -> SyncPaginatedResponse[UrlList]:
+    def list(
+        self,
+        *,
+        pending: int | bool | None = None,
+        field: str | None = None,
+        page_size: int = 100,
+    ) -> SyncPaginatedResponse[UrlList]:
         """List all URL lists with automatic pagination.
+
+        Note:
+            ``GET /urllist`` returns a bare array with no total
+            (``policy/urllist.yaml:157-165``) and declares no ``limit`` or
+            ``offset``; the paginator still sends them, so a tenant that
+            ignores them answers the whole collection on the first page.
+
+        Args:
+            pending: ``1`` for lists with undeployed changes, ``0`` for
+                applied lists (``policy/urllist.yaml:133-142``).
+            field: Return only this field of each record — one of ``id``,
+                ``name``, ``data``, ``modify_type``, ``modify_time``,
+                ``modify_by``, ``pending`` (``:143-156``).
+            page_size: Results per page.
 
         Returns:
             A lazy paginated iterator of :class:`~netskope.models.url_lists.UrlList`.
+
+        Raises:
+            netskope.exceptions.ValidationError: If *pending* or *field* is
+                not a value the API accepts.
         """
         return SyncPaginatedResponse(
             transport=self._transport,
             method="GET",
             path=_PATH,
-            params={},
+            params=_build_list_params(pending, field),
             model=UrlList,
             page_size=page_size,
             extract=_extract,
@@ -315,10 +363,11 @@ class UrlListsResource(SyncResource):
         self._delete(_list_path(list_id))
 
     def deploy(self) -> dict[str, Any]:
-        """Deploy all pending policy changes.
+        """Apply every pending URL-list change (``POST /urllist/deploy``).
 
         Returns:
-            The deployment status from the API.
+            The deployment result: the API answers with the array of URL lists
+            it applied (``policy/urllist.yaml:209-217``).
         """
         return self._post(_DEPLOY_PATH)
 
@@ -333,13 +382,22 @@ class AsyncUrlListsResource(AsyncResource):
 
         return AsyncUrlListResponses(self._transport)
 
-    def list(self, *, page_size: int = 100) -> AsyncPaginatedResponse[UrlList]:
-        """List all URL lists with automatic pagination."""
+    def list(
+        self,
+        *,
+        pending: int | bool | None = None,
+        field: str | None = None,
+        page_size: int = 100,
+    ) -> AsyncPaginatedResponse[UrlList]:
+        """List all URL lists with automatic pagination.
+
+        See :meth:`UrlListsResource.list`.
+        """
         return AsyncPaginatedResponse(
             transport=self._transport,
             method="GET",
             path=_PATH,
-            params={},
+            params=_build_list_params(pending, field),
             model=UrlList,
             page_size=page_size,
             extract=_extract,
@@ -407,5 +465,5 @@ class AsyncUrlListsResource(AsyncResource):
         await self._delete(_list_path(list_id))
 
     async def deploy(self) -> dict[str, Any]:
-        """Deploy all pending policy changes."""
+        """Apply every pending URL-list change.  See :meth:`UrlListsResource.deploy`."""
         return await self._post(_DEPLOY_PATH)

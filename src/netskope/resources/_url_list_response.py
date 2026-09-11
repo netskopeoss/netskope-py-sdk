@@ -13,6 +13,7 @@ from netskope.resources._response_list import extract_response_list
 from netskope.resources.url_lists import (
     _DEPLOY_PATH,
     _PATH,
+    _build_list_params,
     _flatten_url_list,
     _list_path,
     _merge_source,
@@ -25,6 +26,19 @@ from netskope.response import ApiResponse
 
 def _parse_item(body: Any) -> UrlList:
     return UrlList.model_validate(_require_record(body))
+
+
+def _parse_deployment(body: Any) -> PolicyDeployment:
+    """Decode the deploy acknowledgment from either shape the API answers with.
+
+    ``POST /urllist/deploy`` returns the array of URL lists it applied
+    (policy/urllist.yaml:209-217), which carries no status of its own, so the
+    records land in ``PolicyDeployment.urllists``.  An object response keeps
+    its ``status``/``message``.
+    """
+    if isinstance(body, list):
+        return PolicyDeployment(urllists=[UrlList.model_validate(row) for row in body])
+    return PolicyDeployment.model_validate(body)
 
 
 def _parse_page(body: Any, limit: int | None, offset: int | None) -> Page[UrlList]:
@@ -42,9 +56,15 @@ class UrlListResponses(SyncResource):
     """Completed typed URL-list responses."""
 
     def list_page(
-        self, *, limit: int | None = None, offset: int | None = None
+        self,
+        *,
+        pending: int | bool | None = None,
+        field: str | None = None,
+        limit: int | None = None,
+        offset: int | None = None,
     ) -> ApiResponse[Page[UrlList]]:
-        response = self._transport.request("GET", _PATH, params=page_params(limit, offset) or None)
+        params = {**_build_list_params(pending, field), **page_params(limit, offset)}
+        response = self._transport.request("GET", _PATH, params=params or None)
         return ApiResponse(response, lambda raw: _parse_page(raw.json(), limit, offset))
 
     def get(self, list_id: int) -> ApiResponse[UrlList]:
@@ -78,7 +98,7 @@ class UrlListResponses(SyncResource):
 
     def deploy(self) -> ApiResponse[PolicyDeployment]:
         response = self._transport.request("POST", _DEPLOY_PATH)
-        return ApiResponse(response, lambda raw: PolicyDeployment.model_validate(raw.json()))
+        return ApiResponse(response, lambda raw: _parse_deployment(raw.json()))
 
     def delete(self, list_id: int) -> ApiResponse[PolicyDeployment | None]:
         response = self._transport.request("DELETE", _list_path(list_id))
@@ -92,11 +112,15 @@ class AsyncUrlListResponses(AsyncResource):
     """Completed typed URL-list responses."""
 
     async def list_page(
-        self, *, limit: int | None = None, offset: int | None = None
+        self,
+        *,
+        pending: int | bool | None = None,
+        field: str | None = None,
+        limit: int | None = None,
+        offset: int | None = None,
     ) -> ApiResponse[Page[UrlList]]:
-        response = await self._transport.request(
-            "GET", _PATH, params=page_params(limit, offset) or None
-        )
+        params = {**_build_list_params(pending, field), **page_params(limit, offset)}
+        response = await self._transport.request("GET", _PATH, params=params or None)
         return ApiResponse(response, lambda raw: _parse_page(raw.json(), limit, offset))
 
     async def get(self, list_id: int) -> ApiResponse[UrlList]:
@@ -130,7 +154,7 @@ class AsyncUrlListResponses(AsyncResource):
 
     async def deploy(self) -> ApiResponse[PolicyDeployment]:
         response = await self._transport.request("POST", _DEPLOY_PATH)
-        return ApiResponse(response, lambda raw: PolicyDeployment.model_validate(raw.json()))
+        return ApiResponse(response, lambda raw: _parse_deployment(raw.json()))
 
     async def delete(self, list_id: int) -> ApiResponse[PolicyDeployment | None]:
         response = await self._transport.request("DELETE", _list_path(list_id))

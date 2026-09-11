@@ -11,6 +11,7 @@ from pydantic import BaseModel
 from netskope._pagination import _make_page
 from netskope.datasearch import (
     DATASEARCH_PAGE_CAP,
+    DATASEARCH_TIMEOUT_DEFAULT,
     AsyncScanIterator,
     DatasearchWindow,
     ScanIterator,
@@ -35,7 +36,14 @@ from netskope.resources._alert_query import (
     _validate_alert_id,
 )
 from netskope.resources._base import AsyncResource, SyncResource
-from netskope.resources.events import _DATASEARCH_TYPES, _event_model, _event_path
+from netskope.resources.events import (
+    _DATASEARCH_TYPES,
+    _TRANSACTION_PATH,
+    _event_model,
+    _event_path,
+    _insertion_params,
+    audit_type_query,
+)
 from netskope.response import ApiResponse
 
 M = TypeVar("M", bound=BaseModel)
@@ -61,13 +69,15 @@ def event_capabilities(event_type: str | EventType) -> EventQueryCapabilities:
             jql=True,
         )
     if event_type == "audit":
+        # audit.yaml:12-18 declares the same `query` filter as every other
+        # category; what it lacks is fields/groupbys/orderbys.
         return EventQueryCapabilities(
             page_limit=5000,
             scannable=False,
             projection=False,
             grouping=False,
             ordering=False,
-            jql=False,
+            jql=True,
         )
     if event_type == "transaction":
         raise ValidationError(
@@ -78,7 +88,6 @@ def event_capabilities(event_type: str | EventType) -> EventQueryCapabilities:
 
 def _endpoint(
     event_type: str | EventType,
-    query: str | None,
     fields: list[str] | None,
     order_by: str | None,
     group_by: str | list[str] | None = None,
@@ -86,11 +95,7 @@ def _endpoint(
 ) -> tuple[str, type[Event], EventQueryCapabilities]:
     """Reject unsupported query features, then resolve the path and record model."""
     capabilities = event_capabilities(event_type)
-    if not capabilities.jql and query is not None:
-        raise ValidationError(
-            "The audit event type does not support JQL queries; use audit_type to filter instead."
-        )
-    if capabilities.jql and audit_type is not None:
+    if audit_type is not None and str(event_type) != EventType.AUDIT.value:
         raise ValidationError(f"{event_type} events do not support the audit_type filter.")
     if not capabilities.projection and fields is not None:
         raise ValidationError(f"{event_type} events do not support server-side field projection.")
@@ -122,25 +127,47 @@ def _prepare(
     offset: int | None,
     limit: int | None,
     audit_type: str | None = None,
+    timeout: int | None = DATASEARCH_TIMEOUT_DEFAULT,
+    insertion_start_time: datetime | int | None = None,
+    insertion_end_time: datetime | int | None = None,
 ) -> tuple[str, type[Event], dict[str, Any]]:
-    path, model, capabilities = _endpoint(event_type, query, fields, order_by, None, audit_type)
+    path, model, capabilities = _endpoint(event_type, fields, order_by, None, audit_type)
     params = _build_page_params(
-        query, fields, start_time, end_time, order_by, descending, offset, limit
+        audit_type_query(query, audit_type),
+        fields,
+        start_time,
+        end_time,
+        order_by,
+        descending,
+        offset,
+        limit,
+        # Only /events/datasearch/* declares a query timeout.
+        timeout=timeout if event_type in _DATASEARCH_TYPES else None,
     )
-    if audit_type is not None:
-        params["type"] = audit_type
+    params.update(_insertion_params(str(event_type), insertion_start_time, insertion_end_time))
     return path, model, _within_page_limit(event_type, capabilities, params)
 
 
 def _prepare_lookup(
-    event_type: str | EventType, event_id: str
+    event_type: str | EventType,
+    event_id: str,
+    timeout: int | None = DATASEARCH_TIMEOUT_DEFAULT,
 ) -> tuple[str, type[Event], dict[str, Any]]:
     _validate_alert_id(event_id)
-    if not event_capabilities(event_type).jql:
-        raise ValidationError(
-            f"Event type {str(event_type)!r} does not support lookup by ID (no JQL support)."
-        )
-    return _prepare(event_type, f'_id eq "{event_id}"', None, None, None, None, None, None, 1)
+    # event_capabilities, reached through _prepare, rejects the transaction
+    # metrics endpoint before any request is sent.
+    return _prepare(
+        event_type,
+        f'_id eq "{event_id}"',
+        None,
+        None,
+        None,
+        None,
+        None,
+        None,
+        1,
+        timeout=timeout,
+    )
 
 
 def _parse_page(body: Any, model: type[M], offset: int, limit: int | None) -> Page[M]:
@@ -204,6 +231,9 @@ class EventResponses(SyncResource):
         offset: int | None = None,
         limit: int | None = None,
         audit_type: str | None = None,
+        timeout: int | None = DATASEARCH_TIMEOUT_DEFAULT,
+        insertion_start_time: datetime | int | None = None,
+        insertion_end_time: datetime | int | None = None,
     ) -> ApiResponse[Page[Event]]:
         path, model, params = _prepare(
             event_type,
@@ -216,6 +246,9 @@ class EventResponses(SyncResource):
             offset,
             limit,
             audit_type,
+            timeout,
+            insertion_start_time,
+            insertion_end_time,
         )
         raw = self._transport.request("GET", path, params=params or None)
         return _page_response(raw, model, offset, limit)
@@ -232,31 +265,42 @@ class EventResponses(SyncResource):
         order_by: str | None = None,
         descending: bool | None = None,
         limit: int | None = None,
+        timeout: int | None = DATASEARCH_TIMEOUT_DEFAULT,
     ) -> ApiResponse[Page[DatasearchBucket]]:
-        path, _, capabilities = _endpoint(event_type, query, fields, order_by, group_by)
+        path, _, capabilities = _endpoint(event_type, fields, order_by, group_by)
         params = _within_page_limit(
             event_type,
             capabilities,
             _build_aggregate_params(
-                group_by, query, fields, start_time, end_time, order_by, descending, limit
+                group_by,
+                query,
+                fields,
+                start_time,
+                end_time,
+                order_by,
+                descending,
+                limit,
+                timeout=timeout if event_type in _DATASEARCH_TYPES else None,
             ),
         )
         raw = self._transport.request("GET", path, params=params)
         return ApiResponse(raw, lambda response: _parse_aggregate_page(response.json(), limit))
 
     def get(
-        self, event_id: str, *, event_type: str | EventType = EventType.APPLICATION
+        self,
+        event_id: str,
+        *,
+        event_type: str | EventType = EventType.APPLICATION,
+        timeout: int | None = DATASEARCH_TIMEOUT_DEFAULT,
     ) -> ApiResponse[Event]:
-        path, model, params = _prepare_lookup(event_type, event_id)
+        path, model, params = _prepare_lookup(event_type, event_id, timeout)
         raw = self._transport.request("GET", path, params=params)
         return _get_response(raw, model, event_id)
 
     def transaction_metrics(self, *, hours: int = 24) -> ApiResponse[TransactionMetrics]:
         if isinstance(hours, bool) or not isinstance(hours, int) or not 1 <= hours <= 168:
             raise ValidationError("hours must be an integer between 1 and 168.")
-        raw = self._transport.request(
-            "GET", "/api/v2/events/metrics/transactionevents", params={"hours": hours}
-        )
+        raw = self._transport.request("GET", _TRANSACTION_PATH, params={"hours": hours})
         return _metrics_response(raw)
 
     def scan_pages(
@@ -271,11 +315,12 @@ class EventResponses(SyncResource):
         page_size: int = DATASEARCH_PAGE_CAP,
         max_records: int | None = None,
         max_pages: int = 1000,
+        timeout: int | None = DATASEARCH_TIMEOUT_DEFAULT,
     ) -> ScanIterator[ApiResponse[Page[Event]]]:
         if not event_capabilities(event_type).scannable:
             raise ValidationError(f"Exact scans are not established for {event_type} events.")
-        params = _build_scan_params(window, query, fields, order_by, descending)
-        path, model, _ = _endpoint(event_type, query, fields, order_by)
+        params = _build_scan_params(window, query, fields, order_by, descending, timeout=timeout)
+        path, model, _ = _endpoint(event_type, fields, order_by)
 
         def fetch(offset: int, limit: int) -> _ScanPage[ApiResponse[Page[Event]]]:
             raw = self._transport.request(
@@ -304,6 +349,9 @@ class AsyncEventResponses(AsyncResource):
         offset: int | None = None,
         limit: int | None = None,
         audit_type: str | None = None,
+        timeout: int | None = DATASEARCH_TIMEOUT_DEFAULT,
+        insertion_start_time: datetime | int | None = None,
+        insertion_end_time: datetime | int | None = None,
     ) -> ApiResponse[Page[Event]]:
         path, model, params = _prepare(
             event_type,
@@ -316,6 +364,9 @@ class AsyncEventResponses(AsyncResource):
             offset,
             limit,
             audit_type,
+            timeout,
+            insertion_start_time,
+            insertion_end_time,
         )
         raw = await self._transport.request("GET", path, params=params or None)
         return _page_response(raw, model, offset, limit)
@@ -332,31 +383,42 @@ class AsyncEventResponses(AsyncResource):
         order_by: str | None = None,
         descending: bool | None = None,
         limit: int | None = None,
+        timeout: int | None = DATASEARCH_TIMEOUT_DEFAULT,
     ) -> ApiResponse[Page[DatasearchBucket]]:
-        path, _, capabilities = _endpoint(event_type, query, fields, order_by, group_by)
+        path, _, capabilities = _endpoint(event_type, fields, order_by, group_by)
         params = _within_page_limit(
             event_type,
             capabilities,
             _build_aggregate_params(
-                group_by, query, fields, start_time, end_time, order_by, descending, limit
+                group_by,
+                query,
+                fields,
+                start_time,
+                end_time,
+                order_by,
+                descending,
+                limit,
+                timeout=timeout if event_type in _DATASEARCH_TYPES else None,
             ),
         )
         raw = await self._transport.request("GET", path, params=params)
         return ApiResponse(raw, lambda response: _parse_aggregate_page(response.json(), limit))
 
     async def get(
-        self, event_id: str, *, event_type: str | EventType = EventType.APPLICATION
+        self,
+        event_id: str,
+        *,
+        event_type: str | EventType = EventType.APPLICATION,
+        timeout: int | None = DATASEARCH_TIMEOUT_DEFAULT,
     ) -> ApiResponse[Event]:
-        path, model, params = _prepare_lookup(event_type, event_id)
+        path, model, params = _prepare_lookup(event_type, event_id, timeout)
         raw = await self._transport.request("GET", path, params=params)
         return _get_response(raw, model, event_id)
 
     async def transaction_metrics(self, *, hours: int = 24) -> ApiResponse[TransactionMetrics]:
         if isinstance(hours, bool) or not isinstance(hours, int) or not 1 <= hours <= 168:
             raise ValidationError("hours must be an integer between 1 and 168.")
-        raw = await self._transport.request(
-            "GET", "/api/v2/events/metrics/transactionevents", params={"hours": hours}
-        )
+        raw = await self._transport.request("GET", _TRANSACTION_PATH, params={"hours": hours})
         return _metrics_response(raw)
 
     def scan_pages(
@@ -371,11 +433,12 @@ class AsyncEventResponses(AsyncResource):
         page_size: int = DATASEARCH_PAGE_CAP,
         max_records: int | None = None,
         max_pages: int = 1000,
+        timeout: int | None = DATASEARCH_TIMEOUT_DEFAULT,
     ) -> AsyncScanIterator[ApiResponse[Page[Event]]]:
         if not event_capabilities(event_type).scannable:
             raise ValidationError(f"Exact scans are not established for {event_type} events.")
-        params = _build_scan_params(window, query, fields, order_by, descending)
-        path, model, _ = _endpoint(event_type, query, fields, order_by)
+        params = _build_scan_params(window, query, fields, order_by, descending, timeout=timeout)
+        path, model, _ = _endpoint(event_type, fields, order_by)
 
         async def fetch(offset: int, limit: int) -> _ScanPage[ApiResponse[Page[Event]]]:
             raw = await self._transport.request(

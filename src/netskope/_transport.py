@@ -23,6 +23,13 @@ logger = logging.getLogger("netskope")
 _USER_AGENT = f"netskope-python-sdk/{__version__}"
 
 
+# The SCIM provisioning API declares only application/scim+json for its bodies
+# (scim/scim-apis.yaml). The platform admin route under /api/v2/platform/ uses
+# plain JSON, so the rule is keyed on this prefix alone.
+_SCIM_PATH_PREFIX = "/api/v2/scim/"
+_SCIM_MEDIA_TYPE = "application/scim+json;charset=utf-8"
+
+
 def _build_headers(config: NetskopeConfig) -> dict[str, str]:
     headers = {
         "User-Agent": _USER_AGENT,
@@ -42,6 +49,7 @@ def _build_request(
     json: Any | None,
     data: Any | None,
     files: Any | None,
+    extra_headers: dict[str, str] | None = None,
 ) -> httpx.Request:
     try:
         base_url = httpx.URL(config.base_url)
@@ -53,12 +61,24 @@ def _build_request(
     if url.userinfo:
         raise ValidationError("Request URLs must not contain credentials.")
 
+    headers = _build_headers(config)
+    if url.path.startswith(_SCIM_PATH_PREFIX):
+        headers["Accept"] = _SCIM_MEDIA_TYPE
+        if json is not None:
+            headers["Content-Type"] = _SCIM_MEDIA_TYPE
+    if extra_headers:
+        # Operation-specific headers (for example X-CDR-Api-Key). The token
+        # header is never overridable from a resource.
+        headers.update(
+            {k: v for k, v in extra_headers.items() if k.lower() != "netskope-api-token"}
+        )
+
     # Build independently of borrowed clients so their credentials, cookies,
     # query defaults, and base URL cannot enter a Netskope request.
     request = httpx.Request(
         method,
         url,
-        headers=_build_headers(config),
+        headers=headers,
         params=params,
         json=json,
         data=data,
@@ -125,6 +145,7 @@ class SyncTransport:
         data: Any | None = None,
         files: Any | None = None,
         retry_safe: bool | None = None,
+        headers: dict[str, str] | None = None,
     ) -> httpx.Response:
         """Send an HTTP request and return the validated response.
 
@@ -146,6 +167,7 @@ class SyncTransport:
             json=json,
             data=data,
             files=files,
+            extra_headers=headers,
         )
         _log_request(request)
         response = send_with_retries(self._client, request, self._config, retry_safe=retry_safe)
@@ -195,6 +217,7 @@ class AsyncTransport:
         data: Any | None = None,
         files: Any | None = None,
         retry_safe: bool | None = None,
+        headers: dict[str, str] | None = None,
     ) -> httpx.Response:
         """Send an async HTTP request and return the validated response."""
         if self._closed:
@@ -207,6 +230,7 @@ class AsyncTransport:
             json=json,
             data=data,
             files=files,
+            extra_headers=headers,
         )
         _log_request(request)
         response = await async_send_with_retries(

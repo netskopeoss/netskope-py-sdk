@@ -10,9 +10,14 @@ from netskope.models.common import NetskopeModel
 
 
 class SupportedOperatingSystems(NetskopeModel):
-    """The operating-system families returned by the client support service."""
+    """The operating-system families returned by the client support service.
 
-    available_os: list[str]
+    ``AvailableOsFamily`` (devices/provisioner-core.yaml:320-333) declares no
+    required properties, so a response that omits the key yields an empty list
+    rather than a validation error.
+    """
+
+    available_os: list[str] = Field(default_factory=list)
 
 
 _TagText = Annotated[str, Field(pattern=r"^[0-9a-zA-Z\-\s]+$")]

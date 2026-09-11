@@ -338,7 +338,7 @@ class TestUserConfidenceIndex:
 
 
 class TestIncidentUpdateResult:
-    """Only a positive reported count claims that entries were accepted."""
+    """`ok` is the acceptance flag; a reported count can still contradict it."""
 
     @pytest.mark.parametrize("count", [1, 3])
     def test_a_positive_count_is_accepted(self, count: int) -> None:
@@ -355,12 +355,26 @@ class TestIncidentUpdateResult:
         result = IncidentUpdateResult.model_validate({"outcomes": [{"ok": 1, "result": 0}]})
         assert not result.accepted
 
-    def test_a_message_only_outcome_is_not_accepted(self) -> None:
+    def test_the_documented_success_body_is_accepted(self) -> None:
+        """incident_update.yaml:8-14 and :69-75 document {ok: 1, result: <message>}."""
         result = IncidentUpdateResult.model_validate(
             {"outcomes": [{"ok": 1, "result": "Update Successful"}]}
         )
-        assert not result.accepted
+        assert result.accepted
         assert result.accepted_entries == 0
+
+    def test_an_ok_flag_without_a_result_is_accepted(self) -> None:
+        """incident_update.yaml:8-14 makes `result` optional; `ok` carries the outcome."""
+        result = IncidentUpdateResult.model_validate({"outcomes": [{"ok": 1}]})
+        assert result.accepted
+        assert result.accepted_entries == 0
+
+    def test_a_failed_ok_flag_is_not_accepted(self) -> None:
+        """incident_update.yaml:15-21 gives the failure item the same {ok, result} shape."""
+        result = IncidentUpdateResult.model_validate(
+            {"outcomes": [{"ok": 1, "result": 2}, {"ok": 0, "result": "Update Failed"}]}
+        )
+        assert not result.accepted
 
     def test_one_negative_entry_withdraws_the_whole_claim(self) -> None:
         result = IncidentUpdateResult.model_validate(

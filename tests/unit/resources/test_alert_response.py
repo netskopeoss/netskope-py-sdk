@@ -52,11 +52,12 @@ def test_page_retains_metadata_and_original_values(client: NetskopeClient, key: 
 
 @respx.mock
 def test_default_page_omits_parameters(client: NetskopeClient) -> None:
+    """Only the spec-required timeout is sent; search_alert.yaml:313-319."""
     route = respx.get(_URL).mock(
         return_value=httpx.Response(200, json={"result": [{"alert_name": "projected"}]})
     )
     page = client.alerts.list_page()
-    assert dict(route.calls.last.request.url.params) == {}
+    assert dict(route.calls.last.request.url.params) == {"timeout": "180"}
     assert (page.offset, page.limit, page.total, page.has_more) == (0, None, None, None)
     assert page.items[0].id is None
     assert page.items[0].model_fields_set == {"alert_name"}
@@ -124,6 +125,7 @@ def test_page_uses_canonical_orderbys(
     )
     params = dict(route.calls.last.request.url.params)
     assert params == {
+        "timeout": "180",
         "query": 'alert_type eq "DLP"',
         "fields": "_id,timestamp",
         "starttime": "1704067200",
@@ -199,6 +201,7 @@ def test_nonempty_aggregates_are_not_alerts(client: NetskopeClient) -> None:
     assert page.metadata == {"status": {"total": 1_000, "count": 2}}
     assert response.json() == body
     assert dict(route.calls.last.request.url.params) == {
+        "timeout": "180",
         "groupbys": "alert_type,user",
         "fields": "_id,count",
         "limit": "3",
@@ -248,7 +251,10 @@ def test_get_retains_original_envelope_and_not_found_metadata(client: NetskopeCl
     response = client.alerts.with_response.get("a1")
     assert response.parse().cci == 8
     assert response.json() == {"data": [{"_id": "a1", "cci": "8"}]}
-    assert dict(route.calls[0].request.url.params) == {"query": '_id eq "a1"'}
+    assert dict(route.calls[0].request.url.params) == {
+        "timeout": "180",
+        "query": '_id eq "a1"',
+    }
     assert route.call_count == 1
     missing = client.alerts.with_response.get("b2")
     with pytest.raises(NotFoundError) as exc:

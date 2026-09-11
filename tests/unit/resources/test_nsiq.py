@@ -356,7 +356,7 @@ async def async_retry_client() -> AsyncIterator[AsyncNetskopeClient]:
 
 
 class TestReadOnlyPostsRetry:
-    """URL lookup and RetroHunt IOC lookup read through POST, so a 429 is retried."""
+    """URL lookup reads through POST, so a 429 is retried."""
 
     @respx.mock
     def test_url_lookup_retries_after_a_429(self, retry_client: NetskopeClient) -> None:
@@ -372,17 +372,16 @@ class TestReadOnlyPostsRetry:
         assert route.call_count == 2
 
     @respx.mock
-    def test_lookup_iocs_retries_after_a_429(self, retry_client: NetskopeClient) -> None:
-        payload = {"status": "success", "result": {"abc": {"verdict": "clean"}}}
+    def test_lookup_iocs_is_not_retried(self, retry_client: NetskopeClient) -> None:
+        """``POST /retrohunt/ioc/getinfo`` is declared ``rbac.access: rw``
+        (nsiq/nsiq.yaml:88-141), so the SDK must not replay it."""
         route = respx.post(_GETINFO_URL).mock(
-            side_effect=[
-                httpx.Response(429, json={"message": "slow down"}),
-                httpx.Response(200, json=payload),
-            ]
+            return_value=httpx.Response(429, json={"message": "slow down"})
         )
 
-        assert _nsiq(retry_client).lookup_iocs("abc") == payload
-        assert route.call_count == 2
+        with pytest.raises(RateLimitError):
+            _nsiq(retry_client).lookup_iocs("abc")
+        assert route.call_count == 1
 
     @respx.mock
     async def test_async_url_lookup_retries_after_a_429(
@@ -400,19 +399,16 @@ class TestReadOnlyPostsRetry:
         assert route.call_count == 2
 
     @respx.mock
-    async def test_async_lookup_iocs_retries_after_a_429(
+    async def test_async_lookup_iocs_is_not_retried(
         self, async_retry_client: AsyncNetskopeClient
     ) -> None:
-        payload = {"status": "success", "result": {"abc": {"verdict": "clean"}}}
         route = respx.post(_GETINFO_URL).mock(
-            side_effect=[
-                httpx.Response(429, json={"message": "slow down"}),
-                httpx.Response(200, json=payload),
-            ]
+            return_value=httpx.Response(429, json={"message": "slow down"})
         )
 
-        assert await _ansiq(async_retry_client).lookup_iocs("abc") == payload
-        assert route.call_count == 2
+        with pytest.raises(RateLimitError):
+            await _ansiq(async_retry_client).lookup_iocs("abc")
+        assert route.call_count == 1
 
     @respx.mock
     def test_recategorize_is_a_write_and_is_not_retried(self, retry_client: NetskopeClient) -> None:

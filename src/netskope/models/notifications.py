@@ -26,7 +26,9 @@ class NotificationTemplateWrite(AdminRequest):
     logo_image_name: str | None = Field(None, alias="logoImageName")
     logo_size: Literal["small", "medium", "large"] | None = Field(None, alias="logoSize")
     redirect_url: str | None = Field(None, alias="redirectUrl")
-    stripe_color: str | None = Field(None, alias="stripeColor", pattern=r"^#[0-9a-fA-F]{6}$")
+    # user-notifications-templates.yaml:62-64 declares stripeColor as a bare
+    # string ("A valid hexadecimal color code"), with no pattern.
+    stripe_color: str | None = Field(None, alias="stripeColor")
 
     @model_validator(mode="after")
     def _action_buttons(self) -> Self:

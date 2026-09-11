@@ -58,18 +58,39 @@ class TestEventsResource:
     # ------------------------------------------------------------------
 
     @respx.mock
-    def test_audit_routes_to_data_audit_with_type_param(self, client: NetskopeClient) -> None:
-        """Audit events use /events/data/audit and a ``type`` param, never ``query``."""
+    def test_audit_routes_to_data_audit_with_a_query_clause(self, client: NetskopeClient) -> None:
+        """audit.yaml:12-72 declares query, not type, and no timeout."""
         route = respx.get(_AUDIT_URL).mock(return_value=httpx.Response(200, json=_EMPTY))
         list(client.events.list("audit", audit_type="admin"))
         params = route.calls.last.request.url.params
-        assert params["type"] == "admin"
-        assert "query" not in params
+        assert params["query"] == 'type eq "admin"'
+        assert "type" not in params and "timeout" not in params
 
     @respx.mock
-    def test_audit_rejects_query_no_http(self, client: NetskopeClient) -> None:
-        with pytest.raises(ValidationError):
-            client.events.list("audit", query='user eq "a@ex.com"')
+    def test_audit_accepts_a_query_and_combines_it_with_audit_type(
+        self, client: NetskopeClient
+    ) -> None:
+        """audit.yaml:13-18 documents `query` as the audit filter."""
+        route = respx.get(_AUDIT_URL).mock(return_value=httpx.Response(200, json=_EMPTY))
+        list(client.events.list("audit", query='user eq "a@ex.com"', audit_type="admin"))
+        assert (
+            route.calls.last.request.url.params["query"]
+            == '(user eq "a@ex.com") and type eq "admin"'
+        )
+
+    @respx.mock
+    def test_audit_supports_insertion_time_bounds(self, client: NetskopeClient) -> None:
+        """audit.yaml:51-72 declares insertionstarttime/insertionendtime."""
+        route = respx.get(_AUDIT_URL).mock(return_value=httpx.Response(200, json=_EMPTY))
+        list(client.events.list("audit", insertion_start_time=1, insertion_end_time=2))
+        params = route.calls.last.request.url.params
+        assert params["insertionstarttime"] == "1" and params["insertionendtime"] == "2"
+
+    @respx.mock
+    def test_insertion_bounds_rejected_for_datasearch_no_http(self, client: NetskopeClient) -> None:
+        """search_network.yaml:218-279 declares no insertion-time parameters."""
+        with pytest.raises(ValidationError, match="insertion-time"):
+            client.events.list("network", insertion_start_time=1)
         assert len(respx.calls) == 0
 
     @respx.mock
@@ -81,22 +102,23 @@ class TestEventsResource:
         assert route.calls.last.request.url.params["query"] == 'status eq "down"'
 
     @respx.mock
-    def test_transaction_routes_to_metrics_endpoint(self, client: NetskopeClient) -> None:
-        route = respx.get(_TRANSACTION_URL).mock(return_value=httpx.Response(200, json=_EMPTY))
-        list(client.events.list("transaction"))
-        assert route.called
-        assert route.calls.last.request.url.path == "/api/v2/events/metrics/transactionevents"
+    def test_transaction_is_not_a_record_endpoint_no_http(self, client: NetskopeClient) -> None:
+        """transaction_metrics.yaml:65-90 returns one metrics object, not records."""
+        with pytest.raises(ValidationError, match="transaction_metrics"):
+            client.events.list("transaction")
+        assert len(respx.calls) == 0
 
     @respx.mock
-    def test_list_sends_groupbys_and_combined_sortby(self, client: NetskopeClient) -> None:
-        """The datasearch API expects ``groupbys`` and ``sortby="field DESC|ASC"``."""
+    def test_list_sends_groupbys_and_combined_orderbys(self, client: NetskopeClient) -> None:
+        """search_app.yaml:382-399 names these groupbys and orderbys; no sortby exists."""
         route = respx.get(_APP_URL).mock(return_value=httpx.Response(200, json=_EMPTY))
         list(client.events.list("application", group_by="app", order_by="timestamp"))
         params = route.calls.last.request.url.params
         assert params["groupbys"] == "app"
         assert "groupby" not in params
-        assert params["sortby"] == "timestamp DESC"
-        assert "sortorder" not in params
+        assert params["orderbys"] == "timestamp DESC"
+        assert "sortby" not in params and "sortorder" not in params
+        assert params["timeout"] == "180"
 
     @respx.mock
     def test_list_groupbys_joins_list_and_ascending_sort(self, client: NetskopeClient) -> None:
@@ -111,7 +133,8 @@ class TestEventsResource:
         )
         params = route.calls.last.request.url.params
         assert params["groupbys"] == "app,user"
-        assert params["sortby"] == "timestamp ASC"
+        assert params["orderbys"] == "timestamp ASC"
+        assert "sortby" not in params
 
     # ------------------------------------------------------------------
     # get()
@@ -163,13 +186,21 @@ class TestEventsResource:
             client.events.get("deadbeef")
 
     @respx.mock
-    @pytest.mark.parametrize("event_type", ["audit", "transaction"])
-    def test_get_rejects_unqueryable_types_no_http(
-        self, client: NetskopeClient, event_type: str
-    ) -> None:
-        with pytest.raises(ValidationError):
-            client.events.get("deadbeef", event_type=event_type)
+    def test_get_rejects_transaction_no_http(self, client: NetskopeClient) -> None:
+        """transaction_metrics.yaml:74-83 takes only `hours`; there is no record to fetch."""
+        with pytest.raises(ValidationError, match="transaction_metrics"):
+            client.events.get("deadbeef", event_type="transaction")
         assert len(respx.calls) == 0
+
+    @respx.mock
+    def test_get_audit_looks_up_by_id_through_query(self, client: NetskopeClient) -> None:
+        """audit.yaml:13-18 accepts a query, so `_id eq` resolves one audit row."""
+        route = respx.get(_AUDIT_URL).mock(
+            return_value=httpx.Response(200, json={"result": [{"_id": "beef01"}]})
+        )
+        assert client.events.get("beef01", event_type="audit").id == "beef01"
+        params = route.calls.last.request.url.params
+        assert params["query"] == '_id eq "beef01"' and "timeout" not in params
 
 
 class TestAsyncEventsResource:
@@ -199,18 +230,21 @@ class TestAsyncEventsResource:
             await aclient.events.get("deadbeef")
 
     @respx.mock
-    async def test_audit_routing_and_groupbys(self, aclient: AsyncNetskopeClient) -> None:
+    async def test_audit_routing_and_query_clause(self, aclient: AsyncNetskopeClient) -> None:
+        """audit.yaml:12-72: the audit type is a query clause, and no timeout is sent."""
         route = respx.get(_AUDIT_URL).mock(return_value=httpx.Response(200, json=_EMPTY))
-        paginated = aclient.events.list("audit", audit_type="user", group_by="user")
+        paginated = aclient.events.list("audit", audit_type="user")
         _ = [event async for event in paginated]
         params = route.calls.last.request.url.params
-        assert params["type"] == "user"
-        assert params["groupbys"] == "user"
+        assert params["query"] == 'type eq "user"'
+        assert "type" not in params and "timeout" not in params
 
     @respx.mock
-    async def test_audit_rejects_query_no_http(self, aclient: AsyncNetskopeClient) -> None:
-        with pytest.raises(ValidationError):
-            aclient.events.list("audit", query="x")
+    async def test_audit_type_rejected_for_other_types_no_http(
+        self, aclient: AsyncNetskopeClient
+    ) -> None:
+        with pytest.raises(ValidationError, match="audit_type"):
+            aclient.events.list("network", audit_type="admin")
         assert len(respx.calls) == 0
 
 
@@ -292,11 +326,7 @@ def test_event_capabilities_default_to_supporting_jql() -> None:
     )
 
 
-@pytest.mark.parametrize(
-    ("event_type", "jql"),
-    [("application", True), ("infrastructure", True), ("audit", False)],
-)
-def test_declared_capabilities_state_jql_support(
-    client: NetskopeClient, event_type: str, jql: bool
-) -> None:
-    assert client.events.capabilities(event_type).jql is jql
+@pytest.mark.parametrize("event_type", ["application", "infrastructure", "audit"])
+def test_declared_capabilities_state_jql_support(client: NetskopeClient, event_type: str) -> None:
+    """Every record endpoint declares `query`, audit included (audit.yaml:13-18)."""
+    assert client.events.capabilities(event_type).jql is True

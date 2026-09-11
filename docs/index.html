@@ -635,7 +635,7 @@ first = client.alerts.<span class="fn">list</span>().<span class="fn">first</spa
             <tr class="border-b border-slate-100 param-row"><td class="pr-4"><code>id</code></td><td class="pr-4"><code>str | None</code></td><td>Alert unique identifier (API field: <code>_id</code>)</td></tr>
             <tr class="border-b border-slate-100 param-row"><td class="pr-4"><code>alert_name</code></td><td class="pr-4"><code>str | None</code></td><td>Human-readable alert name</td></tr>
             <tr class="border-b border-slate-100 param-row"><td class="pr-4"><code>alert_type</code></td><td class="pr-4"><code>str | None</code></td><td>Alert category (DLP, malware, anomaly, Security Assessment, etc.)</td></tr>
-            <tr class="border-b border-slate-100 param-row"><td class="pr-4"><code>severity</code></td><td class="pr-4"><code>str | None</code></td><td>Severity level (critical, high, medium, low)</td></tr>
+            <tr class="border-b border-slate-100 param-row"><td class="pr-4"><code>severity</code></td><td class="pr-4"><code>str | int | None</code></td><td>Severity level (critical, high, medium, low); some tenants report it as a number (API field: <code>severity_level</code>)</td></tr>
             <tr class="border-b border-slate-100 param-row"><td class="pr-4"><code>user</code></td><td class="pr-4"><code>str | None</code></td><td>Affected user email</td></tr>
             <tr class="border-b border-slate-100 param-row"><td class="pr-4"><code>app</code></td><td class="pr-4"><code>str | None</code></td><td>Application name (e.g. "Workday", "Slack")</td></tr>
             <tr class="border-b border-slate-100 param-row"><td class="pr-4"><code>activity</code></td><td class="pr-4"><code>str | None</code></td><td>Activity that triggered the alert</td></tr>
@@ -643,7 +643,7 @@ first = client.alerts.<span class="fn">list</span>().<span class="fn">first</spa
             <tr class="border-b border-slate-100 param-row"><td class="pr-4"><code>action</code></td><td class="pr-4"><code>str | None</code></td><td>Action taken (alert, block, etc.)</td></tr>
             <tr class="border-b border-slate-100 param-row"><td class="pr-4"><code>category</code></td><td class="pr-4"><code>str | None</code></td><td>URL/app category</td></tr>
             <tr class="border-b border-slate-100 param-row"><td class="pr-4"><code>cci</code></td><td class="pr-4"><code>int | None</code></td><td>Cloud Confidence Index score</td></tr>
-            <tr class="border-b border-slate-100 param-row"><td class="pr-4"><code>ccl</code></td><td class="pr-4"><code>str | None</code></td><td>Cloud Confidence Level</td></tr>
+            <tr class="border-b border-slate-100 param-row"><td class="pr-4"><code>ccl</code></td><td class="pr-4"><code>str | int | None</code></td><td>Cloud Confidence Level; some tenants report it as a number</td></tr>
             <tr class="border-b border-slate-100 param-row"><td class="pr-4"><code>access_method</code></td><td class="pr-4"><code>str | None</code></td><td>How traffic was accessed (Client, API, etc.)</td></tr>
             <tr class="border-b border-slate-100 param-row"><td class="pr-4"><code>traffic_type</code></td><td class="pr-4"><code>str | None</code></td><td>Traffic classification</td></tr>
             <tr class="param-row"><td class="pr-4"><code>timestamp</code></td><td class="pr-4"><code>datetime | None</code></td><td>When the alert occurred (auto-parsed from epoch)</td></tr>
@@ -656,7 +656,7 @@ first = client.alerts.<span class="fn">list</span>().<span class="fn">first</spa
 <!-- ═══════════════════════ EVENTS ═══════════════════════ -->
 <section id="events" class="max-w-4xl mx-auto px-6 py-16">
     <h2 class="text-3xl font-bold mb-2">Events</h2>
-    <p class="text-slate-500 text-sm mb-8"><code>client.events</code> &mdash; Query security events across 10 event types via <code>/api/v2/events/datasearch/{type}</code></p>
+    <p class="text-slate-500 text-sm mb-8"><code>client.events</code> &mdash; Query security events, mostly via <code>/api/v2/events/datasearch/{type}</code>. <code>audit</code> reads <code>/api/v2/events/data/audit</code> and <code>infrastructure</code> reads <code>/api/v2/events/data/infrastructure</code>.</p>
 
     <h3 class="font-semibold text-lg mb-3">Supported Event Types</h3>
     <div class="grid grid-cols-2 md:grid-cols-5 gap-2 mb-8">
@@ -669,11 +669,11 @@ first = client.alerts.<span class="fn">list</span>().<span class="fn">first</spa
         <div class="p-2 bg-slate-50 rounded-lg text-center text-sm font-mono">infrastructure</div>
         <div class="p-2 bg-slate-50 rounded-lg text-center text-sm font-mono">clientstatus</div>
         <div class="p-2 bg-slate-50 rounded-lg text-center text-sm font-mono">epdlp</div>
-        <div class="p-2 bg-slate-50 rounded-lg text-center text-sm font-mono">transaction</div>
     </div>
+    <p class="text-slate-600 text-sm mb-8"><code>transaction</code> is not a record endpoint: <code>list()</code> and <code>get()</code> reject it. Its hourly PubSub backlog metrics come from <code>client.events.transaction_metrics(hours=24)</code>, whose only parameter is <code>hours</code>.</p>
 
     <h3 class="font-semibold text-lg mb-3"><code>.list(event_type, ...)</code> &mdash; List Events</h3>
-    <p class="text-slate-600 text-sm mb-4">Same parameters as <code>alerts.list()</code>, plus the required <code>event_type</code> first argument. Returns type-specific models for <code>network</code>, <code>page</code>, and <code>audit</code>.</p>
+    <p class="text-slate-600 text-sm mb-4">Same parameters as <code>alerts.list()</code>, plus the <code>event_type</code> first argument. Returns type-specific models for <code>network</code>, <code>page</code>, <code>audit</code>, <code>clientstatus</code>, and <code>incident</code>. Audit events accept the same <code>query</code> expression as the other categories; the <code>audit_type</code> convenience is folded into it as a <code>type eq "&lt;value&gt;"</code> clause, and supplying it to any other category is rejected. <code>audit</code> and <code>infrastructure</code> are also the only types that take <code>insertion_start_time</code>/<code>insertion_end_time</code>.</p>
     <div class="code-block p-5 mb-8">
 <code><span class="kw">from</span> netskope.models.events <span class="kw">import</span> EventType
 
@@ -689,6 +689,10 @@ first = client.alerts.<span class="fn">list</span>().<span class="fn">first</spa
 <span class="cm"># Page events — returns PageEvent with url, domain, browser</span>
 <span class="kw">for</span> event <span class="kw">in</span> client.events.<span class="fn">list</span>(<span class="s">"page"</span>):
     <span class="bi">print</span>(f<span class="s">"{event.url} — {event.domain}"</span>)
+
+<span class="cm"># Audit events take a JQL query; audit_type is folded into it</span>
+<span class="kw">for</span> event <span class="kw">in</span> client.events.<span class="fn">list</span>(<span class="s">"audit"</span>, audit_type=<span class="s">"admin"</span>):
+    <span class="bi">print</span>(f<span class="s">"{event.user} — {event.activity}"</span>)
 
 <span class="cm"># Filter by JQL and time range</span>
 <span class="kw">from</span> datetime <span class="kw">import</span> datetime, timedelta
@@ -719,7 +723,7 @@ events = client.events.<span class="fn">list</span>(
     <h2 class="text-3xl font-bold mb-2">URL Lists</h2>
     <p class="text-slate-500 text-sm mb-8"><code>client.url_lists</code> &mdash; Full CRUD for URL allow/block lists and policy deployment via <code>/api/v2/policy/urllist</code></p>
     <div class="code-block p-5 mb-8">
-<code><span class="cm"># List all URL lists</span>
+<code><span class="cm"># List all URL lists. list() also takes the API's `pending` and `field` filters.</span>
 <span class="kw">for</span> url_list <span class="kw">in</span> client.url_lists.<span class="fn">list</span>():
     <span class="bi">print</span>(f<span class="s">"[{url_list.id}] {url_list.name}: {len(url_list.urls)} URLs ({url_list.type})"</span>)
 <span class="cm"># → [1] Exceptions to prohibited sites: 5 URLs (exact)</span>
@@ -745,7 +749,8 @@ updated = client.url_lists.<span class="fn">update</span>(
     urls=[<span class="s">"malware.example.com"</span>, <span class="s">"phishing.bad.org"</span>, <span class="s">"new-threat.evil.net"</span>],
 )
 
-<span class="cm"># Deploy all pending policy changes (required after create/update/delete)</span>
+<span class="cm"># Deploy all pending policy changes (POST /policy/urllist/deploy),</span>
+<span class="cm"># required after create/update/delete</span>
 client.url_lists.<span class="fn">deploy</span>()
 
 <span class="cm"># Delete</span>
@@ -763,7 +768,7 @@ client.url_lists.<span class="fn">deploy</span>()</code></div>
         <tr class="border-b border-slate-100 param-row"><td class="pr-4"><code>name</code></td><td class="pr-4"><code>str | None</code></td><td>Human-readable name</td></tr>
         <tr class="border-b border-slate-100 param-row"><td class="pr-4"><code>type</code></td><td class="pr-4"><code>str | None</code></td><td>Matching strategy: <code>"exact"</code> or <code>"regex"</code></td></tr>
         <tr class="border-b border-slate-100 param-row"><td class="pr-4"><code>urls</code></td><td class="pr-4"><code>list[str]</code></td><td>The URL entries</td></tr>
-        <tr class="border-b border-slate-100 param-row"><td class="pr-4"><code>pending</code></td><td class="pr-4"><code>bool | None</code></td><td>Whether changes await deployment</td></tr>
+        <tr class="border-b border-slate-100 param-row"><td class="pr-4"><code>pending</code></td><td class="pr-4"><code>int | bool | None</code></td><td>The API declares this an integer &mdash; <code>1</code> when the list has undeployed changes</td></tr>
         <tr class="param-row"><td class="pr-4"><code>modify_by</code></td><td class="pr-4"><code>str | None</code></td><td>Last modified by (admin email)</td></tr>
     </tbody></table></div>
 </section>
@@ -786,8 +791,8 @@ client.url_lists.<span class="fn">deploy</span>()</code></div>
 pub = client.publishers.<span class="fn">get</span>(<span class="nb">109</span>)
 <span class="bi">print</span>(f<span class="s">"{pub.publisher_name} — registered={pub.registered}"</span>)
 
-<span class="cm"># Create a new publisher</span>
-new_pub = client.publishers.<span class="fn">create</span>(name=<span class="s">"aws-us-east-1-publisher"</span>)
+<span class="cm"># Create a new publisher — lbroker_connect goes out as `lbrokerconnect`</span>
+new_pub = client.publishers.<span class="fn">create</span>(name=<span class="s">"aws-us-east-1-publisher"</span>, lbroker_connect=<span class="nb">True</span>)
 
 <span class="cm"># Update</span>
 client.publishers.<span class="fn">update</span>(new_pub.publisher_id, name=<span class="s">"aws-us-east-1-primary"</span>)
@@ -800,10 +805,10 @@ client.publishers.<span class="fn">delete</span>(new_pub.publisher_id)</code></d
     <tbody class="text-slate-600">
         <tr class="border-b border-slate-100 param-row"><td class="pr-4"><code>publisher_id</code></td><td class="pr-4"><code>int | None</code></td><td>Numeric identifier</td></tr>
         <tr class="border-b border-slate-100 param-row"><td class="pr-4"><code>publisher_name</code></td><td class="pr-4"><code>str | None</code></td><td>Human-readable name</td></tr>
-        <tr class="border-b border-slate-100 param-row"><td class="pr-4"><code>status</code></td><td class="pr-4"><code>str | None</code></td><td><code>"connected"</code> or <code>"not_connected"</code></td></tr>
+        <tr class="border-b border-slate-100 param-row"><td class="pr-4"><code>status</code></td><td class="pr-4"><code>str | None</code></td><td><code>"connected"</code> or <code>"not registered"</code> (<code>PublisherStatus.NOT_REGISTERED</code>)</td></tr>
         <tr class="border-b border-slate-100 param-row"><td class="pr-4"><code>apps_count</code></td><td class="pr-4"><code>int | None</code></td><td>Number of apps assigned to this publisher</td></tr>
         <tr class="border-b border-slate-100 param-row"><td class="pr-4"><code>registered</code></td><td class="pr-4"><code>bool | None</code></td><td>Registration status</td></tr>
-        <tr class="param-row"><td class="pr-4"><code>sticky_ip_enabled</code></td><td class="pr-4"><code>bool | None</code></td><td>Whether sticky IP is enabled</td></tr>
+        <tr class="param-row"><td class="pr-4"><code>lbrokerconnect</code></td><td class="pr-4"><code>bool | None</code></td><td>Whether the publisher connects through a local broker</td></tr>
     </tbody></table></div>
 </section>
 
@@ -819,6 +824,11 @@ client.publishers.<span class="fn">delete</span>(new_pub.publisher_id)</code></d
     <span class="bi">print</span>(f<span class="s">"{app.app_name} → {app.host}:{app.port}"</span>)
 <span class="cm"># → [Portal Test] → npaportal.mynetskopedemo.com:443</span>
 <span class="cm"># → [Finance MyNetskopeDemo] → finance.mynetskopedemo.com:443</span>
+
+<span class="cm"># Each filter argument becomes one term of the single `query` expression</span>
+<span class="cm"># the endpoint takes, joined with `and`, so this is sent as</span>
+<span class="cm"># query=name sw Portal and in_policy eq yes.</span>
+apps = client.private_apps.<span class="fn">list</span>(app_name=<span class="s">"Portal"</span>, in_policy=<span class="nb">True</span>).<span class="fn">to_list</span>()
 
 <span class="cm"># Get by ID</span>
 app = client.private_apps.<span class="fn">get</span>(<span class="nb">110</span>)
@@ -884,7 +894,8 @@ user = client.scim.users.<span class="fn">create</span>(
 )
 <span class="bi">print</span>(f<span class="s">"Created user: {user.id}"</span>)
 
-<span class="cm"># Update (PATCH) — a dict of the fields to change</span>
+<span class="cm"># Update (PATCH) — a dict of the fields to change.</span>
+<span class="cm"># Returns None on the documented 204, or the decoded user if a tenant sends one.</span>
 client.scim.users.<span class="fn">update</span>(user.id, {<span class="s">"active"</span>: <span class="nb">False</span>})
 
 <span class="cm"># Delete</span>
@@ -894,7 +905,11 @@ client.scim.users.<span class="fn">delete</span>(user.id)</code></div>
     <div class="code-block p-5 mb-8">
 <code><span class="cm"># List all groups</span>
 <span class="kw">for</span> group <span class="kw">in</span> client.scim.groups.<span class="fn">list</span>():
-    <span class="bi">print</span>(f<span class="s">"{group.display_name}: {len(group.members)} members"</span>)
+    <span class="bi">print</span>(group.display_name)
+
+<span class="cm"># Members are excluded by default — ask for them by name</span>
+group = client.scim.groups.<span class="fn">get</span>(<span class="s">"group-id"</span>, attributes=<span class="s">"members"</span>)
+<span class="bi">print</span>(f<span class="s">"{group.display_name}: {len(group.members)} members"</span>)
 
 <span class="cm"># Create a group with members</span>
 group = client.scim.groups.<span class="fn">create</span>(
@@ -942,7 +957,8 @@ client.incidents.<span class="fn">update</span>(
 
 <span class="cm"># Get User Confidence Index (risk score)</span>
 uci = client.incidents.<span class="fn">get_uci</span>(<span class="s">"bob@company.com"</span>)
-<span class="bi">print</span>(f<span class="s">"Risk score: {uci.score}, severity: {uci.severity}"</span>)
+latest = uci.confidences[-<span class="nb">1</span>] <span class="kw">if</span> uci.confidences <span class="kw">else</span> <span class="nb">None</span>
+<span class="bi">print</span>(f<span class="s">"Latest confidence: {latest.confidence_score if latest else 'n/a'}"</span>)
 
 <span class="cm"># Get UBA anomalies for specific users</span>
 anomalies = client.incidents.<span class="fn">get_anomalies</span>(
@@ -966,20 +982,23 @@ forensics = client.incidents.<span class="fn">get_forensics</span>(<span class="
     <h2 class="text-3xl font-bold mb-2">Steering &amp; Infrastructure</h2>
     <p class="text-slate-500 text-sm mb-8"><code>client.steering</code> &mdash; Steering configuration, PoPs, and IPSec tunnels</p>
     <div class="code-block p-5 mb-6">
-<code><span class="cm"># Get NPA steering configuration</span>
+<code><span class="cm"># Get NPA steering configuration. "npa" and "publishers" are the only</span>
+<span class="cm"># scopes with an endpoint; any other scope is rejected before a request.</span>
 config = client.steering.<span class="fn">get_config</span>(<span class="s">"npa"</span>)
 <span class="bi">print</span>(config.data)
 
-<span class="cm"># Update steering configuration — settings is the PATCH body</span>
-client.steering.<span class="fn">update_config</span>(<span class="s">"npa"</span>, settings={<span class="s">"some_setting"</span>: <span class="s">"value"</span>})
+<span class="cm"># Update steering configuration — settings is the PATCH body (values are 0 or 1)</span>
+client.steering.<span class="fn">update_config</span>(<span class="s">"npa"</span>, settings={<span class="s">"npa_enabled"</span>: <span class="nb">1</span>})
 
-<span class="cm"># List Points of Presence (PoPs)</span>
+<span class="cm"># List Points of Presence (PoPs). `country` is a query filter on the</span>
+<span class="cm"># endpoint, not a response field — the record carries `location`.</span>
 <span class="kw">for</span> pop <span class="kw">in</span> client.steering.<span class="fn">list_pops</span>():
-    <span class="bi">print</span>(f<span class="s">"{pop.name} — {pop.region} ({pop.country})"</span>)
+    <span class="bi">print</span>(f<span class="s">"{pop.name} — {pop.region} ({pop.location})"</span>)
 
-<span class="cm"># List IPSec tunnels</span>
+<span class="cm"># List IPSec tunnels. The record is keyed by site and reports `enabled`,</span>
+<span class="cm"># even though create_tunnel()/update_tunnel() write the API's `enable`.</span>
 <span class="kw">for</span> tunnel <span class="kw">in</span> client.steering.<span class="fn">list_tunnels</span>():
-    <span class="bi">print</span>(f<span class="s">"{tunnel.name}: {tunnel.status}"</span>)
+    <span class="bi">print</span>(f<span class="s">"{tunnel.site}: enabled={tunnel.enabled}"</span>)
 
 <span class="cm"># Get specific tunnel</span>
 tunnel = client.steering.<span class="fn">get_tunnel</span>(<span class="nb">42</span>)</code></div>
@@ -1067,17 +1086,37 @@ client.npa.<span class="fn">search</span>(<span class="s">"private_apps"</span>,
 
     <h3 class="font-semibold text-xl mb-3">Probes &amp; Alert Rules</h3>
     <div class="code-block p-5 mb-8">
-<code><span class="cm"># Application probes — client.dem.probes</span>
+<code><span class="cm"># Application probes — client.dem.probes. A probe follows an app named by</span>
+<span class="cm"># app_name (predefined) or app_id (custom); frequency is in minutes.</span>
+<span class="cm"># There is no target, protocol, or interval — passing one raises.</span>
 probes = client.dem.probes.<span class="fn">list</span>()
-probe = client.dem.probes.<span class="fn">create</span>(<span class="s">"portal-check"</span>, <span class="s">"https://portal.example.com"</span>, protocol=<span class="s">"https"</span>)
-client.dem.probes.<span class="fn">update</span>(probe_id, {<span class="s">"interval"</span>: <span class="nb">60</span>})
+probe = client.dem.probes.<span class="fn">create</span>(
+    <span class="s">"slack-probe"</span>,
+    frequency=<span class="nb">5</span>,
+    entity={<span class="s">"user"</span>: [<span class="s">"alice@example.com"</span>], <span class="s">"group"</span>: [], <span class="s">"ou"</span>: []},
+    os=[<span class="s">"windows"</span>, <span class="s">"mac"</span>],
+    device_classification=[<span class="s">"managed"</span>],
+    app_name=<span class="s">"Slack"</span>,
+)
+client.dem.probes.<span class="fn">update</span>(probe_id, {<span class="s">"frequency"</span>: <span class="nb">10</span>})
 client.dem.probes.<span class="fn">delete</span>(probe_id)
 
 <span class="cm"># Network probes (read/update/delete) — client.dem.network_probes</span>
 client.dem.network_probes.<span class="fn">list</span>()
 
-<span class="cm"># Alert rules — client.dem.alert_rules</span>
-rule = client.dem.alert_rules.<span class="fn">create</span>(<span class="s">"latency-high"</span>, metric=<span class="s">"latency"</span>, threshold=<span class="nb">200</span>, severity=<span class="s">"high"</span>)</code></div>
+<span class="cm"># Alert rules — client.dem.alert_rules. metric/threshold build the nested</span>
+<span class="cm"># criteria the API expects; there is no probe_id — scope a rule with</span>
+<span class="cm"># criteria.condition.filter. list() sends category/type/enabled/severity;</span>
+<span class="cm"># limit and offset slice the decoded result in the SDK.</span>
+rules = client.dem.alert_rules.<span class="fn">list</span>(category=<span class="s">"User Experience"</span>, enabled=<span class="nb">True</span>)
+rule = client.dem.alert_rules.<span class="fn">create</span>(
+    <span class="s">"low-experience-score"</span>,
+    metric=<span class="s">"userDemScore"</span>,
+    threshold=<span class="nb">2000</span>,
+    severity=<span class="s">"high"</span>,
+    category=<span class="s">"User Experience"</span>,
+    type=<span class="s">"Experience Score"</span>,
+)</code></div>
 
     <h3 class="font-semibold text-xl mb-3">Alerts &amp; Ad-hoc Query</h3>
     <div class="code-block p-5 mb-8">
@@ -1087,12 +1126,16 @@ rule = client.dem.alert_rules.<span class="fn">create</span>(<span class="s">"la
 alert = client.dem.alerts.<span class="fn">get</span>(<span class="s">"alert-id"</span>)
 entities = client.dem.alerts.<span class="fn">entities</span>(<span class="s">"alert-id"</span>)
 
-<span class="cm"># Ad-hoc query engine (privileged) — client.dem.query</span>
+<span class="cm"># Ad-hoc query engine (privileged) — client.dem.query.</span>
+<span class="cm"># begin/end go out as {"absolute": "&lt;RFC 3339&gt;"} objects; a bare int is</span>
+<span class="cm"># read as epoch milliseconds. agent_status and client_status are state</span>
+<span class="cm"># sources — read them with get_states(), which get_data() points you to.</span>
 <span class="kw">from</span> datetime <span class="kw">import</span> datetime, timedelta
 data = client.dem.query.<span class="fn">get_data</span>(
-    <span class="s">"page"</span>, select=[<span class="s">"user"</span>, <span class="s">"exp_score"</span>],
+    <span class="s">"ux_score"</span>, select=[<span class="s">"user"</span>, <span class="s">"exp_score"</span>],
     begin=datetime.<span class="fn">now</span>() - timedelta(hours=<span class="nb">1</span>), end=datetime.<span class="fn">now</span>(),
 )
+states = client.dem.query.<span class="fn">get_states</span>(<span class="s">"client_status"</span>, select=[<span class="s">"user"</span>])
 
 <span class="cm"># Discovered apps — client.dem.apps</span>
 apps = client.dem.apps.<span class="fn">list</span>()</code></div>
@@ -1179,20 +1222,22 @@ members = client.users.groups.<span class="fn">members</span>(<span class="s">"E
 
 role = client.rbac.roles.<span class="fn">get</span>(<span class="nb">7</span>)
 
-<span class="cm"># Create a scoped role with API-group permissions</span>
+<span class="cm"># Create a scoped role with API-group permissions. Entries are keyed by</span>
+<span class="cm"># apiGroupId; permission is one of none, r, rw, rwa.</span>
 role = client.rbac.roles.<span class="fn">create</span>(
     <span class="s">"SOC Analyst"</span>,
     description=<span class="s">"Read-only incident access"</span>,
-    api_groups=[{<span class="s">"name"</span>: <span class="s">"Incidents"</span>, <span class="s">"permission"</span>: <span class="s">"read"</span>}],
+    api_groups=[{<span class="s">"apiGroupId"</span>: <span class="nb">1</span>, <span class="s">"permission"</span>: <span class="s">"r"</span>}],
 )
 client.rbac.roles.<span class="fn">update</span>(role.id, description=<span class="s">"Updated"</span>)
 client.rbac.roles.<span class="fn">delete</span>(role.id)</code></div>
 
     <h3 class="font-semibold text-xl mb-3">Administrators &mdash; <code>client.rbac.admins</code></h3>
+    <p class="text-slate-600 text-sm mb-3"><code>admins.list()</code> yields <code>AdminUser</code>, which types the platform admin record: <code>metadata</code>, <code>record_type</code>, <code>provisioned_by</code>, and <code>role</code> from the Netskope SCIM extension. It subclasses <code>ScimUser</code>, whose <code>display_name</code>, <code>emails</code>, <code>name</code>, and <code>groups</code> are never populated for an admin. <code>page_size</code> must be between 1 and 1000.</p>
     <div class="code-block p-5 mb-8">
-<code><span class="cm"># List admins (SCIM-paginated ScimUser records)</span>
+<code><span class="cm"># List admins (SCIM-paginated AdminUser records)</span>
 <span class="kw">for</span> admin <span class="kw">in</span> client.rbac.admins.<span class="fn">list</span>():
-    <span class="bi">print</span>(f<span class="s">"{admin.user_name} active={admin.active}"</span>)
+    <span class="bi">print</span>(f<span class="s">"{admin.user_name} {admin.record_type} role={admin.role}"</span>)
 
 <span class="cm"># Filter with SCIM syntax</span>
 admins = client.rbac.admins.<span class="fn">list</span>(filter_expr=<span class="s">'userName co "@example.com"'</span>).<span class="fn">to_list</span>()</code></div>
@@ -1232,10 +1277,11 @@ token = client.tokens.<span class="fn">create</span>(
 )
 <span class="bi">print</span>(<span class="s">"Secret:"</span>, token.token)
 
-<span class="cm"># Update, reissue (rotate the secret), and revoke</span>
+<span class="cm"># Update, reissue (rotate the secret), revoke, and delete</span>
 client.tokens.<span class="fn">update</span>(token.id, name=<span class="s">"ci-automation-v2"</span>)
 rotated = client.tokens.<span class="fn">reissue</span>(token.id)
-client.tokens.<span class="fn">revoke</span>(token.id)  <span class="cm"># alias of .delete()</span></code></div>
+client.tokens.<span class="fn">revoke</span>(token.id)  <span class="cm"># PATCH {"operation": "revoke"} — the record stays</span>
+client.tokens.<span class="fn">delete</span>(token.id)  <span class="cm"># DELETE — a separate operation</span></code></div>
 
     <h3 class="font-semibold text-lg mb-3">ApiToken Model Fields</h3>
     <div class="overflow-x-auto"><table class="w-full text-sm border-collapse"><thead><tr class="text-left border-b-2 border-slate-200"><th class="py-2 pr-4 font-semibold">Field</th><th class="py-2 pr-4 font-semibold">Type</th><th class="py-2 font-semibold">Description</th></tr></thead>
@@ -1294,12 +1340,16 @@ client.devices.tags.<span class="fn">delete</span>(tag.id)</code></div>
 <span class="kw">for</span> profile <span class="kw">in</span> client.dns.<span class="fn">list</span>():
     <span class="bi">print</span>(f<span class="s">"[{profile.id}] {profile.name} — log_traffic={profile.log_traffic}"</span>)
 
+<span class="cm"># Writes default to interactive=True, so the change waits in a Pending-*</span>
+<span class="cm"># state; pass interactive=False to deploy on write instead.</span>
 profile = client.dns.<span class="fn">create</span>(<span class="s">"corp-dns"</span>)
-client.dns.<span class="fn">update</span>(profile.id, description=<span class="s">"Corporate resolver"</span>, log_traffic=<span class="nb">True</span>)
+client.dns.<span class="fn">update</span>(profile.id, description=<span class="s">"Corporate resolver"</span>, log_traffic=<span class="s">"All DNS"</span>)
 client.dns.<span class="fn">delete</span>(profile.id)
 
-<span class="cm"># Changes are staged — deploy them (all or by id)</span>
-client.dns.<span class="fn">deploy</span>(all=<span class="nb">True</span>, change_note=<span class="s">"quarterly update"</span>)
+<span class="cm"># Deploy the staged changes. Deploying by id requires a change_note;</span>
+<span class="cm"># deploy(all=True) does not.</span>
+client.dns.<span class="fn">deploy</span>(ids=[profile.id], change_note=<span class="s">"quarterly update"</span>)
+client.dns.<span class="fn">deploy</span>(all=<span class="nb">True</span>)
 
 <span class="cm"># Reference data</span>
 client.dns.<span class="fn">list_domain_categories</span>()
@@ -1322,7 +1372,7 @@ client.dns.inheritance_groups.<span class="fn">deploy</span>(all=<span class="nb
         <tr class="border-b border-slate-100 param-row"><td class="pr-4"><code>id</code></td><td class="pr-4"><code>str | int | None</code></td><td>Profile identifier</td></tr>
         <tr class="border-b border-slate-100 param-row"><td class="pr-4"><code>name</code></td><td class="pr-4"><code>str | None</code></td><td>Profile name</td></tr>
         <tr class="border-b border-slate-100 param-row"><td class="pr-4"><code>description</code></td><td class="pr-4"><code>str | None</code></td><td>Description</td></tr>
-        <tr class="param-row"><td class="pr-4"><code>log_traffic</code></td><td class="pr-4"><code>str | bool | None</code></td><td>Whether DNS traffic is logged</td></tr>
+        <tr class="param-row"><td class="pr-4"><code>log_traffic</code></td><td class="pr-4"><code>str | bool | None</code></td><td>A logging mode, not a boolean: <code>"Blocked DNS"</code> or <code>"All DNS"</code></td></tr>
     </tbody></table></div>
 </section>
 
@@ -1334,16 +1384,21 @@ client.dns.inheritance_groups.<span class="fn">deploy</span>(all=<span class="nb
     <p class="text-slate-500 text-sm mb-8"><code>client.cci</code> &mdash; Cloud Confidence Index app lookups and custom app tags via <code>/api/v2/services/cci</code></p>
     <h3 class="font-semibold text-lg mb-3">Key Methods</h3>
     <ul class="space-y-1.5 text-sm text-slate-600 mb-6 list-disc pl-5">
-        <li><code>lookup_app(app_name, *, category=, ccl=, tag=, connector=, discovered=, limit=, offset=)</code> &mdash; look up CCI metadata for an app</li>
+        <li><code>lookup_app(app_name, *, category=, ccl=, tag=, connector=, discovered=, limit=, offset=)</code> &mdash; look up CCI metadata for an app (the exact name; there is no listing or wildcard search)</li>
         <li><code>cci.tags.list()</code>, <code>create()</code>, <code>update()</code>, <code>delete()</code>, <code>list_rules()</code>, <code>supported_attributes()</code> &mdash; manage app tags</li>
     </ul>
+    <p class="text-slate-600 text-sm mb-4"><code>connector</code> and <code>discovered</code> are presence flags: <code>True</code> narrows the result, and omitting them (or passing <code>False</code>) applies no filter. Neither has a "false" form, so there is no connector-less or sanctioned-only mode.</p>
     <div class="code-block p-5">
 <code><span class="cm"># Look up an app's Cloud Confidence Index</span>
-info = client.cci.<span class="fn">lookup_app</span>(<span class="s">"Dropbox"</span>)
+info = client.cci.<span class="fn">lookup_app</span>(<span class="s">"Dropbox"</span>, ccl=<span class="s">"high"</span>, discovered=<span class="nb">True</span>)
 
 <span class="cm"># Tag apps — client.cci.tags</span>
 client.cci.tags.<span class="fn">create</span>(<span class="s">"sanctioned"</span>, apps=[<span class="s">"Box"</span>, <span class="s">"Google Drive"</span>])
-tags = client.cci.tags.<span class="fn">list</span>()</code></div>
+
+<span class="cm"># list() returns the API envelope, not a list</span>
+catalog = client.cci.tags.<span class="fn">list</span>()
+<span class="kw">for</span> name <span class="kw">in</span> catalog[<span class="s">"data"</span>][<span class="s">"tags"</span>]:
+    <span class="bi">print</span>(name)</code></div>
 </section>
 
 <div class="section-divider max-w-4xl mx-auto"></div>
@@ -1354,16 +1409,17 @@ tags = client.cci.tags.<span class="fn">list</span>()</code></div>
     <p class="text-slate-500 text-sm mb-8"><code>client.enrollment</code> &mdash; Device enrollment token sets via <code>/api/v2/enrollment/tokenset</code></p>
     <h3 class="font-semibold text-lg mb-3">Key Methods</h3>
     <ul class="space-y-1.5 text-sm text-slate-600 mb-6 list-disc pl-5">
-        <li><code>list_token_sets(*, limit=, offset=)</code> &mdash; list enrollment token sets</li>
-        <li><code>create_token_set(name, *, max_devices=)</code> &mdash; create a token set</li>
+        <li><code>list_token_sets()</code> &mdash; list enrollment token sets; the operation declares no parameters</li>
+        <li><code>create_token_set()</code> &mdash; create a token set; the operation declares no request body</li>
         <li><code>update_token_set(token_id, *, token_type=, valid_until=, enforce_status=)</code></li>
         <li><code>delete_token_set(token_id)</code>, <code>delete_token_type(token_id, token_type)</code></li>
     </ul>
+    <p class="text-slate-600 text-sm mb-4">Passing <code>name</code>, <code>max_devices</code>, <code>limit</code>, or <code>offset</code> raises a <code>DeprecationWarning</code> and sends nothing &mdash; the endpoints have nowhere to carry them.</p>
     <div class="code-block p-5">
 <code><span class="kw">for</span> ts <span class="kw">in</span> client.enrollment.<span class="fn">list_token_sets</span>():
-    <span class="bi">print</span>(ts.name)
+    <span class="bi">print</span>(ts.id, ts.enforce_status)
 
-ts = client.enrollment.<span class="fn">create_token_set</span>(<span class="s">"contractors"</span>, max_devices=<span class="nb">50</span>)</code></div>
+ts = client.enrollment.<span class="fn">create_token_set</span>()</code></div>
 </section>
 
 <div class="section-divider max-w-4xl mx-auto"></div>
@@ -1421,13 +1477,15 @@ sigs = client.ips.<span class="fn">search_signatures</span>(cvss_severity=[<span
         <li><code>scan_file(filename, content, *, scan_type="sandbox")</code>, <code>scan_file_path(path, *, scan_type="sandbox")</code></li>
         <li><code>get_report(job_id)</code>, <code>get_scan_result(submission_id)</code>, <code>get_submission_report(submission_id)</code></li>
     </ul>
+    <p class="text-slate-600 text-sm mb-4">The sandbox upload is a <code>multipart/form-data</code> POST with a required <code>scantype</code> query parameter. The file must be a ZipCrypto archive (password <code>infected</code>) holding exactly one exe/pdf/doc/xls/ppt/rtf member of at most 16&nbsp;MB; anything else raises <code>ValidationError</code> before the request is built.</p>
     <div class="code-block p-5">
 <code><span class="cm"># Submit a URL for sandbox analysis</span>
 job = client.atp.<span class="fn">scan_url</span>(<span class="s">"http://suspicious.example.com"</span>)
 report = client.atp.<span class="fn">get_url_report</span>(job[<span class="s">"submission_id"</span>])
 
-<span class="cm"># Scan a file from disk</span>
-result = client.atp.<span class="fn">scan_file_path</span>(<span class="s">"/tmp/sample.exe"</span>)</code></div>
+<span class="cm"># Scan an encrypted archive from disk, then read its report by jobid</span>
+result = client.atp.<span class="fn">scan_file_path</span>(<span class="s">"/tmp/sample.zip"</span>)
+report = client.atp.<span class="fn">get_report</span>(result[<span class="s">"jobid"</span>])</code></div>
 </section>
 
 <div class="section-divider max-w-4xl mx-auto"></div>
@@ -1461,14 +1519,25 @@ iocs = client.nsiq.<span class="fn">lookup_iocs</span>([<span class="s">"44d8861
     <ul class="space-y-1.5 text-sm text-slate-600 mb-6 list-disc pl-5">
         <li><code>list_templates(...)</code>, <code>get_template(template_id)</code>, <code>get_default_template()</code>, <code>create_template(data)</code>, <code>update_template(id, data)</code>, <code>delete_template(id)</code></li>
         <li><code>deploy_templates(ids, *, deploy_all=, note=)</code>, <code>revert_templates(ids)</code>, <code>restore_template(id)</code></li>
-        <li><code>get_cdr()</code>/<code>update_cdr()</code>/<code>list_cdr_vendors()</code>/<code>test_cdr_config()</code>, <code>get_cloud_storage()</code>/<code>update_cloud_storage()</code></li>
+        <li><code>get_cdr()</code>/<code>update_cdr()</code>/<code>list_cdr_vendors()</code>/<code>test_cdr_config()</code>/<code>restore_cdr()</code>, <code>get_cloud_storage()</code>/<code>update_cloud_storage()</code></li>
         <li><code>list_applications()</code>, <code>list_supported_browsers()</code>, <code>list_default_categories()</code></li>
     </ul>
+    <p class="text-slate-600 text-sm mb-4"><code>restore_cdr()</code> is a <code>PUT</code> that resets the CDR configuration to factory defaults &mdash; it empties <code>cdr_data</code> and clears <code>active_vendor</code>. <code>test_cdr_config()</code> is a <code>GET</code>: the vendor settings travel as query values, and an inline <code>api_key</code> is sent in the <code>X-CDR-Api-Key</code> header rather than on the URL.</p>
     <div class="code-block p-5">
-<code><span class="kw">for</span> tpl <span class="kw">in</span> client.rbi.<span class="fn">list_templates</span>()[<span class="s">"templates"</span>]:
-    <span class="bi">print</span>(tpl[<span class="s">"name"</span>])
+<code><span class="cm"># The template list is an items/total_count page</span>
+<span class="kw">for</span> tpl <span class="kw">in</span> client.rbi.<span class="fn">list_templates</span>(limit=<span class="nb">10</span>)[<span class="s">"items"</span>]:
+    <span class="bi">print</span>(tpl[<span class="s">"metadata"</span>][<span class="s">"template_id"</span>])
 
-client.rbi.<span class="fn">deploy_templates</span>(deploy_all=<span class="nb">True</span>, note=<span class="s">"rollout"</span>)</code></div>
+<span class="cm"># Or take the typed page, which validates the records</span>
+page = client.rbi.with_response.<span class="fn">list_templates</span>(limit=<span class="nb">10</span>).<span class="fn">parse</span>()
+
+client.rbi.<span class="fn">deploy_templates</span>(deploy_all=<span class="nb">True</span>, note=<span class="s">"rollout"</span>)
+
+<span class="cm"># CDR connectivity test — no configuration is persisted</span>
+result = client.rbi.<span class="fn">test_cdr_config</span>(
+    vendor=<span class="s">"votiro"</span>, endpoint_url=<span class="s">"https://votiro.example.com"</span>,
+)
+<span class="bi">print</span>(result[<span class="s">"test_result"</span>][<span class="s">"success"</span>])</code></div>
 </section>
 
 <div class="section-divider max-w-4xl mx-auto"></div>
@@ -1479,14 +1548,26 @@ client.rbi.<span class="fn">deploy_templates</span>(deploy_all=<span class="nb">
     <p class="text-slate-500 text-sm mb-8"><code>client.dspm</code> &mdash; Data Security Posture Management resources, analytics, and scans via <code>/api/v2/dspm</code></p>
     <h3 class="font-semibold text-lg mb-3">Key Methods</h3>
     <ul class="space-y-1.5 text-sm text-slate-600 mb-6 list-disc pl-5">
-        <li><code>list_resources(resource_type, *, filter_expr=, sort_by=, sort_order=, limit=, offset=)</code></li>
-        <li><code>analytics(metric_type)</code> &mdash; posture analytics for a metric</li>
-        <li><code>connect_datastores(ids)</code>, <code>scan_datastores(ids)</code></li>
+        <li><code>list_resources(resource_type, *, filter_expr=, sort_by=, sort_order=, limit=, offset=)</code> and <code>list_page(...)</code> &mdash; both route by the names <code>supported_resource_types()</code> reports</li>
+        <li><code>analytics(metric_type)</code> &mdash; one of two reports: <code>"sensitivity_score_distribution"</code> (no parameters) or <code>"privilege_risks"</code></li>
+        <li><code>connect_datastore(request)</code>, <code>start_scan(datastore_id)</code>, <code>scan_datastores(ids)</code></li>
     </ul>
+    <p class="text-slate-600 text-sm mb-4">There is no bulk connect-by-id operation: <code>connect_datastores(ids)</code> raises and names <code>connect_datastore(request)</code>, which sends one <code>DataStoreRequest</code>. <code>scan_datastores(ids)</code> loops the single-datastore start-scan operation and stops at the first failure; HTTP 202 acknowledges the request, it does not mean the scan finished.</p>
     <div class="code-block p-5">
-<code><span class="cm"># List discovered databases and kick off a scan</span>
-stores = client.dspm.<span class="fn">list_resources</span>(<span class="s">"databases"</span>)
-client.dspm.<span class="fn">scan_datastores</span>([<span class="s">"store-id-1"</span>])</code></div>
+<code><span class="cm"># List connected databases and kick off a scan</span>
+stores = client.dspm.<span class="fn">list_resources</span>(<span class="s">"databases"</span>, sort_by=<span class="s">"name"</span>, limit=<span class="nb">20</span>)
+client.dspm.<span class="fn">scan_datastores</span>([<span class="s">"store-id-1"</span>])
+
+<span class="cm"># Connect one discovered datastore</span>
+client.dspm.<span class="fn">connect_datastore</span>({
+    <span class="s">"service_id"</span>: <span class="s">"svc-1"</span>,
+    <span class="s">"name"</span>: <span class="s">"prod-db"</span>,
+    <span class="s">"endpoint"</span>: <span class="s">"prod.example.internal"</span>,
+    <span class="s">"authentication_method"</span>: <span class="s">"iam"</span>,
+})
+
+<span class="cm"># Analytics</span>
+client.dspm.<span class="fn">analytics</span>(<span class="s">"sensitivity_score_distribution"</span>)</code></div>
 </section>
 
 <div class="section-divider max-w-4xl mx-auto"></div>
@@ -1497,13 +1578,20 @@ client.dspm.<span class="fn">scan_datastores</span>([<span class="s">"store-id-1
     <p class="text-slate-500 text-sm mb-8"><code>client.spm</code> &mdash; SaaS Security Posture Management app inventory &amp; posture scoring via <code>/api/v2/spm</code></p>
     <h3 class="font-semibold text-lg mb-3">Key Methods</h3>
     <ul class="space-y-1.5 text-sm text-slate-600 mb-6 list-disc pl-5">
-        <li><code>list_apps()</code>, <code>get_app(app_name)</code>, <code>inventory(*, filter=)</code></li>
-        <li><code>posture_score()</code>, <code>list_policy_rules()</code>, <code>recent_changes()</code></li>
+        <li><code>list_apps()</code> and <code>get_app(app_name)</code> &mdash; <code>POST /inventory/getresources</code>, aggregated by instance and by resource type. SPM has no <code>/apps</code> collection.</li>
+        <li><code>inventory(*, group_by=, fields=, limit=, offset=, filters=, ngl_query=, ...)</code> &mdash; the aggregation the operation requires; <code>filter=</code> is a deprecated alias for <code>ngl_query</code></li>
+        <li><code>posture_score()</code> &mdash; <code>POST /results/getposturescores</code>; <code>list_policy_rules()</code> &mdash; <code>GET /rules/list</code></li>
+        <li><code>recent_changes(*, start=, end=, app_name=, instance_name=)</code> &mdash; <code>POST /apps/recentchanges/getstats</code>; the time range is required</li>
     </ul>
     <div class="code-block p-5">
-<code><span class="cm"># List SaaS apps and get the overall posture score</span>
+<code><span class="cm"># List SaaS instances and get the overall posture score</span>
 apps = client.spm.<span class="fn">list_apps</span>()
-score = client.spm.<span class="fn">posture_score</span>()</code></div>
+detail = client.spm.<span class="fn">get_app</span>(<span class="s">"Microsoft 365"</span>)
+score = client.spm.<span class="fn">posture_score</span>()
+
+<span class="cm"># Configuration-change statistics need both bounds (epoch seconds or</span>
+<span class="cm"># aware datetimes); omitting them raises ValidationError.</span>
+changes = client.spm.<span class="fn">recent_changes</span>(start=<span class="nb">1758127874</span>, end=<span class="nb">1759127874</span>)</code></div>
 </section>
 
 <div class="section-divider max-w-4xl mx-auto"></div>
@@ -1733,7 +1821,7 @@ client.events.<span class="fn">list</span>(<span class="s">"application"</span>,
 <!-- ═══════════════════════ MODELS ═══════════════════════ -->
 <section id="models" class="max-w-4xl mx-auto px-6 py-16">
     <h2 class="text-3xl font-bold mb-2">Model Serialization</h2>
-    <p class="text-slate-600 mb-8">All response models are Pydantic v2 objects with full serialization support. They are frozen (immutable) and forward-compatible (unknown API fields are silently ignored, so new fields added by the API won't break existing code).</p>
+    <p class="text-slate-600 mb-8">All response models are Pydantic v2 objects with full serialization support. They are frozen (immutable) and forward-compatible: a key the model does not declare is kept as an extra rather than dropped, so a field the API adds is still reachable and still round-trips through <code>model_dump()</code>. Fields the API never returns have been removed from the models; anything a tenant does send arrives through those extras.</p>
     <div class="code-block p-5 mb-8">
 <code>alert = client.alerts.<span class="fn">list</span>().<span class="fn">first</span>()
 
@@ -1778,7 +1866,8 @@ AlertSeverity.HIGH      <span class="cm"># "high"</span>
 EventType.NETWORK       <span class="cm"># "network"</span>
 EventType.APPLICATION   <span class="cm"># "application"</span>
 IncidentStatus.OPEN     <span class="cm"># "open"</span>
-PublisherStatus.CONNECTED  <span class="cm"># "connected"</span>
+PublisherStatus.CONNECTED       <span class="cm"># "connected"</span>
+PublisherStatus.NOT_REGISTERED  <span class="cm"># "not registered"</span>
 UrlListType.EXACT       <span class="cm"># "exact"</span>
 UrlListType.REGEX       <span class="cm"># "regex"</span></code></div>
 </section>
@@ -1792,7 +1881,7 @@ UrlListType.REGEX       <span class="cm"># "regex"</span></code></div>
     <div class="overflow-x-auto"><table class="w-full text-sm border-collapse"><thead><tr class="text-left border-b-2 border-slate-200"><th class="py-2 pr-4 font-semibold">Namespace</th><th class="py-2 pr-4 font-semibold">Methods</th><th class="py-2 font-semibold">API Endpoint</th></tr></thead>
     <tbody class="text-slate-600">
         <tr class="border-b border-slate-100 param-row"><td class="pr-4 font-mono"><code>client.alerts</code></td><td class="pr-4"><code>list()</code>, <code>get(id)</code></td><td><code>/api/v2/events/datasearch/alert</code></td></tr>
-        <tr class="border-b border-slate-100 param-row"><td class="pr-4 font-mono"><code>client.events</code></td><td class="pr-4"><code>list(type)</code></td><td><code>/api/v2/events/datasearch/{type}</code></td></tr>
+        <tr class="border-b border-slate-100 param-row"><td class="pr-4 font-mono"><code>client.events</code></td><td class="pr-4"><code>list(type)</code>, <code>get(id)</code>, <code>transaction_metrics()</code></td><td><code>/api/v2/events/datasearch/{type}</code>, <code>/api/v2/events/data/audit</code>, <code>/api/v2/events/data/infrastructure</code></td></tr>
         <tr class="border-b border-slate-100 param-row"><td class="pr-4 font-mono"><code>client.url_lists</code></td><td class="pr-4"><code>list()</code>, <code>get()</code>, <code>create()</code>, <code>update()</code>, <code>delete()</code>, <code>deploy()</code></td><td><code>/api/v2/policy/urllist</code></td></tr>
         <tr class="border-b border-slate-100 param-row"><td class="pr-4 font-mono"><code>client.publishers</code></td><td class="pr-4"><code>list()</code>, <code>get()</code>, <code>create()</code>, <code>update()</code>, <code>delete()</code></td><td><code>/api/v2/infrastructure/publishers</code></td></tr>
         <tr class="border-b border-slate-100 param-row"><td class="pr-4 font-mono"><code>client.private_apps</code></td><td class="pr-4"><code>list()</code>, <code>get()</code>, <code>create()</code>, <code>update()</code>, <code>delete()</code></td><td><code>/api/v2/steering/apps/private</code></td></tr>
@@ -1805,18 +1894,18 @@ UrlListType.REGEX       <span class="cm"># "regex"</span></code></div>
         <tr class="border-b border-slate-100 param-row"><td class="pr-4 font-mono"><code>client.dns</code></td><td class="pr-4"><code>list()</code>, <code>get()</code>, <code>create()</code>, <code>update()</code>, <code>delete()</code>, <code>deploy()</code>, <code>inheritance_groups.*</code></td><td><code>/api/v2/profiles/dns</code></td></tr>
         <tr class="border-b border-slate-100 param-row"><td class="pr-4 font-mono"><code>client.users</code></td><td class="pr-4"><code>list()</code>, <code>get()</code>, <code>groups.list()</code>, <code>groups.get()</code>, <code>groups.members()</code></td><td><code>/api/v2/users/getusers</code>, <code>/getgroups</code></td></tr>
         <tr class="border-b border-slate-100 param-row"><td class="pr-4 font-mono"><code>client.rbac</code></td><td class="pr-4"><code>roles.list()</code>, <code>roles.get()</code>, <code>roles.create()</code>, <code>roles.update()</code>, <code>roles.delete()</code>, <code>admins.list()</code></td><td><code>/api/v2/rbac/roles</code></td></tr>
-        <tr class="border-b border-slate-100 param-row"><td class="pr-4 font-mono"><code>client.tokens</code></td><td class="pr-4"><code>list()</code>, <code>get()</code>, <code>create()</code>, <code>update()</code>, <code>reissue()</code>, <code>revoke()</code>/<code>delete()</code></td><td><code>/api/v2/auth/tokens</code></td></tr>
+        <tr class="border-b border-slate-100 param-row"><td class="pr-4 font-mono"><code>client.tokens</code></td><td class="pr-4"><code>list()</code>, <code>get()</code>, <code>create()</code>, <code>update()</code>, <code>reissue()</code>, <code>revoke()</code>, <code>delete()</code></td><td><code>/api/v2/auth/tokens</code></td></tr>
         <tr class="border-b border-slate-100 param-row"><td class="pr-4 font-mono"><code>client.devices</code></td><td class="pr-4"><code>list()</code>, <code>supported_os()</code>, <code>tags.list()</code>, <code>tags.create()</code>, <code>tags.update()</code>, <code>tags.delete()</code></td><td><code>/api/v2/steering/devices</code></td></tr>
-        <tr class="border-b border-slate-100 param-row"><td class="pr-4 font-mono"><code>client.enrollment</code></td><td class="pr-4"><code>list_token_sets()</code>, <code>create_token_set()</code>, <code>update_token_set()</code>, <code>delete_token_set()</code></td><td><code>/api/v2/enrollment/tokenset</code></td></tr>
+        <tr class="border-b border-slate-100 param-row"><td class="pr-4 font-mono"><code>client.enrollment</code></td><td class="pr-4"><code>list_token_sets()</code>, <code>create_token_set()</code> (both take no arguments), <code>update_token_set()</code>, <code>delete_token_set()</code></td><td><code>/api/v2/enrollment/tokenset</code></td></tr>
         <tr class="border-b border-slate-100 param-row"><td class="pr-4 font-mono"><code>client.notifications</code></td><td class="pr-4"><code>list_templates()</code>, <code>get_template()</code>, <code>create_template()</code>, <code>update_template()</code>, <code>delete_template()</code>, <code>get_delivery_settings()</code></td><td><code>/api/v2/notifications/user/*</code></td></tr>
         <tr class="border-b border-slate-100 param-row"><td class="pr-4 font-mono"><code>client.cci</code></td><td class="pr-4"><code>lookup_app()</code>, <code>tags.list()</code>, <code>tags.create()</code>, <code>tags.update()</code>, <code>tags.delete()</code></td><td><code>/api/v2/services/cci</code></td></tr>
         <tr class="border-b border-slate-100 param-row"><td class="pr-4 font-mono"><code>client.ips</code></td><td class="pr-4"><code>status()</code>, <code>search_signatures()</code>, <code>list_allowlist()</code>, <code>set_alert_only_mode()</code>, signature overrides</td><td><code>/api/v2/ips</code></td></tr>
         <tr class="border-b border-slate-100 param-row"><td class="pr-4 font-mono"><code>client.atp</code></td><td class="pr-4"><code>scan_url()</code>, <code>scan_file()</code>, <code>scan_file_path()</code>, <code>get_report()</code>, <code>get_url_report()</code></td><td><code>/api/v2/atp</code></td></tr>
         <tr class="border-b border-slate-100 param-row"><td class="pr-4 font-mono"><code>client.nsiq</code></td><td class="pr-4"><code>url_lookup()</code>, <code>recategorize()</code>, <code>lookup_iocs()</code>, <code>get_ioc()</code>, false-positive reporting</td><td><code>/api/v2/nsiq</code></td></tr>
         <tr class="border-b border-slate-100 param-row"><td class="pr-4 font-mono"><code>client.rbi</code></td><td class="pr-4"><code>list_templates()</code>, <code>create_template()</code>, <code>deploy_templates()</code>, CDR &amp; cloud-storage config</td><td><code>/api/v2/rbi</code></td></tr>
-        <tr class="border-b border-slate-100 param-row"><td class="pr-4 font-mono"><code>client.dspm</code></td><td class="pr-4"><code>list_resources()</code>, <code>analytics()</code>, <code>connect_datastores()</code>, <code>scan_datastores()</code></td><td><code>/api/v2/dspm</code></td></tr>
+        <tr class="border-b border-slate-100 param-row"><td class="pr-4 font-mono"><code>client.dspm</code></td><td class="pr-4"><code>list_resources()</code>, <code>list_page()</code>, <code>analytics()</code>, <code>connect_datastore()</code>, <code>start_scan()</code>, <code>scan_datastores()</code></td><td><code>/api/v2/dspm</code></td></tr>
         <tr class="border-b border-slate-100 param-row"><td class="pr-4 font-mono"><code>client.aicc</code></td><td class="pr-4"><code>applications.*</code>, <code>mcp_servers.*</code>, <code>identities.*</code>, <code>models.*</code>, <code>agents.*</code>, <code>analytics.*</code>, <code>data_coverage.*</code>, plus per-entity handles <code>application(name)</code>, <code>identity(name)</code>, <code>extension(name)</code>, <code>data_protection(provider)</code></td><td><code>/api/v2/aicc/*</code></td></tr>
-        <tr class="param-row"><td class="pr-4 font-mono"><code>client.spm</code></td><td class="pr-4"><code>list_apps()</code>, <code>get_app()</code>, <code>inventory()</code>, <code>posture_score()</code>, <code>list_policy_rules()</code></td><td><code>/api/v2/spm</code></td></tr>
+        <tr class="param-row"><td class="pr-4 font-mono"><code>client.spm</code></td><td class="pr-4"><code>list_apps()</code>, <code>get_app()</code>, <code>inventory()</code>, <code>posture_score()</code>, <code>list_policy_rules()</code>, <code>recent_changes(start=, end=)</code></td><td><code>/api/v2/spm</code></td></tr>
     </tbody></table></div>
 </section>
 

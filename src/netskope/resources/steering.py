@@ -39,10 +39,12 @@ _CLIENT_CONFIG_PATH = "/api/v2/steering/globalconfig/clientconfiguration"
 
 # Each config scope has its own endpoint.  Note that ``publishers`` does NOT
 # live under ``clientconfiguration`` — it has a dedicated globalconfig path.
+# ``npa_global_config.yaml`` declares exactly these two configurable scopes
+# (``/globalconfig/clientconfiguration/npa`` at :218, ``/globalconfig/publishers``
+# at :352); the SDK's former ``nsc`` and ``ztna`` scopes had no path behind them
+# and every call on them was a 404.
 _SCOPE_PATHS: dict[str, str] = {
     "npa": f"{_CLIENT_CONFIG_PATH}/npa",
-    "nsc": f"{_CLIENT_CONFIG_PATH}/nsc",
-    "ztna": f"{_CLIENT_CONFIG_PATH}/ztna",
     "publishers": "/api/v2/steering/globalconfig/publishers",
 }
 
@@ -50,6 +52,10 @@ _POPS_PATH = "/api/v2/steering/ipsec/pops"
 _TUNNELS_PATH = "/api/v2/steering/ipsec/tunnels"
 _DEVICES_PATH = "/api/v2/steering/devices"
 
+# The tiers and ciphers Netskope commonly provisions.  Neither
+# ``ipsec_tunnel_request_post`` nor ``_patch`` puts an enum on ``bandwidth``
+# (steering/ipsec.yaml:237-238) or ``encryption`` (:241-242), so these name the
+# usual values without shutting a tenant out of an unusual one.
 TUNNEL_BANDWIDTHS = (50, 100, 150, 200, 250, 1000)
 TUNNEL_ENCRYPTIONS = ("AES128-CBC", "AES256-CBC", "AES256-GCM")
 _TUNNEL_STATUSES = ("up", "down")
@@ -77,17 +83,18 @@ def _scope_path(scope: str) -> str:
 
 
 def _validate_bandwidth(bandwidth: int) -> None:
-    if bandwidth not in TUNNEL_BANDWIDTHS:
+    if isinstance(bandwidth, bool) or not isinstance(bandwidth, int) or bandwidth <= 0:
         raise ValidationError(
-            f"Invalid bandwidth {bandwidth!r}. "
-            f"Must be one of: {', '.join(str(b) for b in TUNNEL_BANDWIDTHS)}"
+            f"Invalid bandwidth {bandwidth!r}. Must be a positive integer in Mbps; "
+            f"Netskope commonly provisions {', '.join(str(b) for b in TUNNEL_BANDWIDTHS)}."
         )
 
 
 def _validate_encryption(encryption: str) -> None:
-    if encryption not in TUNNEL_ENCRYPTIONS:
+    if not isinstance(encryption, str) or not encryption.strip():
         raise ValidationError(
-            f"Invalid encryption {encryption!r}. Must be one of: {', '.join(TUNNEL_ENCRYPTIONS)}"
+            f"Invalid encryption {encryption!r}. Must be a cipher name; "
+            f"Netskope commonly provisions {', '.join(TUNNEL_ENCRYPTIONS)}."
         )
 
 
@@ -207,10 +214,14 @@ class SteeringResource(SyncResource):
         """Get global steering configuration.
 
         Args:
-            scope: Configuration scope (``"npa"``, ``"nsc"``, ``"ztna"``, or
-                ``"publishers"``).  Client-configuration scopes route to
-                ``/steering/globalconfig/clientconfiguration/{scope}``;
+            scope: Configuration scope — ``"npa"`` or ``"publishers"``.
+                ``"npa"`` routes to
+                ``/steering/globalconfig/clientconfiguration/npa``;
                 ``"publishers"`` routes to ``/steering/globalconfig/publishers``.
+
+        Raises:
+            netskope.exceptions.ValidationError: If *scope* is not one the
+                gateway publishes a path for.
         """
         body = self._get(_scope_path(scope))
         return SteeringConfig.model_validate(body)
@@ -311,10 +322,12 @@ class SteeringResource(SyncResource):
             pops: PoP names where the tunnel terminates (at least one).
             psk: Pre-shared key for IKE authentication.
             srcidentity: IKE source identity presented by the CPE device.
-            bandwidth: Maximum bandwidth in Mbps — one of 50, 100, 150, 200,
-                250, 1000 (default 100).
-            encryption: One of ``AES128-CBC``, ``AES256-CBC``, ``AES256-GCM``
-                (default ``AES256-CBC``).
+            bandwidth: Maximum bandwidth in Mbps, a positive integer
+                (default 100).  Netskope commonly provisions 50, 100, 150,
+                200, 250 or 1000.
+            encryption: Cipher name (default ``AES256-CBC``).  Netskope
+                commonly provisions ``AES128-CBC``, ``AES256-CBC`` or
+                ``AES256-GCM``.
             enabled: Whether the tunnel is enabled after creation.
             vendor: Optional CPE vendor name.
             notes: Optional free-text notes.
@@ -348,8 +361,8 @@ class SteeringResource(SyncResource):
             site: New tunnel/site name.
             pops: New PoP assignment (at least one name).
             psk: New pre-shared key.
-            bandwidth: New bandwidth in Mbps (50/100/150/200/250/1000).
-            encryption: New encryption algorithm.
+            bandwidth: New bandwidth in Mbps, a positive integer.
+            encryption: New cipher name.
             enabled: Enable or disable the tunnel.
             notes: New free-text notes.
 
@@ -374,11 +387,14 @@ class SteeringResource(SyncResource):
     def list_devices(self, *, page_size: int = 100) -> SyncPaginatedResponse[Device]:
         """List managed devices enrolled in the tenant.
 
-        Queries ``GET /api/v2/steering/devices``.  Not every tenant exposes
-        this endpoint; when unavailable the API returns 404 and a
-        :class:`~netskope.exceptions.NotFoundError` propagates.  For those
-        tenants, client status data is available via ``client.events``
-        (the ``clientstatus`` event type) instead.
+        Queries ``GET /api/v2/steering/devices``, which no spec file declares:
+        ``production/endpoints/steering/`` has no ``/devices`` path, and
+        ``production/endpoints/devices/`` offers only ``/otp``,
+        ``/device/tags*``, ``/supportedos``, ``/support/*`` and
+        ``/getclientlogs``.  A tenant that does not expose it answers 404 and a
+        :class:`~netskope.exceptions.NotFoundError` propagates.  Client status
+        data is available via ``client.events`` (the ``clientstatus`` event
+        type) instead.
 
         Args:
             page_size: Results per page.

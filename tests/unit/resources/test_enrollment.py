@@ -61,36 +61,36 @@ class TestEnrollmentResource:
         assert token_sets[0].created_date.year == 2024
 
     @respx.mock
-    def test_list_token_sets_with_pagination_params(self, enrollment: EnrollmentResource) -> None:
+    def test_list_token_sets_ignores_pagination_arguments(
+        self, enrollment: EnrollmentResource
+    ) -> None:
+        """TokensetController_getTokenSets declares no parameters (:48-79)."""
         route = respx.get(_URL).mock(return_value=httpx.Response(200, json=[]))
-        token_sets = enrollment.list_token_sets(limit=5, offset=10)
+        with pytest.warns(DeprecationWarning, match="limit, offset"):
+            token_sets = enrollment.list_token_sets(limit=5, offset=10)
 
-        params = route.calls.last.request.url.params
-        assert params["limit"] == "5"
-        assert params["offset"] == "10"
+        assert route.calls.last.request.url.params == httpx.QueryParams()
         assert token_sets == []
 
     @respx.mock
-    def test_create_token_set(self, enrollment: EnrollmentResource) -> None:
-        """POST /tokenset sends name (+ max_devices) and parses the response."""
+    def test_create_token_set_sends_no_body(self, enrollment: EnrollmentResource) -> None:
+        """TokensetController_createTokenSet declares no requestBody (:12-47)."""
         route = respx.post(_URL).mock(return_value=httpx.Response(200, json=_TOKEN_SET))
-        created = enrollment.create_token_set("Contractors", max_devices=100)
+        created = enrollment.create_token_set()
 
-        assert sent_json(route) == {"name": "Contractors", "max_devices": 100}
+        assert route.calls.last.request.content == b""
         assert isinstance(created, EnrollmentTokenSet)
         assert created.id == 4
 
     @respx.mock
-    def test_create_token_set_minimal_body(self, enrollment: EnrollmentResource) -> None:
-        """max_devices is omitted from the payload when not provided."""
+    def test_create_token_set_warns_about_undeclared_fields(
+        self, enrollment: EnrollmentResource
+    ) -> None:
         route = respx.post(_URL).mock(return_value=httpx.Response(200, json=_TOKEN_SET))
-        enrollment.create_token_set("Engineering Team")
+        with pytest.warns(DeprecationWarning, match="max_devices, name"):
+            enrollment.create_token_set("Contractors", max_devices=100)
 
-        assert sent_json(route) == {"name": "Engineering Team"}
-
-    def test_create_token_set_rejects_empty_name(self, enrollment: EnrollmentResource) -> None:
-        with pytest.raises(ValidationError):
-            enrollment.create_token_set("")
+        assert route.calls.last.request.content == b""
 
     @respx.mock
     def test_update_token_set(self, enrollment: EnrollmentResource) -> None:
@@ -150,11 +150,10 @@ class TestAsyncEnrollmentResource:
     @respx.mock
     async def test_list_token_sets(self, aenrollment: AsyncEnrollmentResource) -> None:
         route = respx.get(_URL).mock(return_value=httpx.Response(200, json=[_TOKEN_SET]))
-        token_sets = await aenrollment.list_token_sets(limit=5, offset=10)
+        with pytest.warns(DeprecationWarning, match="limit, offset"):
+            token_sets = await aenrollment.list_token_sets(limit=5, offset=10)
 
-        params = route.calls.last.request.url.params
-        assert params["limit"] == "5"
-        assert params["offset"] == "10"
+        assert route.calls.last.request.url.params == httpx.QueryParams()
         assert len(token_sets) == 1
         assert isinstance(token_sets[0], EnrollmentTokenSet)
         assert token_sets[0].id == 4
@@ -162,9 +161,9 @@ class TestAsyncEnrollmentResource:
     @respx.mock
     async def test_create_token_set(self, aenrollment: AsyncEnrollmentResource) -> None:
         route = respx.post(_URL).mock(return_value=httpx.Response(200, json=_TOKEN_SET))
-        created = await aenrollment.create_token_set("QA Lab", max_devices=25)
+        created = await aenrollment.create_token_set()
 
-        assert sent_json(route) == {"name": "QA Lab", "max_devices": 25}
+        assert route.calls.last.request.content == b""
         assert created.id == 4
 
     @respx.mock

@@ -153,7 +153,7 @@ class TestIncidentsResource:
         [
             {"users": []},
             {"timeframe": 0},
-            {"timeframe": 91},
+            {"timeframe": -1},
             {"limit": 0},
             {"limit": 10001},
             {"offset": -1},
@@ -168,6 +168,29 @@ class TestIncidentsResource:
         with pytest.raises(ValidationError):
             client.incidents.get_anomalies(users, **kwargs)  # type: ignore[arg-type]
         assert len(respx.calls) == 0
+
+    @respx.mock
+    def test_get_anomalies_accepts_a_timeframe_past_ninety_days(
+        self, client: NetskopeClient
+    ) -> None:
+        """uba.yaml:608-615 declares timeframe as an int32 with no upper bound."""
+        route = respx.post(_ANOMALIES_URL).mock(
+            return_value=httpx.Response(200, json={"results": [], "totalCount": 0})
+        )
+        assert client.incidents.get_anomalies(["a@ex.com"], timeframe=365) == []
+        assert sent_json(route) == {"users": ["a@ex.com"], "timeframe": 365}
+
+    @respx.mock
+    def test_get_anomalies_reads_the_results_key(self, client: NetskopeClient) -> None:
+        """uba.yaml:926-937 requires results and totalCount on UserAnomalies."""
+        respx.post(_ANOMALIES_URL).mock(
+            return_value=httpx.Response(
+                200,
+                json={"results": [{"anomalyId": "an1", "user": "a@ex.com"}], "totalCount": 1},
+            )
+        )
+        anomalies = client.incidents.get_anomalies(["a@ex.com"])
+        assert [anomaly.id for anomaly in anomalies] == ["an1"]
 
     @respx.mock
     def test_get_forensics(self, client: NetskopeClient) -> None:

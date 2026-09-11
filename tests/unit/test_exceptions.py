@@ -418,11 +418,57 @@ class TestRaiseForStatus:
         assert caught.value.status_code == 400
         assert "Invalid query field" in str(caught.value)
 
-    @pytest.mark.parametrize("execution", ["COMPLETE", "SUCCESS", "failed", 0])
+    @pytest.mark.parametrize("execution", ["COMPLETE", "SUCCESS", 0])
     def test_200_with_other_top_level_execution_does_not_raise(self, execution: object) -> None:
         raise_for_status(
             self._make_response(200, {"result": [], "execution": execution, "status": {"count": 0}})
         )
+
+    @pytest.mark.parametrize("execution", ["Failed", "failed", "FAILED", " failed "])
+    @pytest.mark.parametrize("nested", [False, True], ids=["top-level", "status-envelope"])
+    def test_failed_execution_is_recognised_in_any_casing(
+        self, execution: str, nested: bool
+    ) -> None:
+        """search_alert.yaml:249-255 enums Success/Failed but examples show SUCCESS."""
+        body: dict = (
+            {"result": [], "status": {"execution": execution, "count": 0}}
+            if nested
+            else {"result": [], "execution": execution, "status": {"count": 0}}
+        )
+        with pytest.raises(APIError) as caught:
+            raise_for_status(self._make_response(200, body))
+        assert "execution=FAILED" in str(caught.value)
+
+    def test_data_error_becomes_the_reported_message(self) -> None:
+        """ims_forensics.yaml:25-36 and :60-94 return the reason as data.error on 200."""
+        with pytest.raises(NotFoundError) as caught:
+            raise_for_status(
+                self._make_response(
+                    200,
+                    {
+                        "data": {"error": "Incident's Forensic File not found in destination."},
+                        "status": "error",
+                    },
+                )
+            )
+        assert "not found in destination" in str(caught.value)
+
+    def test_data_error_without_a_not_found_reason_is_a_plain_api_error(self) -> None:
+        """ims_forensics.yaml:75-79 reports a rate-limit reason the same way."""
+        with pytest.raises(APIError) as caught:
+            raise_for_status(
+                self._make_response(
+                    200,
+                    {
+                        "data": {
+                            "error": "Rate Limit quota exceeded for forensic profile destination."
+                        },
+                        "status": "error",
+                    },
+                )
+            )
+        assert not isinstance(caught.value, NotFoundError)
+        assert "Rate Limit quota exceeded" in str(caught.value)
 
     def test_retry_after_http_date_is_seconds_until_the_deadline(self) -> None:
         deadline = datetime.now(UTC) + timedelta(seconds=45)

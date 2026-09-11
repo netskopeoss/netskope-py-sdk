@@ -28,7 +28,7 @@ from netskope.models.publishers import (
     PublisherUpdate,
 )
 from netskope.resources._base import AsyncResource, SyncResource
-from netskope.resources._extract import extract_item, extract_list
+from netskope.resources._extract import extract_item, extract_list, id_strings
 
 if TYPE_CHECKING:
     from netskope.resources._publisher_response import AsyncPublisherResponses, PublisherResponses
@@ -133,6 +133,19 @@ def _build_page_params(
     return params
 
 
+# The gateway spells the local-broker flag ``lbrokerconnect``, with no
+# separator: ``publisher_post_request`` (npa_publishers.yaml:323-326),
+# ``publisher_patch_request`` (:354) and ``publisher_put_request`` (:368) all
+# declare it that way, and a ``lbroker_connect`` key is dropped on arrival.
+# Callers keep the Pythonic spelling; the rename happens once, here.
+_WIRE_NAMES = {"lbroker_connect": "lbrokerconnect"}
+
+
+def _to_wire(payload: dict[str, Any]) -> dict[str, Any]:
+    """Rename the fields whose gateway spelling differs from the SDK's."""
+    return {_WIRE_NAMES.get(key, key): value for key, value in payload.items()}
+
+
 def _validate_publisher_payload(
     payload: dict[str, Any],
     model: type[PublisherCreate] | type[PublisherUpdate],
@@ -142,7 +155,7 @@ def _validate_publisher_payload(
         request = model.model_validate(known_fields)
     except PydanticValidationError as exc:
         raise ValidationError(str(exc)) from exc
-    return {**payload, **request.model_dump(mode="json", exclude_unset=True)}
+    return _to_wire({**payload, **request.model_dump(mode="json", exclude_unset=True)})
 
 
 def _build_create_payload(
@@ -170,15 +183,20 @@ def _build_update_payload(
     return _validate_publisher_payload(payload, PublisherUpdate)
 
 
-def _build_bulk_upgrade_payload(publisher_ids: builtins.list[int]) -> dict[str, Any]:
+def _build_bulk_upgrade_payload(publisher_ids: builtins.list[int | str]) -> dict[str, Any]:
+    """Build the bulk-upgrade body, whose ids the gateway takes as strings.
+
+    ``publishers_bulk_request.publishers.id.items`` is ``{type: string}``
+    (npa_publishers.yaml:294-299), and the endpoint's own examples send
+    ``["12"]`` (:1230-1244).  The sibling ``publisherupgradeprofiles/bulk``
+    endpoint already sends strings.
+    """
     if not isinstance(publisher_ids, list):
-        raise ValidationError("publisher_ids must be a list of integer publisher IDs.")
-    if any(isinstance(pid, bool) or not isinstance(pid, int) for pid in publisher_ids):
-        raise ValidationError("publisher_ids must contain integer publisher IDs.")
+        raise ValidationError("publisher_ids must be a list of publisher IDs.")
     return {
         "publishers": {
             "apply": {"upgrade_request": True},
-            "id": list(publisher_ids),
+            "id": id_strings(publisher_ids, "publisher_ids"),
         }
     }
 
@@ -186,7 +204,15 @@ def _build_bulk_upgrade_payload(publisher_ids: builtins.list[int]) -> dict[str, 
 def _build_alerts_config_payload(
     admin_users: builtins.list[str] | None,
     event_types: builtins.list[str] | None,
+    selected_users: str | builtins.list[str] | None = None,
 ) -> dict[str, Any]:
+    """Build the alerts PUT body under the API's camelCase keys.
+
+    ``publishers_alert_put_request`` (npa_publishers.yaml:589-629) declares
+    ``adminUsers``, ``eventTypes`` and ``selectedUsers`` required and bounds
+    ``eventTypes`` to 1..5 entries (:624-625).  ``selectedUsers`` is one
+    comma-joined string (:627-629), so a list is joined here.
+    """
     payload: dict[str, Any] = {}
     if admin_users is not None:
         payload["adminUsers"] = list(admin_users)
@@ -198,7 +224,15 @@ def _build_alerts_config_payload(
                 f"Invalid event_types value(s): {', '.join(invalid)}. "
                 f"Must be one of: {', '.join(sorted(valid))}"
             )
+        if not 1 <= len(event_types) <= 5:
+            raise ValidationError(
+                f"event_types must name between 1 and 5 event types; got {len(event_types)}."
+            )
         payload["eventTypes"] = [str(event) for event in event_types]
+    if selected_users is not None:
+        payload["selectedUsers"] = (
+            ",".join(selected_users) if isinstance(selected_users, list) else selected_users
+        )
     return payload
 
 
@@ -221,11 +255,18 @@ class PublishersResource(SyncResource):
     ) -> SyncPaginatedResponse[Publisher]:
         """List all publishers with automatic pagination.
 
+        Note:
+            ``getNPAPublishers`` documents one query parameter, ``fields``
+            (``npa_publishers.yaml:1025-1033``).  ``filter``, ``offset`` and
+            ``limit`` are undocumented; the list envelope does report ``total``
+            (``:877-879``), so pagination works, but a tenant that ignores
+            these parameters answers with the unfiltered first page.
+
         Args:
             filter_expr: Filter expression to narrow results
-                (API-specific syntax, sent as ``filter``).
+                (API-specific syntax, sent as ``filter``; undocumented).
             fields: Specific fields to include in each record.
-            page_size: Results per page.
+            page_size: Results per page (sent as ``limit``; undocumented).
 
         Returns:
             A lazy paginated iterator of
@@ -343,11 +384,12 @@ class PublishersResource(SyncResource):
         """
         return self.with_response.list_releases().parse()
 
-    def bulk_upgrade(self, publisher_ids: builtins.list[int]) -> dict[str, Any]:
+    def bulk_upgrade(self, publisher_ids: builtins.list[int | str]) -> dict[str, Any]:
         """Trigger an upgrade for one or more publishers.
 
         Args:
-            publisher_ids: Numeric IDs of the publishers to upgrade.
+            publisher_ids: IDs of the publishers to upgrade.  The API
+                takes them as strings, so numbers are stringified.
 
         Returns:
             The raw API response body.
@@ -364,21 +406,31 @@ class PublishersResource(SyncResource):
         *,
         admin_users: builtins.list[str] | None = None,
         event_types: builtins.list[str] | None = None,
+        selected_users: str | builtins.list[str] | None = None,
     ) -> PublisherAlertsConfiguration:
         """Update the publisher alert notification configuration.
+
+        The gateway declares all three keys required on this PUT
+        (``npa_publishers.yaml:589-594``), so a partial body may be rejected;
+        supply everything the configuration should end up with.
 
         Args:
             admin_users: Admin email addresses to notify (sent as
                 ``adminUsers``).
-            event_types: Event types that trigger notifications (sent as
-                ``eventTypes``).  Values must be members of
+            event_types: Between one and five event types that trigger
+                notifications (sent as ``eventTypes``).  Values must be
+                members of
                 :class:`~netskope.models.publishers.PublisherAlertEventType`.
+            selected_users: Recipients the alert is addressed to, as one
+                comma-joined string or a list joined into one (sent as
+                ``selectedUsers``).
 
         Raises:
-            netskope.exceptions.ValidationError: If *event_types* contains
-                an unsupported value.
+            netskope.exceptions.ValidationError: If *event_types* contains an
+                unsupported value or names fewer than one or more than five
+                event types.
         """
-        payload = _build_alerts_config_payload(admin_users, event_types)
+        payload = _build_alerts_config_payload(admin_users, event_types, selected_users)
         body = self._put(_ALERTS_CONFIG_PATH, json=payload)
         return PublisherAlertsConfiguration.model_validate(extract_item(body))
 
@@ -475,7 +527,7 @@ class AsyncPublishersResource(AsyncResource):
         """List available publisher software releases."""
         return (await self.with_response.list_releases()).parse()
 
-    async def bulk_upgrade(self, publisher_ids: builtins.list[int]) -> dict[str, Any]:
+    async def bulk_upgrade(self, publisher_ids: builtins.list[int | str]) -> dict[str, Any]:
         """Trigger an upgrade for one or more publishers.
 
         See :meth:`PublishersResource.bulk_upgrade`.
@@ -493,11 +545,12 @@ class AsyncPublishersResource(AsyncResource):
         *,
         admin_users: builtins.list[str] | None = None,
         event_types: builtins.list[str] | None = None,
+        selected_users: str | builtins.list[str] | None = None,
     ) -> PublisherAlertsConfiguration:
         """Update the publisher alert notification configuration.
 
         See :meth:`PublishersResource.update_alerts_configuration`.
         """
-        payload = _build_alerts_config_payload(admin_users, event_types)
+        payload = _build_alerts_config_payload(admin_users, event_types, selected_users)
         body = await self._put(_ALERTS_CONFIG_PATH, json=payload)
         return PublisherAlertsConfiguration.model_validate(extract_item(body))

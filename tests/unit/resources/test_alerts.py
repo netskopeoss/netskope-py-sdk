@@ -73,8 +73,8 @@ class TestAlertsResource:
         assert len(respx.calls) == 0
 
     @respx.mock
-    def test_list_sends_groupbys_and_combined_sortby(self, client: NetskopeClient) -> None:
-        """The datasearch API expects ``groupbys`` and ``sortby="field DESC|ASC"``."""
+    def test_list_sends_groupbys_and_combined_orderbys(self, client: NetskopeClient) -> None:
+        """search_alert.yaml:351-368 names these groupbys and orderbys; no sortby exists."""
         route = respx.get(_ALERTS_URL).mock(
             return_value=httpx.Response(200, json={"result": [], "status": {"total": 0}})
         )
@@ -82,8 +82,9 @@ class TestAlertsResource:
         params = route.calls.last.request.url.params
         assert params["groupbys"] == "alert_type"
         assert "groupby" not in params
-        assert params["sortby"] == "timestamp DESC"
-        assert "sortorder" not in params
+        assert params["orderbys"] == "timestamp DESC"
+        assert "sortby" not in params and "sortorder" not in params
+        assert params["timeout"] == "180"
 
     @respx.mock
     def test_list_groupbys_joins_list_and_ascending_sort(self, client: NetskopeClient) -> None:
@@ -97,7 +98,8 @@ class TestAlertsResource:
         )
         params = route.calls.last.request.url.params
         assert params["groupbys"] == "alert_type,user"
-        assert params["sortby"] == "timestamp ASC"
+        assert params["orderbys"] == "timestamp ASC"
+        assert "sortby" not in params
 
 
 class TestAsyncAlertsResource:
@@ -110,9 +112,10 @@ class TestAsyncAlertsResource:
         assert len(respx.calls) == 0
 
     @respx.mock
-    async def test_list_sends_groupbys_and_combined_sortby(
+    async def test_list_sends_groupbys_and_combined_orderbys(
         self, aclient: AsyncNetskopeClient
     ) -> None:
+        """search_alert.yaml:363-368 defines orderbys for the async path too."""
         route = respx.get(_ALERTS_URL).mock(
             return_value=httpx.Response(200, json={"result": [], "status": {"total": 0}})
         )
@@ -120,4 +123,5 @@ class TestAsyncAlertsResource:
         _ = [alert async for alert in paginated]
         params = route.calls.last.request.url.params
         assert params["groupbys"] == "alert_type"
-        assert params["sortby"] == "timestamp DESC"
+        assert params["orderbys"] == "timestamp DESC"
+        assert "sortby" not in params

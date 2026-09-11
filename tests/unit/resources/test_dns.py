@@ -119,11 +119,20 @@ class TestDnsResource:
             )
         )
         profile = DnsResource(client._transport).update(
-            42, description="Updated", log_traffic=False
+            42, description="Updated", log_traffic="Blocked DNS"
         )
 
-        assert sent_json(route) == {"description": "Updated", "log_traffic": False}
+        assert sent_json(route) == {"description": "Updated", "log_traffic": "Blocked DNS"}
         assert profile.description == "Updated"
+
+    @respx.mock
+    def test_update_rejects_a_boolean_log_traffic_without_http(
+        self, client: NetskopeClient
+    ) -> None:
+        """log_traffic names a logging mode (profiles/dns.yaml:852-856), not a flag."""
+        with pytest.raises(ValidationError):
+            DnsResource(client._transport).update(42, log_traffic=True)  # type: ignore[arg-type]
+        assert len(respx.calls) == 0
 
     @respx.mock
     def test_update_no_fields_raises_without_http(self, client: NetskopeClient) -> None:
@@ -143,7 +152,9 @@ class TestDnsResource:
         )
         result = DnsResource(client._transport).deploy(all=True, change_note="CHG-1")
 
-        assert sent_json(route) == {"all": True, "change_note": "CHG-1"}
+        # ``all`` is a query parameter, not a body field (profiles/dns.yaml:1874-1883).
+        assert dict(route.calls.last.request.url.params) == {"all": "true"}
+        assert sent_json(route) == {"change_note": "CHG-1"}
         assert result["status"] == "deployed"
 
     @respx.mock
@@ -151,9 +162,19 @@ class TestDnsResource:
         route = respx.post(f"{_URL}/deploy").mock(
             return_value=httpx.Response(200, json={"status": "deployed"})
         )
-        DnsResource(client._transport).deploy(ids=[1, 5, 12])
+        DnsResource(client._transport).deploy(ids=[1, 5, 12], change_note="CHG-2")
 
-        assert sent_json(route) == {"ids": [1, 5, 12]}
+        # DNSDeployRequest ids are strings and change_note is required
+        # (profiles/dns.yaml:1328-1344).
+        assert "all" not in route.calls.last.request.url.params
+        assert sent_json(route) == {"ids": ["1", "5", "12"], "change_note": "CHG-2"}
+
+    @respx.mock
+    def test_deploy_ids_requires_a_change_note_without_http(self, client: NetskopeClient) -> None:
+        """DNSDeployRequest declares required: [change_note, ids] (profiles/dns.yaml:1330-1332)."""
+        with pytest.raises(ValidationError):
+            DnsResource(client._transport).deploy(ids=[1])
+        assert len(respx.calls) == 0
 
     @respx.mock
     def test_deploy_xor_validation_no_http(self, client: NetskopeClient) -> None:
@@ -272,7 +293,10 @@ class TestDnsInheritanceGroupsResource:
         )
         groups = DnsResource(client._transport).inheritance_groups
         groups.deploy(ids=[2, 7], change_note="CHG-2")
-        assert sent_json(route) == {"ids": [2, 7], "change_note": "CHG-2"}
+        # InheritanceGroupDeployRequest requires only ids, as strings
+        # (profiles/dns.yaml:1345-1356); change_note stays optional.
+        assert sent_json(route) == {"ids": ["2", "7"], "change_note": "CHG-2"}
+        assert "all" not in route.calls.last.request.url.params
 
         with pytest.raises(ValidationError):
             groups.deploy()
@@ -351,7 +375,8 @@ class TestAsyncDnsResource:
         )
         dns = AsyncDnsResource(aclient._transport)
         await dns.deploy(all=True)
-        assert sent_json(route) == {"all": True}
+        assert dict(route.calls.last.request.url.params) == {"all": "true"}
+        assert sent_json(route) == {}
 
         with pytest.raises(ValidationError):
             await dns.deploy()
@@ -399,16 +424,20 @@ class TestAsyncDnsResource:
 
         created = await groups.create("Dev")
         assert sent_json(create_route) == {"name": "Dev"}
+        # interactive leaves the group Pending-Create (profiles/dns.yaml:2055-2064).
+        assert dict(create_route.calls.last.request.url.params) == {"interactive": "true"}
         assert created.id == 9
 
         await groups.update(9, description="x")
         assert sent_json(update_route) == {"description": "x"}
+        assert dict(update_route.calls.last.request.url.params) == {"interactive": "true"}
         with pytest.raises(ValidationError):
             await groups.update(9)
 
         await groups.delete(9)
 
         await groups.deploy(all=True)
-        assert sent_json(deploy_route) == {"all": True}
+        assert dict(deploy_route.calls.last.request.url.params) == {"all": "true"}
+        assert sent_json(deploy_route) == {}
         with pytest.raises(ValidationError):
             await groups.deploy()

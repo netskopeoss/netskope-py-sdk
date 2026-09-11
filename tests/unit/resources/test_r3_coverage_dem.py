@@ -35,6 +35,9 @@ _BEGIN_MS = int(_BEGIN.timestamp() * 1000)
 _END_MS = int(_END.timestamp() * 1000)
 _BEGIN_S = int(_BEGIN.timestamp())
 _END_S = int(_END.timestamp())
+# QueryInput.begin/.end are AbsoluteDate objects (dem-workbench-query.yaml:419-433).
+_BEGIN_ABS = {"absolute": "2026-01-01T00:00:00Z"}
+_END_ABS = {"absolute": "2026-01-02T00:00:00Z"}
 
 _PROBE = {"data": {"id": "p1", "name": "probe-1", "target": "https://example.com"}}
 _RULE = {"data": {"id": "r1", "name": "latency-rule", "metric": "latency", "threshold": 200}}
@@ -131,25 +134,25 @@ class TestAsyncNetworkProbes:
 
 class TestAsyncAlertRules:
     @respx.mock
-    async def test_list_sends_params(self, aclient: AsyncNetskopeClient) -> None:
-        route = respx.get(_ALERT_RULES).mock(return_value=httpx.Response(200, json={"data": []}))
-        await aclient.dem.alert_rules.list(limit=5, offset=10)
-        assert dict(route.calls.last.request.url.params) == {"limit": "5", "offset": "10"}
+    async def test_list_sends_only_declared_filters(self, aclient: AsyncNetskopeClient) -> None:
+        """``findAlertRules`` (dem_alert.yaml:1289) has no limit/offset parameters."""
+        body = {"remainingQuota": 3, "rules": [{"id": "r1"}, {"id": "r2"}, {"id": "r3"}]}
+        route = respx.get(_ALERT_RULES).mock(return_value=httpx.Response(200, json=body))
+        result = await aclient.dem.alert_rules.list(severity="high", limit=1, offset=1)
+        assert dict(route.calls.last.request.url.params) == {"severity": "high"}
+        assert result == {"remainingQuota": 3, "rules": [{"id": "r2"}]}
 
     @respx.mock
-    async def test_create_wraps_the_body_in_data(self, aclient: AsyncNetskopeClient) -> None:
+    async def test_create_sends_a_bare_criteria_body(self, aclient: AsyncNetskopeClient) -> None:
         route = respx.post(_ALERT_RULES).mock(return_value=httpx.Response(201, json=_RULE))
-        await aclient.dem.alert_rules.create(
-            "latency-rule", "latency", 200, severity="high", probe_id="p1"
-        )
+        await aclient.dem.alert_rules.create("latency-rule", "popLatency_p95", 200, severity="high")
         assert sent_json(route) == {
-            "data": {
-                "name": "latency-rule",
-                "metric": "latency",
-                "threshold": 200,
-                "severity": "high",
-                "probe_id": "p1",
-            }
+            "name": "latency-rule",
+            "severity": "high",
+            "enabled": True,
+            "criteria": {
+                "condition": {"measure": "popLatency_p95", "thresholds": {"threshold": 200}}
+            },
         }
 
     @respx.mock
@@ -180,20 +183,18 @@ class TestAsyncQuery:
         assert sent_json(route) == {
             "from": "http_all",
             "select": ["user"],
-            "begin": _BEGIN_MS,
-            "end": _END_MS,
+            "begin": _BEGIN_ABS,
+            "end": _END_ABS,
         }
         assert isinstance(result, DemQueryResult)
         assert result.data[0].root == {"user": "a@b.com"}
 
     @respx.mock
-    async def test_get_traceroute_sends_epoch_milliseconds(
-        self, aclient: AsyncNetskopeClient
-    ) -> None:
+    async def test_get_traceroute_sends_absolute_bounds(self, aclient: AsyncNetskopeClient) -> None:
         route = respx.post(_GETTRACEROUTE).mock(return_value=httpx.Response(200, json={}))
         await aclient.dem.query.get_traceroute("traceroute_pop", begin=_BEGIN, end=_END)
         body = sent_json(route)
-        assert body == {"from": "traceroute_pop", "begin": _BEGIN_MS, "end": _END_MS}
+        assert body == {"from": "traceroute_pop", "begin": _BEGIN_ABS, "end": _END_ABS}
         assert "limit" not in body
 
     @respx.mock

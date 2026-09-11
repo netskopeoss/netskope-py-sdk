@@ -16,6 +16,7 @@ from netskope.exceptions import (
     ResponseValidationError,
     ValidationError,
 )
+from netskope.models.administration import AdminUser
 from netskope.models.rbac import (
     RbacRole,
     RbacRoleApiGroup,
@@ -24,7 +25,6 @@ from netskope.models.rbac import (
     RbacRoleScope,
     RbacRoleSummary,
 )
-from netskope.models.scim import ScimUser
 from netskope.pagination import Page
 from netskope.response import ApiResponse
 
@@ -85,9 +85,10 @@ def test_summary_and_detail_have_distinct_aliases_and_typed_nested_fields() -> N
 
 @pytest.mark.parametrize("asynchronous", [False, True])
 @respx.mock
-async def test_roles_response_page_is_bounded_and_count_is_only_metadata(
+async def test_roles_response_page_is_bounded_and_count_is_the_total(
     client: NetskopeClient, aclient: AsyncNetskopeClient, asynchronous: bool
 ) -> None:
+    """GetRolesResponseDto.count is the filtered total (rbac/ms-rbac.yaml:1670-1687)."""
     body = {"version": "v3", "count": 999, "roles": [SUMMARY]}
     route = respx.get(ROLES_URL).respond(200, json=body)
     params = {"role_type": "custom", "scope": "limited", "search": "SOC", "limit": 2, "offset": 40}
@@ -103,7 +104,8 @@ async def test_roles_response_page_is_bounded_and_count_is_only_metadata(
     assert page.items[0].id == 42
     assert page.offset == 40
     assert page.limit == 2
-    assert page.total is page.has_more is None
+    assert page.total == 999
+    assert page.has_more is True
     assert page.metadata == {"version": "v3", "count": 999}
     assert response.parse() is page
     assert response.json() == body
@@ -187,7 +189,7 @@ async def test_admin_response_page_matches_requested_index_and_preserves_extensi
         )
     )
     page = response.parse()
-    assert type(page.items[0]) is ScimUser
+    assert type(page.items[0]) is AdminUser
     assert page.items[0].user_name == "analyst@example.com"
     assert page.items[0].model_dump(by_alias=True, exclude_unset=True) == ADMIN
     assert page.offset == 40

@@ -53,15 +53,29 @@ class TestSteeringConfigRouting:
         assert config.data == {"flag_a": 1}
 
     @respx.mock
-    @pytest.mark.parametrize("scope", ["npa", "nsc", "ztna"])
-    def test_get_config_client_scopes_use_clientconfiguration(
-        self, client: NetskopeClient, scope: str
-    ) -> None:
-        route = respx.get(f"{_CLIENTCONFIG_URL}/{scope}").mock(
+    def test_get_config_npa_scope_uses_clientconfiguration(self, client: NetskopeClient) -> None:
+        route = respx.get(f"{_CLIENTCONFIG_URL}/npa").mock(
             return_value=httpx.Response(200, json={"data": {"flag": 0}})
         )
-        client.steering.get_config(scope)
+        client.steering.get_config("npa")
         assert route.call_count == 1
+
+    @respx.mock
+    @pytest.mark.parametrize("scope", ["nsc", "ztna"])
+    def test_get_config_rejects_scopes_with_no_endpoint(
+        self, client: NetskopeClient, scope: str
+    ) -> None:
+        """npa_global_config.yaml declares npa (:218) and publishers (:352), nothing else.
+
+        ``clientconfiguration/nsc`` and ``clientconfiguration/ztna`` appear in
+        no path in the file, so every call on them was a 404; the error names
+        the scopes that do exist.
+        """
+        with pytest.raises(ValidationError, match="npa, publishers"):
+            client.steering.get_config(scope)
+        with pytest.raises(ValidationError, match="npa, publishers"):
+            client.steering.update_config(scope, settings={"flag": 1})
+        assert len(respx.calls) == 0
 
     @respx.mock
     def test_get_config_invalid_scope_no_http(self, client: NetskopeClient) -> None:
@@ -151,10 +165,10 @@ class TestSteeringTunnels:
     @pytest.mark.parametrize(
         "kwargs",
         [
-            {"bandwidth": 75},
             {"bandwidth": 0},
-            {"encryption": "AES512-CBC"},
-            {"encryption": "aes256-cbc"},  # choices are case-sensitive
+            {"bandwidth": -1},
+            {"encryption": ""},
+            {"encryption": "   "},
         ],
     )
     def test_create_tunnel_validation_no_http(
@@ -202,7 +216,7 @@ class TestSteeringTunnels:
         assert len(respx.calls) == 0
 
     @respx.mock
-    @pytest.mark.parametrize("kwargs", [{"bandwidth": 300}, {"encryption": "DES"}, {"pops": []}])
+    @pytest.mark.parametrize("kwargs", [{"bandwidth": 0}, {"encryption": ""}, {"pops": []}])
     def test_update_tunnel_validation_no_http(
         self, client: NetskopeClient, kwargs: dict[str, object]
     ) -> None:
@@ -360,7 +374,7 @@ class TestAsyncSteeringResource:
     async def test_create_tunnel_validation_no_http(self, aclient: AsyncNetskopeClient) -> None:
         with pytest.raises(ValidationError):
             await aclient.steering.create_tunnel(
-                "Site", ["US-East1"], "psk", "id@example.com", bandwidth=999
+                "Site", ["US-East1"], "psk", "id@example.com", bandwidth=0
             )
         assert len(respx.calls) == 0
 

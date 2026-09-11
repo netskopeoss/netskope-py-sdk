@@ -17,6 +17,7 @@ from __future__ import annotations
 
 import builtins
 import functools
+import warnings
 from typing import Any
 
 from netskope.exceptions import ValidationError
@@ -35,22 +36,16 @@ _VALID_TOKEN_TYPES = (TOKEN_TYPE_AUTH, TOKEN_TYPE_ENCRYPT)
 _VALID_ENFORCE_STATUSES = (0, 1)
 
 
-def _build_list_params(limit: int | None, offset: int | None) -> dict[str, Any]:
-    params: dict[str, Any] = {}
-    if limit is not None:
-        params["limit"] = limit
-    if offset is not None:
-        params["offset"] = offset
-    return params
-
-
-def _build_create_payload(name: str, max_devices: int | None) -> dict[str, Any]:
-    if not name:
-        raise ValidationError("Token set name must be a non-empty string.")
-    payload: dict[str, Any] = {"name": name}
-    if max_devices is not None:
-        payload["max_devices"] = max_devices
-    return payload
+def _warn_unsupported(operation: str, supplied: dict[str, Any]) -> None:
+    """Warn about arguments the gateway operation does not declare."""
+    names = sorted(key for key, value in supplied.items() if value is not None)
+    if names:
+        warnings.warn(
+            f"{operation} does not accept {', '.join(names)}; the gateway spec declares "
+            "no such parameter and the value is not sent. Drop the argument.",
+            DeprecationWarning,
+            stacklevel=3,
+        )
 
 
 def _build_update_payload(
@@ -108,37 +103,38 @@ class EnrollmentResource(SyncResource):
     ) -> builtins.list[EnrollmentTokenSet]:
         """List enrollment token sets.
 
-        The API returns a bare JSON array of token sets (no pagination
-        envelope).  ``limit`` and ``offset`` are passed through as query
-        parameters when provided.
+        ``TokensetController_getTokenSets`` declares no parameters and returns
+        a bare JSON array (enrollment-service-configuration.yaml:50-83), so
+        nothing is sent on the query string.
 
         Args:
-            limit: Maximum number of token sets to return.
-            offset: Number of records to skip.
+            limit: Deprecated and ignored; the operation has no such parameter.
+            offset: Deprecated and ignored; the operation has no such parameter.
         """
-        body = self._get(_TOKENSET_PATH, **_build_list_params(limit, offset))
+        _warn_unsupported("GET /api/v2/enrollment/tokenset", {"limit": limit, "offset": offset})
+        body = self._get(_TOKENSET_PATH)
         return _parse_list(body)
 
     def create_token_set(
         self,
-        name: str,
+        name: str | None = None,
         *,
         max_devices: int | None = None,
     ) -> EnrollmentTokenSet:
-        """Legacy token-set creation with unverified name/device-limit fields.
+        """Create an enrollment token set with the gateway's bodyless POST.
 
-        Prefer ``with_response.create_token_set()`` for the canonical
-        bodyless POST contract. This method preserves historical behavior.
+        ``TokensetController_createTokenSet`` declares no request body
+        (enrollment-service-configuration.yaml:12-49) and ``TokenSetResponse``
+        (:744-773) has neither ``name`` nor ``max_devices``, so nothing is sent.
 
         Args:
-            name: Display name for the token set.
-            max_devices: Maximum number of devices that can enroll using
-                this token set; ``None`` means unlimited.
-
-        Raises:
-            netskope.exceptions.ValidationError: If *name* is empty.
+            name: Deprecated and ignored; the operation accepts no body.
+            max_devices: Deprecated and ignored; the operation accepts no body.
         """
-        body = self._post(_TOKENSET_PATH, json=_build_create_payload(name, max_devices))
+        _warn_unsupported(
+            "POST /api/v2/enrollment/tokenset", {"name": name, "max_devices": max_devices}
+        )
+        body = self._post(_TOKENSET_PATH)
         return EnrollmentTokenSet.model_validate(extract_item(body))
 
     def update_token_set(
@@ -212,12 +208,13 @@ class AsyncEnrollmentResource(AsyncResource):
 
         See :meth:`EnrollmentResource.list_token_sets`.
         """
-        body = await self._get(_TOKENSET_PATH, **_build_list_params(limit, offset))
+        _warn_unsupported("GET /api/v2/enrollment/tokenset", {"limit": limit, "offset": offset})
+        body = await self._get(_TOKENSET_PATH)
         return _parse_list(body)
 
     async def create_token_set(
         self,
-        name: str,
+        name: str | None = None,
         *,
         max_devices: int | None = None,
     ) -> EnrollmentTokenSet:
@@ -225,7 +222,10 @@ class AsyncEnrollmentResource(AsyncResource):
 
         See :meth:`EnrollmentResource.create_token_set`.
         """
-        body = await self._post(_TOKENSET_PATH, json=_build_create_payload(name, max_devices))
+        _warn_unsupported(
+            "POST /api/v2/enrollment/tokenset", {"name": name, "max_devices": max_devices}
+        )
+        body = await self._post(_TOKENSET_PATH)
         return EnrollmentTokenSet.model_validate(extract_item(body))
 
     async def update_token_set(

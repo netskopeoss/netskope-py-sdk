@@ -122,6 +122,13 @@ class RolePatch(_RoleBody):
 
     Empty grant lists are rejected because their clearing semantics have not
     been verified. A grant with permission ``none`` remains valid.
+
+    ``api_groups`` reuses :class:`ApiGroupGrant`, so each grant carries both
+    ``apiGroupId`` and ``permission``. That is deliberately narrower than the
+    gateway: ``PatchRoleApiGroupDto`` (ms-rbac.yaml:2483-2502) marks neither
+    required, unlike the ``UpdateRoleApiGroupDto`` used by POST and PUT
+    (:2374-2400). A grant naming no group cannot be applied to one, so this
+    request type sends the POST shape on a patch as well.
     """
 
     name: str | None = Field(None, alias="roleName")

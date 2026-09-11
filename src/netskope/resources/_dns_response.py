@@ -24,6 +24,16 @@ from netskope.resources._extract import validate_id
 from netskope.response import ApiResponse
 
 
+# ``interactive`` is a query parameter on every DNS write: POST /dns
+# (profiles/dns.yaml:1504-1513), PATCH /dns/{id} (:1732-1741), POST
+# /dns/inheritancegroups (:2055-2064) and PATCH /dns/inheritancegroups/{id}
+# (:2223-2232).  The gateway defaults it to false, which deploys the write
+# immediately; the SDK defaults it to true so a write waits for ``deploy()``.
+def _interactive(interactive: bool) -> dict[str, Any]:
+    """The ``interactive`` query the DNS write endpoints take."""
+    return {"interactive": interactive}
+
+
 def _params(
     filter: str | None,
     limit: int | None,
@@ -64,16 +74,26 @@ class DnsResponses(SyncResource):
         response = self._transport.request("GET", path)
         return ApiResponse(response, lambda raw: item(raw, DnsProfile))
 
-    def create(self, request: DnsProfileCreate) -> ApiResponse[DnsProfile]:
+    def create(
+        self, request: DnsProfileCreate, *, interactive: bool = True
+    ) -> ApiResponse[DnsProfile]:
         response = self._transport.request(
-            "POST", "/api/v2/profiles/dns", json=request_payload(request, DnsProfileCreate)
+            "POST",
+            "/api/v2/profiles/dns",
+            json=request_payload(request, DnsProfileCreate),
+            params=_interactive(interactive),
         )
         return ApiResponse(response, lambda raw: item(raw, DnsProfile))
 
-    def update(self, profile_id: str | int, request: DnsProfilePatch) -> ApiResponse[DnsProfile]:
+    def update(
+        self, profile_id: str | int, request: DnsProfilePatch, *, interactive: bool = True
+    ) -> ApiResponse[DnsProfile]:
         path = f"/api/v2/profiles/dns/{validate_id(profile_id, 'profile_id')}"
         response = self._transport.request(
-            "PATCH", path, json=request_payload(request, DnsProfilePatch)
+            "PATCH",
+            path,
+            json=request_payload(request, DnsProfilePatch),
+            params=_interactive(interactive),
         )
         return ApiResponse(response, lambda raw: item(raw, DnsProfile))
 
@@ -146,20 +166,30 @@ class DnsInheritanceGroupsResponses(SyncResource):
         response = self._transport.request("GET", path)
         return ApiResponse(response, lambda raw: item(raw, DnsInheritanceGroup))
 
-    def create(self, request: DnsInheritanceGroupCreate) -> ApiResponse[DnsInheritanceGroup]:
+    def create(
+        self, request: DnsInheritanceGroupCreate, *, interactive: bool = True
+    ) -> ApiResponse[DnsInheritanceGroup]:
         response = self._transport.request(
             "POST",
             "/api/v2/profiles/dns/inheritancegroups",
             json=request_payload(request, DnsInheritanceGroupCreate),
+            params=_interactive(interactive),
         )
         return ApiResponse(response, lambda raw: item(raw, DnsInheritanceGroup))
 
     def update(
-        self, group_id: str | int, request: DnsInheritanceGroupPatch
+        self,
+        group_id: str | int,
+        request: DnsInheritanceGroupPatch,
+        *,
+        interactive: bool = True,
     ) -> ApiResponse[DnsInheritanceGroup]:
         path = f"/api/v2/profiles/dns/inheritancegroups/{validate_id(group_id, 'group_id')}"
         response = self._transport.request(
-            "PATCH", path, json=request_payload(request, DnsInheritanceGroupPatch)
+            "PATCH",
+            path,
+            json=request_payload(request, DnsInheritanceGroupPatch),
+            params=_interactive(interactive),
         )
         return ApiResponse(response, lambda raw: item(raw, DnsInheritanceGroup))
 
@@ -199,18 +229,26 @@ class AsyncDnsResponses(AsyncResource):
         response = await self._transport.request("GET", path)
         return ApiResponse(response, lambda raw: item(raw, DnsProfile))
 
-    async def create(self, request: DnsProfileCreate) -> ApiResponse[DnsProfile]:
+    async def create(
+        self, request: DnsProfileCreate, *, interactive: bool = True
+    ) -> ApiResponse[DnsProfile]:
         response = await self._transport.request(
-            "POST", "/api/v2/profiles/dns", json=request_payload(request, DnsProfileCreate)
+            "POST",
+            "/api/v2/profiles/dns",
+            json=request_payload(request, DnsProfileCreate),
+            params=_interactive(interactive),
         )
         return ApiResponse(response, lambda raw: item(raw, DnsProfile))
 
     async def update(
-        self, profile_id: str | int, request: DnsProfilePatch
+        self, profile_id: str | int, request: DnsProfilePatch, *, interactive: bool = True
     ) -> ApiResponse[DnsProfile]:
         path = f"/api/v2/profiles/dns/{validate_id(profile_id, 'profile_id')}"
         response = await self._transport.request(
-            "PATCH", path, json=request_payload(request, DnsProfilePatch)
+            "PATCH",
+            path,
+            json=request_payload(request, DnsProfilePatch),
+            params=_interactive(interactive),
         )
         return ApiResponse(response, lambda raw: item(raw, DnsProfile))
 
@@ -283,20 +321,30 @@ class AsyncDnsInheritanceGroupsResponses(AsyncResource):
         response = await self._transport.request("GET", path)
         return ApiResponse(response, lambda raw: item(raw, DnsInheritanceGroup))
 
-    async def create(self, request: DnsInheritanceGroupCreate) -> ApiResponse[DnsInheritanceGroup]:
+    async def create(
+        self, request: DnsInheritanceGroupCreate, *, interactive: bool = True
+    ) -> ApiResponse[DnsInheritanceGroup]:
         response = await self._transport.request(
             "POST",
             "/api/v2/profiles/dns/inheritancegroups",
             json=request_payload(request, DnsInheritanceGroupCreate),
+            params=_interactive(interactive),
         )
         return ApiResponse(response, lambda raw: item(raw, DnsInheritanceGroup))
 
     async def update(
-        self, group_id: str | int, request: DnsInheritanceGroupPatch
+        self,
+        group_id: str | int,
+        request: DnsInheritanceGroupPatch,
+        *,
+        interactive: bool = True,
     ) -> ApiResponse[DnsInheritanceGroup]:
         path = f"/api/v2/profiles/dns/inheritancegroups/{validate_id(group_id, 'group_id')}"
         response = await self._transport.request(
-            "PATCH", path, json=request_payload(request, DnsInheritanceGroupPatch)
+            "PATCH",
+            path,
+            json=request_payload(request, DnsInheritanceGroupPatch),
+            params=_interactive(interactive),
         )
         return ApiResponse(response, lambda raw: item(raw, DnsInheritanceGroup))
 

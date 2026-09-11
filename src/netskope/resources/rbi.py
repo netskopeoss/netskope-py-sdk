@@ -28,8 +28,9 @@ from __future__ import annotations
 
 import builtins
 import functools
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, cast
 
+from netskope.exceptions import ValidationError
 from netskope.resources._base import AsyncResource, SyncResource
 from netskope.resources._extract import validate_id
 
@@ -100,6 +101,64 @@ def _build_deploy_body(
     if note is not None:
         body["note"] = note
     return body or None
+
+
+# ``GET /cdr/testconfig`` query parameters (rbi/cdr.yaml:424-471).
+_CDR_TESTCONFIG_QUERY = ("vendor", "id", "endpoint_url", "workflow_rule_name")
+# Inline mode carries the key in the ``X-CDR-Api-Key`` header (cdr.yaml:472-480).
+_CDR_TESTCONFIG_API_KEY_KEYS = frozenset({"api_key", "apikey", "x-cdr-api-key", "x_cdr_api_key"})
+
+
+def _build_cdr_testconfig_params(
+    config: dict[str, Any] | None,
+    vendor: str | None,
+    config_id: str | None,
+    endpoint_url: str | None,
+    workflow_rule_name: str | None,
+) -> tuple[dict[str, Any], dict[str, str]]:
+    """Build the ``GET /cdr/testconfig`` query and its headers.
+
+    *config* is the legacy body-shaped argument; its ``vendor``/``id``/
+    ``endpoint_url``/``workflow_rule_name`` entries become query parameters.
+
+    An inline API key (``api_key``) travels in the ``X-CDR-Api-Key`` header
+    (cdr.yaml:472-480), never in the query string.
+
+    Raises:
+        netskope.exceptions.ValidationError: If *config* names a field the
+            operation does not declare, or nothing selects a configuration.
+    """
+    merged: dict[str, Any] = {}
+    headers: dict[str, str] = {}
+    if config is not None:
+        if not isinstance(config, dict):
+            raise ValidationError("test_cdr_config takes a mapping of query values.")
+        for key, value in config.items():
+            if str(key).lower() in _CDR_TESTCONFIG_API_KEY_KEYS:
+                if value:
+                    headers["X-CDR-Api-Key"] = str(value)
+                continue
+            if key not in _CDR_TESTCONFIG_QUERY:
+                raise ValidationError(
+                    f"GET /rbi/cdr/testconfig does not accept {key!r}. "
+                    f"Supported: {', '.join(_CDR_TESTCONFIG_QUERY)}."
+                )
+            if value is not None:
+                merged[key] = value
+    for key, value in (
+        ("vendor", vendor),
+        ("id", config_id),
+        ("endpoint_url", endpoint_url),
+        ("workflow_rule_name", workflow_rule_name),
+    ):
+        if value is not None:
+            merged[key] = value
+    if not merged:
+        raise ValidationError(
+            "A CDR connectivity test needs either config_id=<stored config id>, or the "
+            "inline vendor, endpoint_url and workflow_rule_name."
+        )
+    return merged, headers
 
 
 class RbiResource(SyncResource):
@@ -307,11 +366,13 @@ class RbiResource(SyncResource):
         return self._patch(_CDR_PATH, json=config)
 
     def restore_cdr(self) -> dict[str, Any]:
-        """Restore the CDR configuration to default values.
+        """Reset the CDR configuration to factory defaults.
 
-        Maps to ``POST /api/v2/rbi/cdr/default``.
+        Maps to ``PUT /api/v2/rbi/cdr/default`` (``RestoreCdr``).  Destructive:
+        it empties ``cdr_data`` and clears ``active_vendor``, and fails with
+        HTTP 409 while a vendor config is still referenced by a template.
         """
-        return self._post(_CDR_DEFAULT_PATH)
+        return self._put(_CDR_DEFAULT_PATH)
 
     def list_cdr_vendors(self) -> dict[str, Any]:
         """List available CDR vendors and their regional endpoints.
@@ -320,13 +381,45 @@ class RbiResource(SyncResource):
         """
         return self._get(_CDR_VENDORS_PATH)
 
-    def test_cdr_config(self, config: dict[str, Any]) -> dict[str, Any]:
-        """Test a candidate CDR configuration against the vendor (no persist).
+    def test_cdr_config(
+        self,
+        config: dict[str, Any] | None = None,
+        *,
+        vendor: str | None = None,
+        config_id: str | None = None,
+        endpoint_url: str | None = None,
+        workflow_rule_name: str | None = None,
+    ) -> dict[str, Any]:
+        """Test CDR vendor connectivity without persisting anything.
 
-        Maps to ``POST /api/v2/rbi/cdr/testconfig``.  Inspect
+        Maps to ``GET /api/v2/rbi/cdr/testconfig`` (``TestCdrConfig``); the
+        settings travel as query parameters, not as a request body.  Inspect
         ``test_result.success`` in the response for the vendor outcome.
+
+        Inline mode sends the raw key in the ``X-CDR-Api-Key`` request header;
+        pass it as ``config={"api_key": ...}`` alongside the vendor settings.
+
+        Args:
+            config: Legacy mapping form; its ``vendor``, ``id``,
+                ``endpoint_url`` and ``workflow_rule_name`` entries become
+                query parameters.
+            vendor: Vendor name (inline mode; resolved from the stored config
+                when *config_id* is given).
+            config_id: ID of a stored vendor config entry — sent as ``id``.
+            endpoint_url: Vendor endpoint URL (inline mode).
+            workflow_rule_name: Workflow/rule name to exercise during the test.
+
+        Raises:
+            netskope.exceptions.ValidationError: If no selector is supplied or an
+                unsupported key is passed.
         """
-        return self._post(_CDR_TESTCONFIG_PATH, json=config)
+        params, headers = _build_cdr_testconfig_params(
+            config, vendor, config_id, endpoint_url, workflow_rule_name
+        )
+        response = self._transport.request(
+            "GET", _CDR_TESTCONFIG_PATH, params=params or None, headers=headers or None
+        )
+        return cast(dict[str, Any], response.json())
 
 
 class AsyncRbiResource(AsyncResource):
@@ -459,13 +552,33 @@ class AsyncRbiResource(AsyncResource):
         return await self._patch(_CDR_PATH, json=config)
 
     async def restore_cdr(self) -> dict[str, Any]:
-        """Restore the CDR configuration to default values."""
-        return await self._post(_CDR_DEFAULT_PATH)
+        """Reset the CDR configuration to factory defaults.
+
+        See :meth:`RbiResource.restore_cdr`.
+        """
+        return await self._put(_CDR_DEFAULT_PATH)
 
     async def list_cdr_vendors(self) -> dict[str, Any]:
         """List available CDR vendors and their regional endpoints."""
         return await self._get(_CDR_VENDORS_PATH)
 
-    async def test_cdr_config(self, config: dict[str, Any]) -> dict[str, Any]:
-        """Test a candidate CDR configuration against the vendor (no persist)."""
-        return await self._post(_CDR_TESTCONFIG_PATH, json=config)
+    async def test_cdr_config(
+        self,
+        config: dict[str, Any] | None = None,
+        *,
+        vendor: str | None = None,
+        config_id: str | None = None,
+        endpoint_url: str | None = None,
+        workflow_rule_name: str | None = None,
+    ) -> dict[str, Any]:
+        """Test CDR vendor connectivity without persisting anything.
+
+        See :meth:`RbiResource.test_cdr_config`.
+        """
+        params, headers = _build_cdr_testconfig_params(
+            config, vendor, config_id, endpoint_url, workflow_rule_name
+        )
+        response = await self._transport.request(
+            "GET", _CDR_TESTCONFIG_PATH, params=params or None, headers=headers or None
+        )
+        return cast(dict[str, Any], response.json())

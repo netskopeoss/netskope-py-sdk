@@ -19,7 +19,20 @@ from netskope.response import ApiResponse
 
 T = TypeVar("T")
 
+# The gateway contract states a `limit` default of 10000 and no maximum
+# (events/search_alert.yaml:340-345). This ceiling is the SDK's own rail, not
+# the endpoint's: it keeps one page inside the default the service is built
+# around. The audit and infrastructure caps are different — those endpoints do
+# declare `maximum: 5000` (events/audit.yaml:19-27,
+# events/infrastructure.yaml:19-27) and are enforced per endpoint.
 DATASEARCH_PAGE_CAP = 10_000
+
+# `timeout` is a required query parameter on every /events/datasearch/* search
+# with a default of 180 seconds (events/search_alert.yaml:313-319,
+# search_app.yaml:344-350, search_network.yaml:219-225, search_page.yaml:284-290,
+# search_incident.yaml:459-465, search_epdlp.yaml:174-180). The data/audit,
+# data/infrastructure, and metrics/transactionevents endpoints do not declare it.
+DATASEARCH_TIMEOUT_DEFAULT = 180
 
 
 class DatasearchWindow(BaseModel):

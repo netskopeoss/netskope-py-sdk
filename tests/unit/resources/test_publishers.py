@@ -265,7 +265,9 @@ class TestPublishersResource:
         )
         pub = client.publishers.create(name="NewPub")
         assert pub.publisher_id == 99
-        assert sent_json(route) == {"name": "NewPub", "lbroker_connect": False}
+        # publisher_post_request spells the flag ``lbrokerconnect``
+        # (npa_publishers.yaml:323-326).
+        assert sent_json(route) == {"name": "NewPub", "lbrokerconnect": False}
 
     @respx.mock
     def test_create_with_lbroker_connect(self, client: NetskopeClient) -> None:
@@ -273,7 +275,7 @@ class TestPublishersResource:
             return_value=httpx.Response(200, json={"data": {"publisher_id": 100}})
         )
         client.publishers.create(name="DC-Primary", lbroker_connect=True)
-        assert sent_json(route) == {"name": "DC-Primary", "lbroker_connect": True}
+        assert sent_json(route) == {"name": "DC-Primary", "lbrokerconnect": True}
 
     @respx.mock
     def test_create_validates_final_overrides_and_preserves_extensions(
@@ -288,7 +290,7 @@ class TestPublishersResource:
         )
         assert sent_json(route) == {
             "name": "",
-            "lbroker_connect": True,
+            "lbrokerconnect": True,
             "future": {"enabled": False},
         }
 
@@ -362,7 +364,7 @@ class TestPublishersResource:
             client.publishers.update(42)
         assert len(respx.calls) == 0
 
-    @pytest.mark.parametrize("publisher_ids", ["12", 12, (1, 2), [True], [1, "2"], [1, None]])
+    @pytest.mark.parametrize("publisher_ids", ["12", 12, (1, 2), [True], [1, None], []])
     @respx.mock
     def test_bulk_upgrade_rejects_non_integer_ids(
         self, client: NetskopeClient, publisher_ids: object
@@ -419,8 +421,6 @@ class TestPublishersResource:
         assert releases[0].version == "1.2.3"
         assert releases[0].docker_tag == "release-1.2.3"
         assert releases[0].release_type == "GA"
-        assert releases[0].is_recommended is True
-        assert releases[1].is_recommended is False
 
     @respx.mock
     def test_bulk_upgrade_body_shape(self, client: NetskopeClient) -> None:
@@ -429,12 +429,24 @@ class TestPublishersResource:
         )
         result = client.publishers.bulk_upgrade([1, 2, 3])
         assert result == {"status": "success"}
+        # publishers_bulk_request ids are strings (npa_publishers.yaml:294-299).
         assert sent_json(route) == {
             "publishers": {
                 "apply": {"upgrade_request": True},
-                "id": [1, 2, 3],
+                "id": ["1", "2", "3"],
             }
         }
+
+    @respx.mock
+    def test_bulk_upgrade_accepts_ids_already_given_as_strings(
+        self, client: NetskopeClient
+    ) -> None:
+        """The bulk schema's items are {type: string} (npa_publishers.yaml:297-299)."""
+        route = respx.put(_BULK_URL).mock(
+            return_value=httpx.Response(200, json={"status": "success"})
+        )
+        client.publishers.bulk_upgrade([1, "2"])
+        assert sent_json(route)["publishers"]["id"] == ["1", "2"]
 
     @respx.mock
     def test_get_alerts_configuration(self, client: NetskopeClient) -> None:
@@ -569,7 +581,7 @@ class TestAsyncPublishersResource:
         )
         pub = await aclient.publishers.create(name="NewPub", lbroker_connect=True)
         assert pub.publisher_id == 99
-        assert sent_json(route) == {"name": "NewPub", "lbroker_connect": True}
+        assert sent_json(route) == {"name": "NewPub", "lbrokerconnect": True}
 
     @respx.mock
     async def test_create_invalid_override_sends_no_http(
@@ -648,7 +660,7 @@ class TestAsyncPublishersResource:
         assert sent_json(route) == {
             "publishers": {
                 "apply": {"upgrade_request": True},
-                "id": [7],
+                "id": ["7"],
             }
         }
 
@@ -658,7 +670,7 @@ class TestAsyncPublishersResource:
             await aclient.publishers.update(42)
         assert len(respx.calls) == 0
 
-    @pytest.mark.parametrize("publisher_ids", ["12", [True], [1, "2"]])
+    @pytest.mark.parametrize("publisher_ids", ["12", [True], []])
     @respx.mock
     async def test_bulk_upgrade_rejects_non_integer_ids(
         self, aclient: AsyncNetskopeClient, publisher_ids: object

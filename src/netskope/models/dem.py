@@ -11,12 +11,21 @@ and metadata contract. Legacy raw-returning resource methods remain available.
 
 from __future__ import annotations
 
+from datetime import datetime
 from enum import StrEnum
 from typing import Any, Literal, Self
 
-from pydantic import BaseModel, ConfigDict, Field, RootModel, model_validator
+from pydantic import BaseModel, ConfigDict, Field, RootModel, field_validator, model_validator
 
 from netskope.models.common import NetskopeModel
+
+
+def _parse_rfc3339(value: str) -> datetime:
+    """Read one RFC 3339 query bound, rejecting anything the gateway would."""
+    try:
+        return datetime.fromisoformat(value.replace("Z", "+00:00"))
+    except (AttributeError, ValueError):
+        raise ValueError("A query bound must be an RFC 3339 timestamp.") from None
 
 
 class QueryDataSource(StrEnum):
@@ -62,8 +71,16 @@ class NetworkMetricType(StrEnum):
 
 
 # Data sources valid for the stateless ``getstates`` query (no time window).
+# ``StateQueryFrom`` (dem-workbench-query.yaml:516-521).
 STATE_DATA_SOURCES: frozenset[str] = frozenset(
     {QueryDataSource.AGENT_STATUS, QueryDataSource.CLIENT_STATUS}
+)
+
+# Data sources valid for ``getdata``/``getdataset``. ``DataQueryFrom``
+# (dem-workbench-query.yaml:15-33) is the 16-value set without ``agent_status``
+# and ``client_status``, which belong to ``StateQueryFrom`` alone.
+DATA_QUERY_SOURCES: frozenset[str] = frozenset(
+    set(QueryDataSource) - {QueryDataSource.AGENT_STATUS, QueryDataSource.CLIENT_STATUS}
 )
 
 # Data sources valid for the ``gettraceroute`` query.
@@ -145,22 +162,70 @@ class DemQueryResult(NetskopeModel):
     meta: DemQueryMetadata | None = None
 
 
+class DemProbeEntity(NetskopeModel):
+    """The users, groups and OUs a probe runs for (demconfig.yaml:2670-2684)."""
+
+    user: list[str] = Field(default_factory=list)
+    group: list[str] = Field(default_factory=list)
+    ou: list[str] = Field(default_factory=list)
+
+
 class DemProbe(NetskopeModel):
+    """An app or network probe row.
+
+    Fields follow ``AppProbeCreateUpdateResp`` (demconfig.yaml:2753-2811) plus
+    the two collection flags ``NetworkProbeCreateUpdateResp`` adds
+    (:2813-2870).  ``status`` is an integer (1 enabled, 0 disabled), not a
+    boolean.
+    """
+
     id: str | int | None = None
     name: str | None = None
-    target: str | None = None
-    protocol: str | None = None
-    interval: int | None = None
-    enabled: bool | None = None
+    app_id: int | None = Field(default=None, alias="appID")
+    app_name: str | None = Field(default=None, alias="appName")
+    app_type: str | None = Field(default=None, alias="appType")
+    app_domains: list[str] = Field(default_factory=list, alias="appDomains")
+    frequency: int | None = None
+    entity: DemProbeEntity | None = None
+    os: list[str] = Field(default_factory=list)
+    device_classification: list[str] = Field(default_factory=list, alias="deviceClassification")
+    status: int | None = None
+    priority: int | None = None
+    network_path_device_health_collection: bool | None = Field(
+        default=None, alias="networkPathDeviceHealthCollection"
+    )
+    process_info_collection: bool | None = Field(default=None, alias="processInfoCollection")
+    modified_time: str | None = Field(default=None, alias="modifiedTime")
+    created_time: str | None = Field(default=None, alias="createdTime")
+
+
+class DemAlertRuleReceiver(NetskopeModel):
+    id: str | None = None
 
 
 class DemAlertRule(NetskopeModel):
-    id: str | int | None = None
+    """An experience-alert rule.
+
+    Fields follow ``AlertRuleResponse`` = ``PostAlertRuleRequest`` plus ``id``,
+    ``lastUpdateTime`` and ``numOfAlerts`` (dem_alert.yaml:274-287, :441-467).
+    The measured metric lives at ``criteria.condition.measure`` and its
+    threshold at ``criteria.condition.thresholds``.
+    """
+
+    id: str | None = None
     name: str | None = None
-    metric: str | None = None
-    threshold: float | None = None
+    category: str | None = None
+    type: str | None = None
     severity: str | None = None
-    probe_id: str | None = None
+    enabled: bool | None = None
+    criteria: dict[str, Any] | None = None
+    criteria_type: str | None = Field(default=None, alias="criteriaType")
+    email_receiver: str | None = Field(default=None, alias="emailReceiver")
+    webhook_receivers: list[DemAlertRuleReceiver] = Field(
+        default_factory=list, alias="webhookReceivers"
+    )
+    last_update_time: int | None = Field(default=None, alias="lastUpdateTime")
+    num_of_alerts: int | None = Field(default=None, alias="numOfAlerts")
 
 
 class DemApp(NetskopeModel):
@@ -311,23 +376,72 @@ class AdemNetworkGraph(NetskopeModel):
     device_to_pop_latency_ms: float | None = Field(default=None, alias="deviceToPopLatencyms")
 
 
-class DemProbeCreate(BaseModel):
-    model_config = ConfigDict(extra="allow", strict=True, frozen=True)
+class DemProbeMove(BaseModel):
+    """``MoveProbeReqBody`` (demconfig.yaml:2494-2508); ``position`` is required
+    for ``after``/``before``."""
 
-    name: str
-    target: str
-    protocol: str = "https"
-    interval: int | None = None
+    model_config = ConfigDict(extra="forbid", strict=True, frozen=True)
+
+    operation: Literal["top", "bottom", "after", "before"]
+    position: int | None = None
+
+    @model_validator(mode="after")
+    def _position_required(self) -> Self:
+        if self.operation in ("after", "before") and self.position is None:
+            raise ValueError("A move after or before another probe needs its 0-based position.")
+        return self
+
+
+class DemProbeCreate(BaseModel):
+    """``AppProbeCreateRequest`` (demconfig.yaml:2744-2752).
+
+    ``AppProbeUpdateCreateCommon`` requires ``name``, ``frequency``,
+    ``entity``, ``os``, ``deviceClassification`` and ``status``; the ``oneOf``
+    adds ``appName`` for a predefined app or ``appID`` for a custom one, and
+    the create variant also requires ``move``.
+    """
+
+    model_config = ConfigDict(extra="allow", strict=True, frozen=True, populate_by_name=True)
+
+    name: str = Field(min_length=1)
+    frequency: int
+    entity: dict[str, list[str]]
+    os: list[Literal["windows", "mac"]] = Field(min_length=1)
+    device_classification: list[Literal["managed", "unmanaged", "not configured"]] = Field(
+        min_length=1, alias="deviceClassification"
+    )
+    status: int
+    app_type: Literal["predefined", "custom"] = Field(alias="appType")
+    app_name: str | None = Field(default=None, alias="appName")
+    app_id: int | None = Field(default=None, alias="appID")
+    move: DemProbeMove
+
+    @model_validator(mode="after")
+    def _app_selector(self) -> Self:
+        if self.app_type == "predefined" and not self.app_name:
+            raise ValueError("A predefined app probe requires appName.")
+        if self.app_type == "custom" and self.app_id is None:
+            raise ValueError("A custom app probe requires appID.")
+        return self
 
 
 class DemAlertRuleCreate(BaseModel):
-    model_config = ConfigDict(extra="allow", strict=True, frozen=True)
+    """``PostAlertRuleRequest`` (dem_alert.yaml:441-467).
 
-    name: str
-    metric: str
-    threshold: float
-    severity: str = "medium"
-    probe_id: str | None = None
+    The schema lists no required properties, but a rule without a name or a
+    measurable criterion cannot be acted on, so both are required here.
+    """
+
+    model_config = ConfigDict(extra="allow", strict=True, frozen=True, populate_by_name=True)
+
+    name: str = Field(min_length=1)
+    criteria: dict[str, Any]
+    severity: Literal["info", "low", "medium", "high", "critical"] = "medium"
+    enabled: bool = True
+    category: str | None = None
+    type: str | None = None
+    criteria_type: str | None = Field(default=None, alias="criteriaType")
+    email_receiver: str | None = Field(default=None, alias="emailReceiver")
 
 
 class DemQueryRequest(BaseModel):
@@ -337,17 +451,38 @@ class DemQueryRequest(BaseModel):
 
     data_source: str = Field(alias="from")
     select: list[Any] = Field(min_length=1)
-    begin: int | None = None
-    end: int | None = None
+    begin: dict[str, str] | None = None
+    end: dict[str, str] | None = None
     where: Any | None = None
     group_by: list[str] | None = Field(default=None, alias="groupby")
     order_by: list[Any] | None = Field(default=None, alias="orderby")
     limit: int | None = Field(default=None, ge=0)
     offset: int | None = Field(default=None, ge=0)
 
+    @field_validator("begin", "end")
+    @classmethod
+    def _query_bound(cls, value: dict[str, str] | None) -> dict[str, str] | None:
+        """``QueryInput.begin``/``.end`` accept one RFC 3339 bound.
+
+        ``AbsoluteDate``/``RelativeDate`` (dem-workbench-query.yaml:5-14,
+        :499-507) each carry exactly one key, and ``QueryInput`` sets
+        ``additionalProperties: false`` (:420).
+        """
+        if value is None:
+            return value
+        if len(value) != 1 or next(iter(value)) not in ("absolute", "relative"):
+            raise ValueError('A query bound is {"absolute": <RFC3339>} or {"relative": <RFC3339>}.')
+        _parse_rfc3339(next(iter(value.values())))
+        return value
+
     @model_validator(mode="after")
     def _ordered_window(self) -> Self:
-        if self.begin is not None and self.end is not None and self.end <= self.begin:
+        if self.begin is None or self.end is None:
+            return self
+        begin_key, end_key = next(iter(self.begin)), next(iter(self.end))
+        if begin_key != end_key:
+            raise ValueError("begin and end must both be absolute or both be relative.")
+        if _parse_rfc3339(self.end[end_key]) <= _parse_rfc3339(self.begin[begin_key]):
             raise ValueError("end must be greater than begin.")
         return self
 

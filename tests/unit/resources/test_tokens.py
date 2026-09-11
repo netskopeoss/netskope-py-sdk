@@ -174,13 +174,14 @@ class TestTokensResource:
         assert route.called
 
     @respx.mock
-    def test_revoke_is_delete_alias(self, tokens: TokensResource) -> None:
-        route = respx.delete(f"{_URL}/tok-1").mock(
+    def test_revoke_patches_the_revoke_operation(self, tokens: TokensResource) -> None:
+        """revoke is its own operation (auth/api-tokens.yaml:86-94), not DELETE."""
+        route = respx.patch(f"{_URL}/tok-1").mock(
             return_value=httpx.Response(200, json={"id": "tok-1", "name": "ci-token"})
         )
-        assert TokensResource.revoke is TokensResource.delete
-        assert tokens.revoke("tok-1") is None
-        assert route.called
+        token = tokens.revoke("tok-1")
+        assert sent_json(route) == {"operation": "revoke"}
+        assert token.id == "tok-1"
 
 
 class TestAsyncTokensResource:
@@ -237,10 +238,16 @@ class TestAsyncTokensResource:
         assert token.token == "s3cret-value"
 
     @respx.mock
-    async def test_delete_and_revoke_alias(self, atokens: AsyncTokensResource) -> None:
-        route = respx.delete(f"{_URL}/tok-1").mock(
+    async def test_delete_and_revoke_are_separate_operations(
+        self, atokens: AsyncTokensResource
+    ) -> None:
+        deleted = respx.delete(f"{_URL}/tok-1").mock(
             return_value=httpx.Response(200, json={"id": "tok-1", "name": "ci-token"})
         )
-        assert AsyncTokensResource.revoke is AsyncTokensResource.delete
+        revoked = respx.patch(f"{_URL}/tok-1").mock(
+            return_value=httpx.Response(200, json={"id": "tok-1", "name": "ci-token"})
+        )
         assert await atokens.delete("tok-1") is None
-        assert route.called
+        assert (await atokens.revoke("tok-1")).id == "tok-1"
+        assert deleted.called
+        assert sent_json(revoked) == {"operation": "revoke"}

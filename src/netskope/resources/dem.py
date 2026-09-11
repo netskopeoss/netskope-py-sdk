@@ -10,18 +10,19 @@
     client.dem.apps              # DEM-monitored applications
     client.dem.users             # ADEM per-user/per-device telemetry
 
-Time units differ by endpoint — read the helper docstrings below.  Two
-module-level helpers convert ``datetime`` arguments while passing bare ``int``
-values through **unchanged** in each endpoint's native unit:
+Time arguments are accepted as a ``datetime`` or a bare ``int``, and the SDK
+puts each endpoint's own shape on the wire:
 
-* :func:`_epoch_millis` — ``dem/query/getdata`` and ``dem/query/gettraceroute``
-  use epoch **milliseconds** (body keys ``begin`` / ``end``).
-* :func:`_epoch_seconds` — ``dem/query/getentities`` and **all** ADEM
-  (``adem/users/*``) endpoints use epoch **seconds** (keys ``starttime`` /
-  ``endtime``).
+* ``dem/query/getdata``, ``getdataset`` and ``gettraceroute`` send
+  ``begin``/``end`` as ``{"absolute": "<RFC 3339>"}`` objects
+  (``QueryInput.begin``/``.end``, dem-workbench-query.yaml:419-433).  A bare
+  ``int`` is read as epoch **milliseconds** and converted for you.
+* ``dem/query/getentities`` and **all** ADEM (``adem/users/*``) endpoints send
+  epoch **seconds** in ``starttime``/``endtime``.  A bare ``int`` is passed
+  through as-is.
 
-If you pass a bare ``int`` you are responsible for supplying it in the correct
-native unit; a ``datetime`` is always converted for you.
+A naive ``datetime`` is interpreted in the local timezone; pass an aware one to
+be explicit.
 """
 
 from __future__ import annotations
@@ -29,11 +30,12 @@ from __future__ import annotations
 import asyncio
 import builtins
 import functools
-from datetime import datetime
-from typing import TYPE_CHECKING, Any
+from datetime import UTC, datetime
+from typing import TYPE_CHECKING, Any, cast
 
 from netskope.exceptions import ValidationError
 from netskope.models.dem import (
+    DATA_QUERY_SOURCES,
     STATE_DATA_SOURCES,
     TRACEROUTE_DATA_SOURCES,
     AdemApplication,
@@ -43,7 +45,6 @@ from netskope.models.dem import (
     DemAlert,
     DemQueryResult,
     NetworkMetricType,
-    QueryDataSource,
 )
 from netskope.resources._base import AsyncResource, SyncResource
 from netskope.resources._extract import extract_item, extract_list, quote_id, validate_id
@@ -116,22 +117,94 @@ def _epoch_millis(value: datetime | int) -> int:
     return value
 
 
+def _absolute_bound(value: datetime | int) -> dict[str, str]:
+    """Return *value* as an ``AbsoluteDate`` (dem-workbench-query.yaml:5-14).
+
+    ``QueryInput`` sets ``additionalProperties: false`` and types ``begin`` and
+    ``end`` as ``{"absolute": <RFC 3339>}`` or ``{"relative": <RFC 3339>}``, so
+    an epoch integer is never accepted on the wire.  Bare ``int`` arguments
+    stay in this surface's historical unit — epoch milliseconds — and are
+    converted here.
+    """
+    moment = datetime.fromtimestamp(_epoch_millis(value) / 1000, tz=UTC)
+    return {"absolute": moment.isoformat().replace("+00:00", "Z")}
+
+
 # --- Shared payload builders ----------------------------------------------
+
+
+# Arguments the old ``{"data": {...}}`` probe body carried that ``AppProbeCreateRequest``
+# (demconfig.yaml:2744) does not define, with the spec field to use instead.
+_RETIRED_PROBE_FIELDS = {
+    "target": "the probe follows an app, named by appName (predefined) or appID (custom)",
+    "protocol": "the app probe schema has no protocol",
+    "interval": "use frequency (minutes)",
+}
 
 
 def _probe_create_body(
     name: str,
-    target: str,
-    protocol: str,
-    interval: int | None,
+    *,
+    frequency: int | None,
+    entity: dict[str, builtins.list[str]] | None,
+    os: builtins.list[str] | None,
+    device_classification: builtins.list[str] | None,
+    status: int,
+    app_name: str | None,
+    app_id: int | None,
+    move: dict[str, Any] | None,
+    retired: dict[str, Any],
     additional_fields: dict[str, Any] | None,
 ) -> dict[str, Any]:
-    data: dict[str, Any] = {"name": name, "target": target, "protocol": protocol}
-    if interval is not None:
-        data["interval"] = interval
+    """Build the bare ``AppProbeCreateRequest`` body (demconfig.yaml:2744-2752).
+
+    ``POST /appprobes`` takes the object itself, never a ``data`` wrapper.
+    """
+    supplied = [key for key, value in retired.items() if value is not None]
+    if supplied:
+        detail = "; ".join(f"{key} — {_RETIRED_PROBE_FIELDS[key]}" for key in supplied)
+        raise ValidationError(
+            f"POST /dem/appprobes does not define {', '.join(supplied)}: {detail}. "
+            "Required fields are name, frequency, entity, os, deviceClassification, "
+            "status, appType with appName or appID, and move."
+        )
+    missing = [
+        label
+        for label, value in (
+            ("frequency", frequency),
+            ("entity", entity),
+            ("os", os),
+            ("device_classification", device_classification),
+        )
+        if value is None
+    ]
+    if missing:
+        raise ValidationError(
+            f"An application probe requires {', '.join(missing)}. See "
+            "AppProbeUpdateCreateCommon: name, frequency, entity, os, "
+            "deviceClassification and status are all required."
+        )
+    if (app_name is None) == (app_id is None):
+        raise ValidationError(
+            "Name exactly one app: app_name for a predefined app, or app_id for a custom one."
+        )
+    body: dict[str, Any] = {
+        "name": name,
+        "frequency": frequency,
+        "entity": entity,
+        "os": list(os or ()),
+        "deviceClassification": list(device_classification or ()),
+        "status": status,
+        "appType": "predefined" if app_name is not None else "custom",
+        "move": dict(move) if move else {"operation": "bottom"},
+    }
+    if app_name is not None:
+        body["appName"] = app_name
+    else:
+        body["appID"] = app_id
     if additional_fields:
-        data.update(additional_fields)
-    return {"data": data}
+        body.update(additional_fields)
+    return body
 
 
 def _alert_rule_create_body(
@@ -140,19 +213,55 @@ def _alert_rule_create_body(
     threshold: float,
     severity: str,
     probe_id: str | None,
-    additional_fields: dict[str, Any] | None,
+    *,
+    category: str | None = None,
+    alert_type: str | None = None,
+    enabled: bool = True,
+    email_receiver: str | None = None,
+    criteria_type: str | None = None,
+    window: int | None = None,
+    filter: dict[str, Any] | None = None,
+    duration: int | None = None,
+    criteria: dict[str, Any] | None = None,
+    additional_fields: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
-    data: dict[str, Any] = {
-        "name": name,
-        "metric": metric,
-        "threshold": threshold,
-        "severity": severity,
-    }
+    """Build the bare ``PostAlertRuleRequest`` body (dem_alert.yaml:441-467).
+
+    The measurement is ``criteria.condition.measure`` and its threshold is
+    ``criteria.condition.thresholds``; there is no flat ``metric``/``threshold``
+    pair, no ``probe_id``, and no ``data`` wrapper.
+    """
     if probe_id is not None:
-        data["probe_id"] = probe_id
+        raise ValidationError(
+            "POST /dem/alert/rules has no probe_id. Scope a rule with "
+            "criteria.condition.filter.scopeEntity instead."
+        )
+    if criteria is None:
+        condition: dict[str, Any] = {"measure": metric, "thresholds": {"threshold": threshold}}
+        if window is not None:
+            condition["window"] = window
+        if filter is not None:
+            condition["filter"] = filter
+        criteria = {"condition": condition}
+        if duration is not None:
+            criteria["duration"] = duration
+    body: dict[str, Any] = {
+        "name": name,
+        "severity": severity,
+        "enabled": enabled,
+        "criteria": criteria,
+    }
+    for key, value in (
+        ("category", category),
+        ("type", alert_type),
+        ("criteriaType", criteria_type),
+        ("emailReceiver", email_receiver),
+    ):
+        if value is not None:
+            body[key] = value
     if additional_fields:
-        data.update(additional_fields)
-    return {"data": data}
+        body.update(additional_fields)
+    return body
 
 
 def _getdata_body(
@@ -166,8 +275,13 @@ def _getdata_body(
     limit: int | None,
     offset: int | None,
 ) -> dict[str, Any]:
-    if data_source not in QueryDataSource.__members__.values():
-        valid = ", ".join(sorted(s.value for s in QueryDataSource))
+    if data_source in STATE_DATA_SOURCES:
+        raise ValidationError(
+            f"{data_source!r} is a state source, not a data source. "
+            "Read current agent and client state with get_states."
+        )
+    if data_source not in DATA_QUERY_SOURCES:
+        valid = ", ".join(sorted(DATA_QUERY_SOURCES))
         raise ValidationError(f"Invalid data_source {data_source!r}. Must be one of: {valid}")
     body: dict[str, Any] = {"from": data_source, "select": select}
     if group_by:
@@ -176,8 +290,8 @@ def _getdata_body(
         body["where"] = where
     if order_by is not None:
         body["orderby"] = order_by
-    body["begin"] = _epoch_millis(begin)
-    body["end"] = _epoch_millis(end)
+    body["begin"] = _absolute_bound(begin)
+    body["end"] = _absolute_bound(end)
     if limit is not None:
         body["limit"] = min(limit, _MAX_QUERY_LIMIT)
     if offset is not None:
@@ -196,6 +310,7 @@ def _getentities_body(
     exp_score: builtins.list[str] | None,
     pop: builtins.list[str] | None,
     source_ip: str | None,
+    user_location: builtins.list[dict[str, str]] | None = None,
 ) -> dict[str, Any]:
     start = _epoch_seconds(start_time)
     end = _epoch_seconds(end_time)
@@ -219,17 +334,25 @@ def _getentities_body(
         body["pop"] = pop
     if source_ip is not None:
         body["sourceIp"] = source_ip
+    if user_location is not None:
+        body["userLocation"] = [dict(entry) for entry in user_location]
     return body
 
 
 def _getentities_params(
-    limit: int | None, offset: int | None, sort_order: str | None
+    limit: int | None,
+    offset: int | None,
+    sort_order: str | None,
+    sort_by: str | None = None,
 ) -> dict[str, Any]:
+    """Build the ``/query/getentities`` query (dem-workbench-query.yaml:1208-1253)."""
     params: dict[str, Any] = {}
     if limit is not None:
         params["limit"] = min(limit, _MAX_ENTITIES_LIMIT)
     if offset is not None:
         params["offset"] = offset
+    if sort_by is not None:
+        params["sortby"] = sort_by
     if sort_order is not None:
         params["sortorder"] = sort_order
     return params
@@ -277,14 +400,53 @@ def _gettraceroute_body(
         )
     body: dict[str, Any] = {
         "from": data_source,
-        "begin": _epoch_millis(begin),
-        "end": _epoch_millis(end),
+        "begin": _absolute_bound(begin),
+        "end": _absolute_bound(end),
     }
     if where is not None:
         body["where"] = where
     if order_by is not None:
         body["orderby"] = order_by
     return body
+
+
+def _alert_rule_params(
+    category: str | None,
+    alert_type: str | None,
+    enabled: bool | None,
+    severity: str | None,
+) -> dict[str, Any]:
+    """Build the ``GET /alert/rules`` query (dem_alert.yaml:1289-1316).
+
+    The operation declares ``category``, ``type``, ``enabled`` and ``severity``
+    only — there is no ``limit`` or ``offset``.
+    """
+    params: dict[str, Any] = {}
+    for key, value in (
+        ("category", category),
+        ("type", alert_type),
+        ("enabled", enabled),
+        ("severity", severity),
+    ):
+        if value is not None:
+            params[key] = value
+    return params
+
+
+def _slice_rules(body: Any, limit: int | None, offset: int | None) -> Any:
+    """Apply an SDK-side slice to an unpaginated ``{remainingQuota, rules}`` body.
+
+    ``findAlertRules`` returns every matching rule, so *limit*/*offset* are
+    honoured here rather than sent as query parameters the operation would
+    ignore.
+    """
+    if (limit is None and offset is None) or not isinstance(body, dict):
+        return body
+    rules = body.get("rules")
+    if not isinstance(rules, list):
+        return body
+    start = offset or 0
+    return {**body, "rules": rules[start : None if limit is None else start + limit]}
 
 
 def _getalerts_body(
@@ -369,22 +531,64 @@ class DemProbesResource(SyncResource):
     def create(
         self,
         name: str,
-        target: str,
+        target: str | None = None,
         *,
-        protocol: str = "https",
+        frequency: int | None = None,
+        entity: dict[str, builtins.list[str]] | None = None,
+        os: builtins.list[str] | None = None,
+        device_classification: builtins.list[str] | None = None,
+        status: int = 1,
+        app_name: str | None = None,
+        app_id: int | None = None,
+        move: dict[str, Any] | None = None,
+        protocol: str | None = None,
         interval: int | None = None,
         additional_fields: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
         """Create an application probe.
 
-        The request body is wrapped as ``{"data": {...}}`` with
-        ``name``/``target``/``protocol`` (and optional ``interval``), matching
-        the CLI.  NOTE: the gateway OpenAPI spec models a richer *bare-object*
-        body (``appName``/``appID``, ``frequency``, ``entity``, ``os``,
-        ``deviceClassification``, ``move``); pass those via *additional_fields*
-        if your tenant requires the spec shape.
+        ``POST /api/v2/dem/appprobes`` takes the probe object itself — no
+        ``data`` wrapper.  ``name``, ``frequency``, ``entity``, ``os``,
+        ``device_classification`` and ``status`` are all required, along with
+        exactly one of *app_name* (a predefined app) or *app_id* (a custom
+        one), and a ``move`` that places the probe in the priority list.
+
+        Args:
+            name: Probe name.
+            target: Retired — the schema has no target; an app probe follows
+                an app named by *app_name* or *app_id*.  Supplying it raises.
+            frequency: Probe interval in minutes.
+            entity: ``{"user": [...], "group": [...], "ou": [...]}``.
+            os: ``"windows"`` and/or ``"mac"``.
+            device_classification: ``"managed"``, ``"unmanaged"`` and/or
+                ``"not configured"``.
+            status: ``1`` to enable the probe, ``0`` to create it disabled.
+            app_name: Name of a predefined app (``appType="predefined"``).
+            app_id: ID of a custom app (``appType="custom"``).
+            move: ``{"operation": "top"|"bottom"|"after"|"before"[, "position": n]}``.
+                Defaults to ``{"operation": "bottom"}``.
+            protocol: Retired — the schema has no protocol.  Supplying it raises.
+            interval: Retired — use *frequency* (minutes).  Supplying it raises.
+            additional_fields: Extra top-level body fields, merged last.
+
+        Raises:
+            netskope.exceptions.ValidationError: If a retired argument is
+                supplied, a required field is missing, or the app selector is
+                ambiguous.
         """
-        body = _probe_create_body(name, target, protocol, interval, additional_fields)
+        body = _probe_create_body(
+            name,
+            frequency=frequency,
+            entity=entity,
+            os=os,
+            device_classification=device_classification,
+            status=status,
+            app_name=app_name,
+            app_id=app_id,
+            move=move,
+            retired={"target": target, "protocol": protocol, "interval": interval},
+            additional_fields=additional_fields,
+        )
         return self._post(_APPPROBES_PATH, json=body)
 
     def get(self, probe_id: str | int) -> dict[str, Any]:
@@ -422,14 +626,34 @@ class AsyncDemProbesResource(AsyncResource):
     async def create(
         self,
         name: str,
-        target: str,
+        target: str | None = None,
         *,
-        protocol: str = "https",
+        frequency: int | None = None,
+        entity: dict[str, builtins.list[str]] | None = None,
+        os: builtins.list[str] | None = None,
+        device_classification: builtins.list[str] | None = None,
+        status: int = 1,
+        app_name: str | None = None,
+        app_id: int | None = None,
+        move: dict[str, Any] | None = None,
+        protocol: str | None = None,
         interval: int | None = None,
         additional_fields: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
         """See :meth:`DemProbesResource.create`."""
-        body = _probe_create_body(name, target, protocol, interval, additional_fields)
+        body = _probe_create_body(
+            name,
+            frequency=frequency,
+            entity=entity,
+            os=os,
+            device_classification=device_classification,
+            status=status,
+            app_name=app_name,
+            app_id=app_id,
+            move=move,
+            retired={"target": target, "protocol": protocol, "interval": interval},
+            additional_fields=additional_fields,
+        )
         return await self._post(_APPPROBES_PATH, json=body)
 
     async def get(self, probe_id: str | int) -> dict[str, Any]:
@@ -531,14 +755,36 @@ class DemAlertRulesResource(SyncResource):
 
         return DemAlertRuleResponses(self._transport)
 
-    def list(self, *, limit: int | None = None, offset: int | None = None) -> dict[str, Any]:
-        """List configured DEM alert rules."""
-        params: dict[str, Any] = {}
-        if limit is not None:
-            params["limit"] = limit
-        if offset is not None:
-            params["offset"] = offset
-        return self._get(_ALERT_RULES_PATH, **params)
+    def list(
+        self,
+        *,
+        category: str | None = None,
+        type: str | None = None,
+        enabled: bool | None = None,
+        severity: str | None = None,
+        limit: int | None = None,
+        offset: int | None = None,
+    ) -> dict[str, Any]:
+        """List configured DEM alert rules.
+
+        ``GET /api/v2/dem/alert/rules`` declares only the four filters below
+        and returns every match, so *limit* and *offset* slice the decoded
+        ``rules`` collection on the client rather than travelling as query
+        parameters.
+
+        Args:
+            category: ``"Network"``, ``"Platform"``, ``"Private Apps"``,
+                ``"User Experience"`` or ``"Site"``.
+            type: An ``AlertType`` value, e.g. ``"Experience Score"``.
+            enabled: Restrict to enabled or disabled rules.
+            severity: ``"info"``, ``"low"``, ``"medium"``, ``"high"`` or
+                ``"critical"``.
+            limit: Rules to keep, applied by the SDK after decoding.
+            offset: Rules to skip, applied by the SDK after decoding.
+        """
+        params = _alert_rule_params(category, type, enabled, severity)
+        body = self._get(_ALERT_RULES_PATH, **params)
+        return cast(dict[str, Any], _slice_rules(body, limit, offset))
 
     def create(
         self,
@@ -548,20 +794,64 @@ class DemAlertRulesResource(SyncResource):
         *,
         severity: str = "medium",
         probe_id: str | None = None,
+        category: str | None = None,
+        type: str | None = None,
+        enabled: bool = True,
+        email_receiver: str | None = None,
+        criteria_type: str | None = None,
+        window: int | None = None,
+        filter: dict[str, Any] | None = None,
+        duration: int | None = None,
+        criteria: dict[str, Any] | None = None,
         additional_fields: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
         """Create a DEM alert rule.
 
-        The request body is wrapped as ``{"data": {...}}`` with flat
-        ``name``/``metric``/``threshold``/``severity`` (and optional
-        ``probe_id``), matching the CLI.  NOTE: the gateway OpenAPI spec models
-        a bare-object body with a nested ``criteria`` structure (the metric is
-        ``criteria.condition.measure`` and the threshold is
-        ``criteria.condition.thresholds``) and has no ``probe_id`` field; pass
-        spec-shaped fields via *additional_fields* if your tenant requires them.
+        ``POST /api/v2/dem/alert/rules`` takes the rule object itself.  The
+        measurement and its threshold live inside ``criteria``:
+        ``{"condition": {"measure": <metric>, "thresholds": {"threshold":
+        <threshold>}}}``.
+
+        Args:
+            name: Rule name.
+            metric: An ``AlertRuleMeasure`` value (e.g. ``"userDemScore"``,
+                ``"popLatency_p95"``), sent as ``criteria.condition.measure``.
+            threshold: Sent as ``criteria.condition.thresholds.threshold``.
+            severity: ``"info"``, ``"low"``, ``"medium"``, ``"high"`` or
+                ``"critical"``.
+            probe_id: Retired — the schema has no probe_id.  Supplying it
+                raises; scope a rule with ``criteria.condition.filter``.
+            category: An ``AlertCategory`` value.
+            type: An ``AlertType`` value.
+            enabled: Whether the rule is active.
+            email_receiver: Address to notify.
+            criteria_type: ``criteriaType``; the API supports ``"event"``.
+            window: Aggregation window in seconds, inside ``criteria.condition``.
+            filter: ``criteria.condition.filter`` scope expression.
+            duration: Seconds the threshold must stay violated.
+            criteria: A complete ``criteria`` object, replacing the one built
+                from *metric*/*threshold*/*window*/*filter*/*duration*.
+            additional_fields: Extra top-level body fields, merged last.
+
+        Raises:
+            netskope.exceptions.ValidationError: If *probe_id* is supplied.
         """
         body = _alert_rule_create_body(
-            name, metric, threshold, severity, probe_id, additional_fields
+            name,
+            metric,
+            threshold,
+            severity,
+            probe_id,
+            category=category,
+            alert_type=type,
+            enabled=enabled,
+            email_receiver=email_receiver,
+            criteria_type=criteria_type,
+            window=window,
+            filter=filter,
+            duration=duration,
+            criteria=criteria,
+            additional_fields=additional_fields,
         )
         return self._post(_ALERT_RULES_PATH, json=body)
 
@@ -588,14 +878,20 @@ class AsyncDemAlertRulesResource(AsyncResource):
 
         return AsyncDemAlertRuleResponses(self._transport)
 
-    async def list(self, *, limit: int | None = None, offset: int | None = None) -> dict[str, Any]:
-        """List configured DEM alert rules."""
-        params: dict[str, Any] = {}
-        if limit is not None:
-            params["limit"] = limit
-        if offset is not None:
-            params["offset"] = offset
-        return await self._get(_ALERT_RULES_PATH, **params)
+    async def list(
+        self,
+        *,
+        category: str | None = None,
+        type: str | None = None,
+        enabled: bool | None = None,
+        severity: str | None = None,
+        limit: int | None = None,
+        offset: int | None = None,
+    ) -> dict[str, Any]:
+        """See :meth:`DemAlertRulesResource.list`."""
+        params = _alert_rule_params(category, type, enabled, severity)
+        body = await self._get(_ALERT_RULES_PATH, **params)
+        return cast(dict[str, Any], _slice_rules(body, limit, offset))
 
     async def create(
         self,
@@ -605,11 +901,34 @@ class AsyncDemAlertRulesResource(AsyncResource):
         *,
         severity: str = "medium",
         probe_id: str | None = None,
+        category: str | None = None,
+        type: str | None = None,
+        enabled: bool = True,
+        email_receiver: str | None = None,
+        criteria_type: str | None = None,
+        window: int | None = None,
+        filter: dict[str, Any] | None = None,
+        duration: int | None = None,
+        criteria: dict[str, Any] | None = None,
         additional_fields: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
         """See :meth:`DemAlertRulesResource.create`."""
         body = _alert_rule_create_body(
-            name, metric, threshold, severity, probe_id, additional_fields
+            name,
+            metric,
+            threshold,
+            severity,
+            probe_id,
+            category=category,
+            alert_type=type,
+            enabled=enabled,
+            email_receiver=email_receiver,
+            criteria_type=criteria_type,
+            window=window,
+            filter=filter,
+            duration=duration,
+            criteria=criteria,
+            additional_fields=additional_fields,
         )
         return await self._post(_ALERT_RULES_PATH, json=body)
 
@@ -708,16 +1027,20 @@ class DemQueryResource(SyncResource):
         exp_score: builtins.list[str] | None = None,
         pop: builtins.list[str] | None = None,
         source_ip: str | None = None,
+        user_location: builtins.list[dict[str, str]] | None = None,
         limit: int | None = None,
         offset: int | None = None,
+        sort_by: str | None = None,
         sort_order: str | None = None,
     ) -> dict[str, Any]:
         """List user/device entities (``getentities``).
 
         ``start_time``/``end_time`` are epoch **seconds** and the window must
-        be at most 48 hours.  ``limit`` (capped at 100), ``offset`` and
-        ``sort_order`` are sent as query parameters; all other filters go in
-        the JSON body.
+        be at most 48 hours.  ``limit`` (capped at 100), ``offset``,
+        ``sort_by`` (API default ``user_score``) and ``sort_order`` are sent as
+        query parameters; all other filters, ``user_location`` included, go in
+        the JSON body as ``userLocation``
+        (``[{"city": ..., "country": ..., "region": ...}]``).
         """
         body = _getentities_body(
             start_time,
@@ -730,8 +1053,9 @@ class DemQueryResource(SyncResource):
             exp_score,
             pop,
             source_ip,
+            user_location,
         )
-        params = _getentities_params(limit, offset, sort_order)
+        params = _getentities_params(limit, offset, sort_order, sort_by)
         return self._post(_QUERY_GETENTITIES_PATH, json=body, retry_safe=True, **params)
 
     def get_states(
@@ -846,8 +1170,10 @@ class AsyncDemQueryResource(AsyncResource):
         exp_score: builtins.list[str] | None = None,
         pop: builtins.list[str] | None = None,
         source_ip: str | None = None,
+        user_location: builtins.list[dict[str, str]] | None = None,
         limit: int | None = None,
         offset: int | None = None,
+        sort_by: str | None = None,
         sort_order: str | None = None,
     ) -> dict[str, Any]:
         """See :meth:`DemQueryResource.get_entities`."""
@@ -862,8 +1188,9 @@ class AsyncDemQueryResource(AsyncResource):
             exp_score,
             pop,
             source_ip,
+            user_location,
         )
-        params = _getentities_params(limit, offset, sort_order)
+        params = _getentities_params(limit, offset, sort_order, sort_by)
         return await self._post(_QUERY_GETENTITIES_PATH, json=body, retry_safe=True, **params)
 
     async def get_states(

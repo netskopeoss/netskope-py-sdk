@@ -17,6 +17,11 @@ from netskope.response import ApiResponse
 
 T = TypeVar("T", bound=BaseModel)
 
+# ``userName`` is a property of EnterpriseAccount, not EnterpriseUser
+# (usermanager.yaml:1034-1042), so a username filter must be account-scoped —
+# as the spec's own getusers example is (:358).
+USERNAME_FILTER_FIELD = "accounts.userName"
+
 
 def _body(query: UserQuery) -> dict[str, Any]:
     try:
@@ -84,7 +89,11 @@ class UsersResponses(SyncResource):
     def get_page(self, identifier: str, *, by: str | None = None) -> ApiResponse[Page[UmUser]]:
         if by not in (None, "email", "username"):
             raise ValidationError("by must be 'email' or 'username'.")
-        field = "emails" if by == "email" or (by is None and "@" in identifier) else "userName"
+        field = (
+            "emails"
+            if by == "email" or (by is None and "@" in identifier)
+            else USERNAME_FILTER_FIELD
+        )
         return self.list_page(UserQuery(filter={"and": [{field: {"eq": identifier}}]}, limit=1))
 
 
@@ -124,7 +133,11 @@ class AsyncUsersResponses(AsyncResource):
     ) -> ApiResponse[Page[UmUser]]:
         if by not in (None, "email", "username"):
             raise ValidationError("by must be 'email' or 'username'.")
-        field = "emails" if by == "email" or (by is None and "@" in identifier) else "userName"
+        field = (
+            "emails"
+            if by == "email" or (by is None and "@" in identifier)
+            else USERNAME_FILTER_FIELD
+        )
         return await self.list_page(
             UserQuery(filter={"and": [{field: {"eq": identifier}}]}, limit=1)
         )

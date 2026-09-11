@@ -117,27 +117,27 @@ class TestUsersResource:
 
     @respx.mock
     def test_get_autodetects_username(self, client: NetskopeClient) -> None:
-        """Identifiers without '@' are looked up via the userName filter."""
+        """Identifiers without '@' filter on accounts.userName (usermanager.yaml:358)."""
         route = respx.post(_GET_USERS_URL).mock(
             return_value=httpx.Response(200, json=_USERS_ENVELOPE)
         )
         UsersResource(client._transport).get("alice")
         assert sent_json(route) == {
             "query": {
-                "filter": {"and": [{"userName": {"eq": "alice"}}]},
+                "filter": {"and": [{"accounts.userName": {"eq": "alice"}}]},
                 "paging": {"offset": 0, "limit": 1},
             }
         }
 
     @respx.mock
     def test_get_by_username_overrides_autodetect(self, client: NetskopeClient) -> None:
-        """by='username' forces a userName lookup even for '@' identifiers."""
+        """by='username' forces an accounts.userName lookup even for '@' identifiers."""
         route = respx.post(_GET_USERS_URL).mock(
             return_value=httpx.Response(200, json=_USERS_ENVELOPE)
         )
         UsersResource(client._transport).get("alice@example.com", by="username")
         assert sent_json(route)["query"]["filter"] == {
-            "and": [{"userName": {"eq": "alice@example.com"}}]
+            "and": [{"accounts.userName": {"eq": "alice@example.com"}}]
         }
 
     @respx.mock
@@ -298,7 +298,9 @@ class TestAsyncUsersResource:
             return_value=httpx.Response(200, json=_USERS_ENVELOPE)
         )
         await AsyncUsersResource(aclient._transport).get("alice")
-        assert sent_json(route)["query"]["filter"] == {"and": [{"userName": {"eq": "alice"}}]}
+        assert sent_json(route)["query"]["filter"] == {
+            "and": [{"accounts.userName": {"eq": "alice"}}]
+        }
 
     @respx.mock
     async def test_get_returns_none_on_empty(self, aclient: AsyncNetskopeClient) -> None:

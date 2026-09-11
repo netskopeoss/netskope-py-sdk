@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from netskope.models.administration import AdminUser
 from netskope.models.rbac import (
     RbacRoleDetail,
     RbacRoleSummary,
@@ -9,7 +10,6 @@ from netskope.models.rbac import (
     RoleMutationReceipt,
     RolePatch,
 )
-from netskope.models.scim import ScimUser
 from netskope.pagination import Page
 from netskope.resources._base import AsyncResource, SyncResource
 from netskope.resources._extract import validate_id
@@ -72,7 +72,7 @@ class RbacAdminsResponses(SyncResource):
         filter_expr: str | None = None,
         count: int = 100,
         start_index: int = 1,
-    ) -> ApiResponse[Page[ScimUser]]:
+    ) -> ApiResponse[Page[AdminUser]]:
         params = _build_admins_page_params(filter_expr, count, start_index)
         response = self._transport.request("GET", _ADMINS_PATH, params=params)
         return ApiResponse(response, lambda raw: _parse_admins_page(raw.json(), start_index, count))
@@ -125,7 +125,7 @@ class AsyncRbacAdminsResponses(AsyncResource):
         filter_expr: str | None = None,
         count: int = 100,
         start_index: int = 1,
-    ) -> ApiResponse[Page[ScimUser]]:
+    ) -> ApiResponse[Page[AdminUser]]:
         params = _build_admins_page_params(filter_expr, count, start_index)
         response = await self._transport.request("GET", _ADMINS_PATH, params=params)
         return ApiResponse(response, lambda raw: _parse_admins_page(raw.json(), start_index, count))

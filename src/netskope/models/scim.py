@@ -89,7 +89,12 @@ class ScimUser(NetskopeModel):
     active: bool | None = None
     emails: list[ScimEmail] = Field(default_factory=list)
     name: dict[str, Any] | None = None
+
     groups: list[dict[str, Any]] = Field(default_factory=list)
+    """Always empty against this API: neither ``GET /Users`` (scim-apis.yaml:1029-1189)
+    nor ``GET /Users/{id}`` (:1711-1860) declares a ``groups`` property. Read group
+    membership from ``client.scim.groups.get(gid, attributes="members")`` instead."""
+
     external_id: str | None = Field(None, alias="externalId")
     schemas: list[str] = Field(default_factory=list)
 
@@ -104,10 +109,13 @@ class ScimGroupMember(NetskopeModel):
 class ScimGroup(NetskopeModel):
     """A SCIM-provisioned group.
 
+    ``members`` is empty unless the read asked for it: the group endpoints
+    exclude members by default (scim-apis.yaml:462).
+
     Example::
 
-        for group in client.scim.groups.list():
-            print(f"{group.display_name}: {len(group.members)} members")
+        group = client.scim.groups.get("grp-1", attributes="members")
+        print(f"{group.display_name}: {len(group.members)} members")
     """
 
     id: str | None = None

@@ -419,7 +419,13 @@ class AiccEntityCounts(NetskopeModel):
 
 
 class AiccDataCoverage(NetskopeModel):
-    data_available_since: datetime | None
+    """``/data-coverage`` payload (aicc/inventory.yaml:5978-5981).
+
+    ``data_available_since`` is nullable and the schema lists no required
+    properties, so a reply that omits it still decodes.
+    """
+
+    data_available_since: datetime | None = None
 
 
 class AiccAlertMatrixItem(NetskopeModel):

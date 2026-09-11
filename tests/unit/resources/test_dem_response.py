@@ -14,6 +14,20 @@ from netskope.exceptions import APIError, ResponseValidationError, ValidationErr
 BASE = "https://t.goskope.com"
 WINDOW = {"start_time": 1000, "end_time": 2000}
 QUERY = {"begin": 1000000, "end": 2000000}
+# QueryInput.begin/.end are AbsoluteDate objects, not epoch integers
+# (dem-workbench-query.yaml:419-433); the ints above are epoch milliseconds.
+QUERY_BOUNDS = {
+    "begin": {"absolute": "1970-01-01T00:16:40Z"},
+    "end": {"absolute": "1970-01-01T00:33:20Z"},
+}
+# The minimum an app probe needs (AppProbeUpdateCreateCommon, demconfig.yaml:2666-2707).
+PROBE_ARGS = {
+    "app_name": "Slack",
+    "frequency": 5,
+    "entity": {"user": ["user1"]},
+    "os": ["windows"],
+    "device_classification": ["managed"],
+}
 CASES = [
     (
         "probes",
@@ -22,7 +36,7 @@ CASES = [
         {},
         "GET",
         "/api/v2/dem/appprobes",
-        {"data": [{"id": "p", "interval": "60"}]},
+        {"data": [{"id": "p", "frequency": 60}]},
         None,
     ),
     (
@@ -42,7 +56,7 @@ CASES = [
         {},
         "GET",
         "/api/v2/dem/alert/rules",
-        {"rules": [{"id": "r", "threshold": "7.5"}]},
+        {"remainingQuota": 7, "rules": [{"id": "r", "severity": "high"}]},
         None,
     ),
     (
@@ -66,7 +80,7 @@ CASES = [
             "data": [{"user": "u", "score_alias": "007"}],
             "meta": {"total": "1", "sampling_enabled": "false"},
         },
-        {"from": "ux_score", "select": ["user"], "begin": 1000000, "end": 2000000},
+        {"from": "ux_score", "select": ["user"], **QUERY_BOUNDS},
     ),
     (
         "query",
@@ -76,7 +90,7 @@ CASES = [
         "POST",
         "/api/v2/dem/query/getdataset",
         {"data": [{"user": "u"}]},
-        {"from": "http_all", "select": ["user"], "begin": 1000000, "end": 2000000},
+        {"from": "http_all", "select": ["user"], **QUERY_BOUNDS},
     ),
     (
         "query",
@@ -106,7 +120,7 @@ CASES = [
         "POST",
         "/api/v2/dem/query/gettraceroute",
         {"nodes": [{"id": "a"}], "edges": []},
-        {"from": "traceroute_pop", "begin": 1000000, "end": 2000000},
+        {"from": "traceroute_pop", **QUERY_BOUNDS},
     ),
     (
         "query",
@@ -408,36 +422,38 @@ def test_malformed_query_retains_same_request(client, payload):
 
 @pytest.mark.parametrize("asynchronous", [False, True])
 @pytest.mark.parametrize(
-    "group,args,path,payload",
+    "group,args,kwargs,path,payload",
     [
         (
             "probes",
-            ("probe", "https://example.com"),
+            ("probe",),
+            PROBE_ARGS,
             "/api/v2/dem/appprobes",
-            {"id": "p", "interval": "60"},
+            {"id": "p", "frequency": 5},
         ),
         (
             "alert_rules",
-            ("rule", "latency", 20.0),
+            ("rule", "userDemScore", 20.0),
+            {},
             "/api/v2/dem/alert/rules",
-            {"id": "r", "threshold": "20"},
+            {"id": "r", "severity": "medium"},
         ),
     ],
 )
 @respx.mock
 async def test_mutations_are_typed_and_not_replayed(
-    client, aclient, asynchronous, group, args, path, payload
+    client, aclient, asynchronous, group, args, kwargs, path, payload
 ):
     route = respx.post(BASE + path).respond(201, json=payload)
     method = getattr((aclient if asynchronous else client).dem, group).with_response.create
-    response = method(*args)
+    response = method(*args, **kwargs)
     if asynchronous:
         response = await response
     assert isinstance(response.parse(), BaseModel) and response.json() == payload
     assert route.call_count == 1
     route.respond(503, json={"message": "unavailable"})
     with pytest.raises(APIError):
-        result = method(*args)
+        result = method(*args, **kwargs)
         if asynchronous:
             await result
     assert route.call_count == 2

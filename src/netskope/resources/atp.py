@@ -19,7 +19,7 @@ HTTP error statuses *and* on HTTP-200 bodies of the form
 Example::
 
     # Submit a file for sandbox analysis, then poll for the report
-    submission = client.atp.scan_file_path("/tmp/suspicious.exe")
+    submission = client.atp.scan_file_path("/tmp/suspicious.zip")
     report = client.atp.get_report(submission["jobid"])
     print(report["verdict"])
 
@@ -29,12 +29,16 @@ Example::
 
 from __future__ import annotations
 
-import base64
 import functools
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
-from netskope.resources._atp_response import AsyncAtpResponses, AtpResponses
+from netskope.resources._atp_response import (
+    AsyncAtpResponses,
+    AtpResponses,
+    file_request_from_parts,
+    filescan_parts,
+)
 from netskope.resources._base import AsyncResource, SyncResource
 from netskope.resources._extract import quote_id
 
@@ -50,21 +54,6 @@ _TPAAS_SUBMISSION = f"{_BASE}/tpaas/submission"
 
 # TPaaS URL scanning (urlscan).
 _TPAAS_URLSCAN = f"{_BASE}/tpaas/urlscan"
-
-
-def _filescan_body(filename: str, content: bytes, scan_type: str) -> dict[str, Any]:
-    """Build the sandbox file-scan JSON body.
-
-    The file is base64-encoded and wrapped under ``data`` alongside the
-    filename and scan type, matching the shape the service accepts.
-    """
-    return {
-        "data": {
-            "filename": filename,
-            "content": base64.b64encode(content).decode("ascii"),
-            "type": scan_type,
-        }
-    }
 
 
 def _report_path(job_id: str) -> str:
@@ -105,24 +94,34 @@ class AtpResource(SyncResource):
     ) -> dict[str, Any]:
         """Submit a file for sandbox malware analysis.
 
-        The file *content* is base64-encoded into the JSON request body.  The
-        response contains a ``jobid`` to pass to :meth:`get_report`.
+        ``POST /scans/filescan`` is a ``multipart/form-data`` upload with the
+        file as a binary ``file`` part and a required ``scantype`` query
+        parameter.  *content* must be a password-protected (ZipCrypto,
+        password ``infected``) ZIP holding exactly one exe/pdf/doc/xls/ppt/rtf
+        member of at most 16 MB.  The response contains a ``jobid`` to pass to
+        :meth:`get_report`.
 
         Args:
-            filename: Name of the file being submitted.
-            content: Raw file bytes.
+            filename: Name of the ZIP archive being submitted.
+            content: Raw archive bytes.
             scan_type: Scan type; the service currently supports ``"sandbox"``.
 
         Returns:
             The decoded JSON body (``jobid``, ``md5``, ``sha256``, ...).
+
+        Raises:
+            netskope.exceptions.ValidationError: If the upload is not a
+                supported encrypted ZIP archive.
         """
-        return self._post(_FILESCAN_PATH, json=_filescan_body(filename, content, scan_type))
+        params, files = filescan_parts(file_request_from_parts(filename, content, scan_type))
+        response = self._transport.request("POST", _FILESCAN_PATH, params=params, files=files)
+        return cast(dict[str, Any], response.json())
 
     def scan_file_path(self, path: str | Path, *, scan_type: str = "sandbox") -> dict[str, Any]:
         """Read *path* from disk and submit it via :meth:`scan_file`.
 
         Args:
-            path: Filesystem path to the file to submit.
+            path: Filesystem path to the ZIP archive to submit.
             scan_type: Scan type; the service currently supports ``"sandbox"``.
         """
         p = Path(path)
@@ -210,7 +209,9 @@ class AsyncAtpResource(AsyncResource):
 
         See :meth:`AtpResource.scan_file`.
         """
-        return await self._post(_FILESCAN_PATH, json=_filescan_body(filename, content, scan_type))
+        params, files = filescan_parts(file_request_from_parts(filename, content, scan_type))
+        response = await self._transport.request("POST", _FILESCAN_PATH, params=params, files=files)
+        return cast(dict[str, Any], response.json())
 
     async def scan_file_path(
         self, path: str | Path, *, scan_type: str = "sandbox"

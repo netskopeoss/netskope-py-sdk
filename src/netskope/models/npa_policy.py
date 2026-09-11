@@ -29,6 +29,18 @@ class NpaSearchType(StrEnum):
     PRIVATE_APPS = "private_apps"
 
 
+class NpaTagType(StrEnum):
+    """Tag scope for NPA name validation.
+
+    ``GET /npa/namevalidation`` takes ``tag_type`` as the string ``"1"`` or
+    ``"2"``, "required only for resourceType tag"
+    (``npa_generic.yaml:282-292``).
+    """
+
+    PRIVATE_APP = "1"
+    PUBLISHER = "2"
+
+
 class NpaRuleAction(NpaRequest):
     action_name: Literal["allow", "block"]
 
@@ -121,6 +133,15 @@ class NpaPolicyRuleCreate(NpaPolicyRulePatch):
 
 
 class NpaGroupOrder(NpaRequest):
+    """Where a new policy group lands relative to an existing one.
+
+    Serialized as a single ``group_order`` object, as the API accepts it.
+    ``npa_policygroup_request`` (``policy/npa_policygroup.yaml:7-20``) nests a
+    second ``group_order`` inside the first, whose wrapper carries no other
+    property — an authoring slip in the spec rather than a shape the gateway
+    wants, so the SDK sends one level and this is deliberately not "fixed".
+    """
+
     group_id: str
     order: Literal["before", "after"]
 
@@ -144,9 +165,16 @@ class NpaPolicyGroupCreate(NpaPolicyGroupPatch):
 
 
 class NpaNameValidation(NetskopeModel):
-    """The result of validating an NPA resource name."""
+    """The result of validating an NPA resource name.
 
-    is_valid_name: bool = Field(validation_alias=AliasChoices("is_valid_name", "valid"))
+    ``validate_name_response`` (``npa_generic.yaml:188-199``) marks nothing
+    required and declares no ``message``, so a response that reports neither
+    parses with both left unset rather than raising.
+    """
+
+    is_valid_name: bool | None = Field(
+        None, validation_alias=AliasChoices("is_valid_name", "valid")
+    )
     message: str | None = None
 
 
@@ -156,6 +184,10 @@ class NpaPolicyRule(NetskopeModel):
     Note:
         The API represents ``enabled`` as the string ``"1"`` or ``"0"``,
         not a boolean — it is preserved as returned.
+        ``npa_policy_response_item`` (``policy/npa_policy.yaml:54-64``)
+        declares only ``rule_data``, ``rule_id`` and ``rule_name``; the
+        remaining fields are modelled because live responses carry them, and
+        any further key stays reachable through the model's extras.
     """
 
     rule_id: int | None = None

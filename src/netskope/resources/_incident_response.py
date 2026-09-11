@@ -9,7 +9,8 @@ from typing import Any, TypeVar
 from pydantic import BaseModel
 from pydantic import ValidationError as PydanticValidationError
 
-from netskope.exceptions import ValidationError
+from netskope.datasearch import DATASEARCH_TIMEOUT_DEFAULT
+from netskope.exceptions import ResponseValidationError, ValidationError
 from netskope.models.alerts import DatasearchBucket
 from netskope.models.incidents import (
     Anomaly,
@@ -71,6 +72,10 @@ def _uci(body: Any) -> UserConfidenceIndex:
         if len(data["data"]) != 1:
             raise ValueError("Expected one user's UCI result.")
         data = _object(data["data"][0])
+    # ubadatasvc.yaml:61-69 defines the reply as confidences plus userId. The
+    # score/user keys are not in that schema; they are accepted here only so a
+    # tenant returning them is not rejected outright, and they reach the caller
+    # through the model's extra fields rather than a declared attribute.
     if not any(key in data for key in ("confidences", "score", "user", "userId")):
         raise ValueError("Expected a UCI time series or score result.")
     return UserConfidenceIndex.model_validate(data)
@@ -78,6 +83,12 @@ def _uci(body: Any) -> UserConfidenceIndex:
 
 def _forensics(body: Any) -> IncidentForensics:
     data = _object(body)
+    reported = data.get("error")
+    if isinstance(reported, str) and reported.strip():
+        # ims_forensics.yaml:25-36 makes `data` a oneOf[Forensics, Error], and
+        # :60-94 shows the Error arm returned on HTTP 200 too. Name the reason
+        # rather than reporting an unrecognised envelope.
+        raise ResponseValidationError(f"The forensics request failed: {reported}")
     if not any(key in data for key in ("content", "meta", "preview_image")):
         raise ValueError("Expected a DLP forensics result.")
     return IncidentForensics.model_validate(data)
@@ -150,9 +161,18 @@ class IncidentResponses(SyncResource):
         descending: bool | None = None,
         offset: int | None = None,
         limit: int | None = None,
+        timeout: int | None = DATASEARCH_TIMEOUT_DEFAULT,
     ) -> ApiResponse[Page[Incident]]:
         params = _build_page_params(
-            query, fields, start_time, end_time, order_by, descending, offset, limit
+            query,
+            fields,
+            start_time,
+            end_time,
+            order_by,
+            descending,
+            offset,
+            limit,
+            timeout=timeout,
         )
         return self._response(
             "GET",
@@ -172,9 +192,18 @@ class IncidentResponses(SyncResource):
         order_by: str | None = None,
         descending: bool | None = None,
         limit: int | None = None,
+        timeout: int | None = DATASEARCH_TIMEOUT_DEFAULT,
     ) -> ApiResponse[Page[DatasearchBucket]]:
         params = _build_aggregate_params(
-            group_by, query, fields, start_time, end_time, order_by, descending, limit
+            group_by,
+            query,
+            fields,
+            start_time,
+            end_time,
+            order_by,
+            descending,
+            limit,
+            timeout=timeout,
         )
         return self._response(
             "GET", _SEARCH_PATH, lambda body: _parse_aggregate_page(body, limit), params=params
@@ -328,9 +357,18 @@ class AsyncIncidentResponses(AsyncResource):
         descending: bool | None = None,
         offset: int | None = None,
         limit: int | None = None,
+        timeout: int | None = DATASEARCH_TIMEOUT_DEFAULT,
     ) -> ApiResponse[Page[Incident]]:
         params = _build_page_params(
-            query, fields, start_time, end_time, order_by, descending, offset, limit
+            query,
+            fields,
+            start_time,
+            end_time,
+            order_by,
+            descending,
+            offset,
+            limit,
+            timeout=timeout,
         )
         return await self._response(
             "GET",
@@ -350,9 +388,18 @@ class AsyncIncidentResponses(AsyncResource):
         order_by: str | None = None,
         descending: bool | None = None,
         limit: int | None = None,
+        timeout: int | None = DATASEARCH_TIMEOUT_DEFAULT,
     ) -> ApiResponse[Page[DatasearchBucket]]:
         params = _build_aggregate_params(
-            group_by, query, fields, start_time, end_time, order_by, descending, limit
+            group_by,
+            query,
+            fields,
+            start_time,
+            end_time,
+            order_by,
+            descending,
+            limit,
+            timeout=timeout,
         )
         return await self._response(
             "GET", _SEARCH_PATH, lambda body: _parse_aggregate_page(body, limit), params=params

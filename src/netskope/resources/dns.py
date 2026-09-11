@@ -17,7 +17,9 @@ from __future__ import annotations
 
 import builtins
 import functools
-from typing import Any
+from typing import Any, Final, Literal, cast
+
+import httpx
 
 from netskope._pagination import AsyncPaginatedResponse, SyncPaginatedResponse
 from netskope.exceptions import ValidationError
@@ -29,7 +31,7 @@ from netskope.resources._dns_response import (
     DnsInheritanceGroupsResponses,
     DnsResponses,
 )
-from netskope.resources._extract import extract_item, extract_list, validate_id
+from netskope.resources._extract import extract_item, extract_list, id_strings, validate_id
 
 _DNS_PATH = "/api/v2/profiles/dns"
 _DEPLOY_PATH = f"{_DNS_PATH}/deploy"
@@ -53,6 +55,11 @@ def _extract_profiles(body: dict[str, Any]) -> list[dict[str, Any]]:
 def _extract_inheritance_groups(body: dict[str, Any]) -> list[dict[str, Any]]:
     """List responses use an ``{"inheritancegroups": [...]}`` envelope."""
     return extract_list(body, "inheritancegroups", "inheritance_groups", "groups")
+
+
+def _body(response: httpx.Response) -> dict[str, Any]:
+    """Decode a JSON response body for the writes that also send query parameters."""
+    return cast(dict[str, Any], response.json())
 
 
 def _build_list_params(
@@ -85,10 +92,17 @@ def _build_reference_params(
     return params
 
 
+# ``DNSProfileRequest.log_traffic`` (profiles/dns.yaml:560-565) and
+# ``DNSProfileUpdateRequest.log_traffic`` (:852-856) are a two-value string
+# enum, not a boolean.
+LogTraffic = Literal["Blocked DNS", "All DNS"]
+_LOG_TRAFFIC_VALUES: Final[tuple[str, ...]] = ("Blocked DNS", "All DNS")
+
+
 def _build_update_payload(
     name: str | None,
     description: str | None,
-    log_traffic: bool | None = None,
+    log_traffic: LogTraffic | None = None,
 ) -> dict[str, Any]:
     payload: dict[str, Any] = {}
     if name is not None:
@@ -96,23 +110,44 @@ def _build_update_payload(
     if description is not None:
         payload["description"] = description
     if log_traffic is not None:
+        if log_traffic not in _LOG_TRAFFIC_VALUES:
+            raise ValidationError(f"log_traffic must be one of: {', '.join(_LOG_TRAFFIC_VALUES)}.")
         payload["log_traffic"] = log_traffic
     if not payload:
         raise ValidationError("At least one field to update must be provided.")
     return payload
 
 
-def _build_deploy_payload(
+def _deploy_request(
     deploy_all: bool,
     ids: builtins.list[int | str] | None,
     change_note: str | None,
-) -> dict[str, Any]:
+    *,
+    require_change_note: bool,
+) -> tuple[dict[str, Any], dict[str, Any]]:
+    """Split a deploy into the query it takes and the body it takes.
+
+    ``all`` is a query parameter on both deploy endpoints — ``/dns/deploy``
+    (profiles/dns.yaml:1874-1883) and ``/dns/inheritancegroups/deploy``
+    (:2367-2376) — and putting it in the body both misses the flag and sends a
+    body missing its required keys.  Those bodies are ``DNSDeployRequest``
+    (``required: [change_note, ids]``, :1328-1332) and
+    ``InheritanceGroupDeployRequest`` (``required: [ids]``, :1345-1348); their
+    ``ids`` are strings.
+    """
     if deploy_all == (ids is not None):
         raise ValidationError("Provide exactly one of all=True or ids=[...].")
-    body: dict[str, Any] = {"all": True} if deploy_all else {"ids": builtins.list(ids or [])}
+    params: dict[str, Any] = {}
+    body: dict[str, Any] = {}
+    if deploy_all:
+        params["all"] = True
+    else:
+        body["ids"] = id_strings(builtins.list(ids or []), "ids")
+        if change_note is None and require_change_note:
+            raise ValidationError("change_note is required when deploying named DNS profiles.")
     if change_note is not None:
         body["change_note"] = change_note
-    return body
+    return params, body
 
 
 class DnsInheritanceGroupsResource(SyncResource):
@@ -150,13 +185,23 @@ class DnsInheritanceGroupsResource(SyncResource):
         body = self._get(f"{_GROUPS_PATH}/{validate_id(group_id, 'group_id')}")
         return DnsInheritanceGroup.model_validate(extract_item(body))
 
-    def create(self, name: str) -> DnsInheritanceGroup:
+    def create(self, name: str, *, interactive: bool = True) -> DnsInheritanceGroup:
         """Create a DNS inheritance group.
+
+        Note:
+            *interactive* is sent as the ``interactive`` query parameter.  The
+            gateway defaults it to ``false``, which deploys the write to the
+            live tenant immediately; the SDK defaults it to ``True`` so the
+            change waits in a ``Pending-*`` state until :meth:`deploy` applies
+            it.  Pass ``interactive=False`` for the gateway's deploy-on-write
+            behaviour.
 
         Args:
             name: Group name (must be unique within the tenant).
+            interactive: Leave the new group pending instead of deploying it
+                (``profiles/dns.yaml:2055-2064``).
         """
-        body = self._post(_GROUPS_PATH, json={"name": name})
+        body = self._post(_GROUPS_PATH, json={"name": name}, interactive=interactive)
         return DnsInheritanceGroup.model_validate(extract_item(body))
 
     def update(
@@ -165,20 +210,34 @@ class DnsInheritanceGroupsResource(SyncResource):
         *,
         name: str | None = None,
         description: str | None = None,
+        interactive: bool = True,
     ) -> DnsInheritanceGroup:
         """Partial-update a DNS inheritance group (PATCH); only set fields are sent.
+
+        Note:
+            *interactive* is sent as the ``interactive`` query parameter.  The
+            gateway defaults it to ``false``, which deploys the write to the
+            live tenant immediately; the SDK defaults it to ``True`` so the
+            change waits in a ``Pending-*`` state until :meth:`deploy` applies
+            it.  Pass ``interactive=False`` for the gateway's deploy-on-write
+            behaviour.
 
         Args:
             group_id: The inheritance group ID.
             name: New group name.
             description: New group description.
+            interactive: Leave the change pending instead of deploying it
+                (``profiles/dns.yaml:2223-2232``).
 
         Raises:
             netskope.exceptions.ValidationError: If no fields are provided.
         """
         payload = _build_update_payload(name, description)
-        body = self._patch(f"{_GROUPS_PATH}/{validate_id(group_id, 'group_id')}", json=payload)
-        return DnsInheritanceGroup.model_validate(extract_item(body))
+        path = f"{_GROUPS_PATH}/{validate_id(group_id, 'group_id')}"
+        response = self._transport.request(
+            "PATCH", path, json=payload, params={"interactive": interactive}
+        )
+        return DnsInheritanceGroup.model_validate(extract_item(_body(response)))
 
     def delete(self, group_id: int | str) -> None:
         """Delete a DNS inheritance group.  Irreversible."""
@@ -205,7 +264,8 @@ class DnsInheritanceGroupsResource(SyncResource):
             netskope.exceptions.ValidationError: Unless exactly one of
                 *all* / *ids* is provided.
         """
-        return self._post(_GROUPS_DEPLOY_PATH, json=_build_deploy_payload(all, ids, change_note))
+        params, body = _deploy_request(all, ids, change_note, require_change_note=False)
+        return self._post(_GROUPS_DEPLOY_PATH, json=body, **params)
 
 
 class DnsResource(SyncResource):
@@ -250,13 +310,23 @@ class DnsResource(SyncResource):
         body = self._get(f"{_DNS_PATH}/{validate_id(profile_id, 'profile_id')}")
         return DnsProfile.model_validate(extract_item(body))
 
-    def create(self, name: str) -> DnsProfile:
+    def create(self, name: str, *, interactive: bool = True) -> DnsProfile:
         """Create a DNS Security profile.
+
+        Note:
+            *interactive* is sent as the ``interactive`` query parameter.  The
+            gateway defaults it to ``false``, which deploys the write to the
+            live tenant immediately; the SDK defaults it to ``True`` so the
+            change waits in a ``Pending-*`` state until :meth:`deploy` applies
+            it.  Pass ``interactive=False`` for the gateway's deploy-on-write
+            behaviour.
 
         Args:
             name: Profile name (must be unique within the tenant).
+            interactive: Leave the new profile pending instead of deploying it
+                (``profiles/dns.yaml:1504-1513``).
         """
-        body = self._post(_DNS_PATH, json={"name": name})
+        body = self._post(_DNS_PATH, json={"name": name}, interactive=interactive)
         return DnsProfile.model_validate(extract_item(body))
 
     def update(
@@ -265,22 +335,39 @@ class DnsResource(SyncResource):
         *,
         name: str | None = None,
         description: str | None = None,
-        log_traffic: bool | None = None,
+        log_traffic: LogTraffic | None = None,
+        interactive: bool = True,
     ) -> DnsProfile:
         """Partial-update a DNS profile (PATCH); only set fields are sent.
+
+        Note:
+            *interactive* is sent as the ``interactive`` query parameter.  The
+            gateway defaults it to ``false``, which deploys the write to the
+            live tenant immediately; the SDK defaults it to ``True`` so the
+            change waits in a ``Pending-*`` state until :meth:`deploy` applies
+            it.  Pass ``interactive=False`` for the gateway's deploy-on-write
+            behaviour.
 
         Args:
             profile_id: The DNS profile ID.
             name: New profile name.
             description: New profile description.
-            log_traffic: Enable or disable traffic logging.
+            log_traffic: Which queries to log — ``"Blocked DNS"`` or
+                ``"All DNS"``.  The gateway models a mode, not a boolean
+                (``profiles/dns.yaml:852-856``).
+            interactive: Leave the change pending instead of deploying it
+                (``profiles/dns.yaml:1732-1741``).
 
         Raises:
-            netskope.exceptions.ValidationError: If no fields are provided.
+            netskope.exceptions.ValidationError: If no fields are provided, or
+                *log_traffic* is not one of the two logging modes.
         """
         payload = _build_update_payload(name, description, log_traffic)
-        body = self._patch(f"{_DNS_PATH}/{validate_id(profile_id, 'profile_id')}", json=payload)
-        return DnsProfile.model_validate(extract_item(body))
+        path = f"{_DNS_PATH}/{validate_id(profile_id, 'profile_id')}"
+        response = self._transport.request(
+            "PATCH", path, json=payload, params={"interactive": interactive}
+        )
+        return DnsProfile.model_validate(extract_item(_body(response)))
 
     def delete(self, profile_id: int | str) -> None:
         """Delete a DNS profile.  Irreversible."""
@@ -299,15 +386,20 @@ class DnsResource(SyncResource):
             with care.
 
         Args:
-            all: Deploy all pending DNS profile changes.
+            all: Deploy all pending DNS profile changes (sent as the ``all``
+                query parameter, ``profiles/dns.yaml:1874-1883``).
             ids: Deploy changes for these profile IDs only.
-            change_note: Audit-log note describing the deployment.
+            change_note: Audit-log note describing the deployment.  Required
+                alongside *ids*: ``DNSDeployRequest`` declares
+                ``required: [change_note, ids]`` (``:1328-1332``).
 
         Raises:
             netskope.exceptions.ValidationError: Unless exactly one of
-                *all* / *ids* is provided.
+                *all* / *ids* is provided, or *ids* arrives without a
+                *change_note*.
         """
-        return self._post(_DEPLOY_PATH, json=_build_deploy_payload(all, ids, change_note))
+        params, body = _deploy_request(all, ids, change_note, require_change_note=True)
+        return self._post(_DEPLOY_PATH, json=body, **params)
 
     def list_tunnels(
         self,
@@ -391,9 +483,12 @@ class AsyncDnsInheritanceGroupsResource(AsyncResource):
         body = await self._get(f"{_GROUPS_PATH}/{validate_id(group_id, 'group_id')}")
         return DnsInheritanceGroup.model_validate(extract_item(body))
 
-    async def create(self, name: str) -> DnsInheritanceGroup:
-        """Create a DNS inheritance group."""
-        body = await self._post(_GROUPS_PATH, json={"name": name})
+    async def create(self, name: str, *, interactive: bool = True) -> DnsInheritanceGroup:
+        """Create a DNS inheritance group.
+
+        See :meth:`DnsInheritanceGroupsResource.create`.
+        """
+        body = await self._post(_GROUPS_PATH, json={"name": name}, interactive=interactive)
         return DnsInheritanceGroup.model_validate(extract_item(body))
 
     async def update(
@@ -402,16 +497,18 @@ class AsyncDnsInheritanceGroupsResource(AsyncResource):
         *,
         name: str | None = None,
         description: str | None = None,
+        interactive: bool = True,
     ) -> DnsInheritanceGroup:
         """Partial-update a DNS inheritance group (PATCH).
 
         See :meth:`DnsInheritanceGroupsResource.update`.
         """
         payload = _build_update_payload(name, description)
-        body = await self._patch(
-            f"{_GROUPS_PATH}/{validate_id(group_id, 'group_id')}", json=payload
+        path = f"{_GROUPS_PATH}/{validate_id(group_id, 'group_id')}"
+        response = await self._transport.request(
+            "PATCH", path, json=payload, params={"interactive": interactive}
         )
-        return DnsInheritanceGroup.model_validate(extract_item(body))
+        return DnsInheritanceGroup.model_validate(extract_item(_body(response)))
 
     async def delete(self, group_id: int | str) -> None:
         """Delete a DNS inheritance group.  Irreversible."""
@@ -428,9 +525,8 @@ class AsyncDnsInheritanceGroupsResource(AsyncResource):
 
         See :meth:`DnsInheritanceGroupsResource.deploy`.
         """
-        return await self._post(
-            _GROUPS_DEPLOY_PATH, json=_build_deploy_payload(all, ids, change_note)
-        )
+        params, body = _deploy_request(all, ids, change_note, require_change_note=False)
+        return await self._post(_GROUPS_DEPLOY_PATH, json=body, **params)
 
 
 class AsyncDnsResource(AsyncResource):
@@ -464,9 +560,9 @@ class AsyncDnsResource(AsyncResource):
         body = await self._get(f"{_DNS_PATH}/{validate_id(profile_id, 'profile_id')}")
         return DnsProfile.model_validate(extract_item(body))
 
-    async def create(self, name: str) -> DnsProfile:
-        """Create a DNS Security profile."""
-        body = await self._post(_DNS_PATH, json={"name": name})
+    async def create(self, name: str, *, interactive: bool = True) -> DnsProfile:
+        """Create a DNS Security profile.  See :meth:`DnsResource.create`."""
+        body = await self._post(_DNS_PATH, json={"name": name}, interactive=interactive)
         return DnsProfile.model_validate(extract_item(body))
 
     async def update(
@@ -475,17 +571,19 @@ class AsyncDnsResource(AsyncResource):
         *,
         name: str | None = None,
         description: str | None = None,
-        log_traffic: bool | None = None,
+        log_traffic: LogTraffic | None = None,
+        interactive: bool = True,
     ) -> DnsProfile:
         """Partial-update a DNS profile (PATCH).
 
         See :meth:`DnsResource.update`.
         """
         payload = _build_update_payload(name, description, log_traffic)
-        body = await self._patch(
-            f"{_DNS_PATH}/{validate_id(profile_id, 'profile_id')}", json=payload
+        path = f"{_DNS_PATH}/{validate_id(profile_id, 'profile_id')}"
+        response = await self._transport.request(
+            "PATCH", path, json=payload, params={"interactive": interactive}
         )
-        return DnsProfile.model_validate(extract_item(body))
+        return DnsProfile.model_validate(extract_item(_body(response)))
 
     async def delete(self, profile_id: int | str) -> None:
         """Delete a DNS profile.  Irreversible."""
@@ -502,7 +600,8 @@ class AsyncDnsResource(AsyncResource):
 
         See :meth:`DnsResource.deploy`.
         """
-        return await self._post(_DEPLOY_PATH, json=_build_deploy_payload(all, ids, change_note))
+        params, body = _deploy_request(all, ids, change_note, require_change_note=True)
+        return await self._post(_DEPLOY_PATH, json=body, **params)
 
     async def list_tunnels(
         self,

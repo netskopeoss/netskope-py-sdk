@@ -24,6 +24,7 @@ from typing import Any
 from netskope.exceptions import ValidationError
 from netskope.models._npa_requests import request_payload
 from netskope.models.infrastructure import (
+    PUBLISHER_UPGRADE_TIMEZONES,
     PublisherUpgradeProfile,
     ReleaseType,
     UpgradeProfileAssignment,
@@ -42,6 +43,7 @@ _PATH = "/api/v2/infrastructure/publisherupgradeprofiles"
 _BULK_PATH = f"{_PATH}/bulk"
 
 _VALID_RELEASE_TYPES = frozenset(member.value for member in ReleaseType)
+_VALID_TIMEZONES = frozenset(PUBLISHER_UPGRADE_TIMEZONES)
 
 
 def _validate_release_type(release_type: str) -> str:
@@ -51,6 +53,23 @@ def _validate_release_type(release_type: str) -> str:
             f"Must be one of: {', '.join(sorted(_VALID_RELEASE_TYPES))}"
         )
     return str(release_type)
+
+
+def _validate_timezone(timezone: str) -> str:
+    """Reject a zone name the gateway's closed enum does not carry.
+
+    ``publisher_upgrade_profile_post_request.timezone``
+    (npa_upgrade_profiles.yaml:428-497) and the PUT request (:573-650) both
+    enumerate the same 69 zone names, so anything else is a round trip the API
+    can only reject.
+    """
+    if timezone not in _VALID_TIMEZONES:
+        raise ValidationError(
+            f"Invalid timezone {timezone!r}. Must be one of the "
+            f"{len(PUBLISHER_UPGRADE_TIMEZONES)} zones the API accepts; see "
+            "netskope.models.infrastructure.PUBLISHER_UPGRADE_TIMEZONES."
+        )
+    return str(timezone)
 
 
 def _build_create_payload(
@@ -66,7 +85,7 @@ def _build_create_payload(
         "enabled": enabled,
         "docker_tag": docker_tag,
         "frequency": frequency,
-        "timezone": timezone,
+        "timezone": _validate_timezone(timezone),
         "release_type": _validate_release_type(release_type),
     }
 
@@ -93,7 +112,7 @@ def _build_update_payload(
         "enabled": enabled if enabled is not None else current.enabled,
         "docker_tag": docker_tag if docker_tag is not None else current.docker_tag,
         "frequency": frequency if frequency is not None else current.frequency,
-        "timezone": timezone if timezone is not None else current.timezone,
+        "timezone": (_validate_timezone(timezone) if timezone is not None else current.timezone),
         "release_type": (
             _validate_release_type(release_type)
             if release_type is not None
@@ -267,15 +286,18 @@ class UpgradeProfilesResource(SyncResource):
                 ``client.publishers.list_releases()``).
             frequency: Upgrade schedule as a cron expression, e.g.
                 ``"0 2 * * SUN"``.
-            timezone: Timezone the schedule triggers in, e.g. ``"US/Pacific"``.
+            timezone: Timezone the schedule triggers in, e.g.
+                ``"US/Pacific"``.  The API accepts a closed set of zone names;
+                see
+                :data:`~netskope.models.infrastructure.PUBLISHER_UPGRADE_TIMEZONES`.
             release_type: Release channel — one of
                 :class:`~netskope.models.infrastructure.ReleaseType`
                 (``Beta``, ``Latest``, ``Latest-1``, ``Latest-2``).
             enabled: Whether the profile is active (default True).
 
         Raises:
-            netskope.exceptions.ValidationError: If *release_type* is not
-                a supported value.
+            netskope.exceptions.ValidationError: If *release_type* or
+                *timezone* is not a supported value.
         """
         payload = _build_create_payload(
             name, docker_tag, frequency, timezone, release_type, enabled
@@ -305,7 +327,8 @@ class UpgradeProfilesResource(SyncResource):
             enabled: Enable or disable the profile.
             docker_tag: New docker tag.
             frequency: New cron schedule.
-            timezone: New schedule timezone.
+            timezone: New schedule timezone, from
+                :data:`~netskope.models.infrastructure.PUBLISHER_UPGRADE_TIMEZONES`.
             release_type: New release channel (see
                 :class:`~netskope.models.infrastructure.ReleaseType`).
 

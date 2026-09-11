@@ -45,7 +45,10 @@ def test_one_request_preserves_original_and_omitted_params(client, event_type, m
     route = respx.get(f"{BASE}/api/v2/events/{family}/{event_type}").respond(200, json=payload)
     response = client.events.with_response.list_page(event_type)
     assert route.call_count == 1
-    assert not route.calls.last.request.url.params
+    # The datasearch endpoints require `timeout` (search_alert.yaml:313-319);
+    # data/audit and data/infrastructure declare no such parameter.
+    expected = {} if family == "data" else {"timeout": "180"}
+    assert dict(route.calls.last.request.url.params) == expected
     page = response.parse()
     assert route.call_count == 1 and len(page.items) == 1
     assert page.total == 8 and page.offset == 0 and page.limit is None and page.has_more is True
@@ -72,6 +75,7 @@ def test_projected_aggregates_and_ordering(client, event_type):
     assert bucket.count == 7 and bucket.dimensions == {"app": "Box"}
     assert response.json()["result"][0]["count"] == "007"
     assert dict(route.calls.last.request.url.params) == {
+        "timeout": "180",
         "groupbys": "app",
         "fields": "app",
         "orderbys": "count DESC",
@@ -230,37 +234,45 @@ def test_transaction_hours_validation(client, hours):
 
 @pytest.mark.parametrize("asynchronous", [False, True], ids=["sync", "async"])
 @pytest.mark.parametrize(
-    "options,message",
+    "options,expected",
     [
-        ({"query": 'user eq "a@ex.com"'}, "does not support JQL queries"),
-        ({"audit_type": "admin", "query": "x"}, "does not support JQL queries"),
+        ({"query": 'user eq "a@ex.com"'}, 'user eq "a@ex.com"'),
+        ({"audit_type": "admin", "query": "x"}, '(x) and type eq "admin"'),
     ],
     ids=["query", "query-with-audit-type"],
 )
 @respx.mock
-async def test_audit_page_rejects_jql_before_http(client, aclient, asynchronous, options, message):
+async def test_audit_page_accepts_jql(client, aclient, asynchronous, options, expected):
+    """audit.yaml:13-18 declares `query`; the SDK no longer refuses it."""
+    route = respx.get(f"{BASE}/api/v2/events/data/audit").respond(200, json={"result": []})
     resource = (aclient if asynchronous else client).events.with_response
-    with pytest.raises(ValidationError, match=message):
-        response = resource.list_page("audit", **options)
-        if asynchronous:
-            await response
-    assert not respx.calls
+    response = resource.list_page("audit", **options)
+    if asynchronous:
+        response = await response
+    assert response.parse().items == []
+    assert route.calls.last.request.url.params["query"] == expected
 
 
 @pytest.mark.parametrize("asynchronous", [False, True], ids=["sync", "async"])
 @respx.mock
-async def test_audit_lookup_by_id_is_rejected_before_http(client, aclient, asynchronous):
+async def test_audit_lookup_by_id_uses_the_query_filter(client, aclient, asynchronous):
+    """A lookup by `_id` is an ordinary audit.yaml:13-18 query expression."""
+    route = respx.get(f"{BASE}/api/v2/events/data/audit").respond(
+        200, json={"result": [{"_id": "deadbeef"}]}
+    )
     resource = (aclient if asynchronous else client).events.with_response
-    with pytest.raises(ValidationError, match="does not support lookup by ID"):
-        response = resource.get("deadbeef", event_type="audit")
-        if asynchronous:
-            await response
-    assert not respx.calls
+    response = resource.get("deadbeef", event_type="audit")
+    if asynchronous:
+        response = await response
+    assert response.parse().id == "deadbeef"
+    params = route.calls.last.request.url.params
+    assert params["query"] == '_id eq "deadbeef"' and "timeout" not in params
 
 
 @pytest.mark.parametrize("asynchronous", [False, True], ids=["sync", "async"])
 @respx.mock
-async def test_audit_page_sends_the_type_filter(client, aclient, asynchronous):
+async def test_audit_page_sends_the_type_as_a_query_clause(client, aclient, asynchronous):
+    """audit.yaml:12-72 lists no `type` parameter, so the filter travels in `query`."""
     route = respx.get(f"{BASE}/api/v2/events/data/audit").respond(
         200, json={"result": [{"_id": "a", "user": "admin"}]}
     )
@@ -269,7 +281,10 @@ async def test_audit_page_sends_the_type_filter(client, aclient, asynchronous):
     if asynchronous:
         page = await page
     assert isinstance(page.items[0], AuditEvent)
-    assert dict(route.calls.last.request.url.params) == {"type": "admin", "limit": "5"}
+    assert dict(route.calls.last.request.url.params) == {
+        "query": 'type eq "admin"',
+        "limit": "5",
+    }
     assert route.call_count == 1
 
 

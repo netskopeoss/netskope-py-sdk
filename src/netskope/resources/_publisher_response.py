@@ -117,7 +117,7 @@ class PublisherResponses(SyncResource):
         response = self._transport.request("POST", path)
         return ApiResponse(response, lambda raw: _extract_token(raw.json()))
 
-    def bulk_upgrade(self, publisher_ids: list[int]) -> ApiResponse[PublisherActionResult]:
+    def bulk_upgrade(self, publisher_ids: list[int | str]) -> ApiResponse[PublisherActionResult]:
         """Request an upgrade and parse its acknowledgment."""
         payload = _build_bulk_upgrade_payload(publisher_ids)
         response = self._transport.request("PUT", _BULK_PATH, json=payload)
@@ -207,7 +207,9 @@ class AsyncPublisherResponses(AsyncResource):
         response = await self._transport.request("POST", path)
         return ApiResponse(response, lambda raw: _extract_token(raw.json()))
 
-    async def bulk_upgrade(self, publisher_ids: list[int]) -> ApiResponse[PublisherActionResult]:
+    async def bulk_upgrade(
+        self, publisher_ids: list[int | str]
+    ) -> ApiResponse[PublisherActionResult]:
         """Request an upgrade and parse its acknowledgment."""
         payload = _build_bulk_upgrade_payload(publisher_ids)
         response = await self._transport.request("PUT", _BULK_PATH, json=payload)

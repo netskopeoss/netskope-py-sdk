@@ -47,13 +47,20 @@ class TestPrivateAppsResource:
         assert apps[0].app_name == "internal-dashboard"
 
     @respx.mock
-    def test_list_sends_cli_filter_params(self, client: NetskopeClient) -> None:
+    def test_list_folds_filters_into_the_query_expression(self, client: NetskopeClient) -> None:
+        """listNPAPrivateApps declares only fields/query/offset/limit.
+
+        Spec: npa_apps_private.yaml:490-524 for the parameter list, and
+        npa_generic.yaml:495-504 for the columns and value spellings each
+        filter becomes a term of.  Bare ``app_name=…`` parameters were dropped
+        on arrival, leaving the caller with an unfiltered collection.
+        """
         route = respx.get(_APPS_URL).mock(
             return_value=httpx.Response(200, json={"data": [], "status": {"total": 0}})
         )
         list(
             client.private_apps.list(
-                query="dash",
+                query="name has dash",
                 app_name="internal-dashboard",
                 publisher_name="pub-1",
                 reachable=True,
@@ -64,14 +71,17 @@ class TestPrivateAppsResource:
             )
         )
         params = route.calls.last.request.url.params
-        assert params["query"] == "dash"
-        assert params["app_name"] == "internal-dashboard"
-        assert params["publisher_name"] == "pub-1"
-        assert params["reachable"] == "true"
-        assert params["clientless_access"] == "false"
-        assert params["host"] == "10.0.0.5"
-        assert params["in_policy"] == "true"
-        assert params["protocol"] == "tcp"
+        assert params["query"] == (
+            "name has dash"
+            " and name sw internal-dashboard"
+            " and publisher_name eq pub-1"
+            " and host eq 10.0.0.5"
+            " and private_app_protocol eq tcp"
+            " and reachable eq yes"
+            " and in_policy eq yes"
+            " and clientless_access eq false"
+        )
+        assert set(params) == {"query", "limit", "offset"}
 
     @respx.mock
     def test_list_omits_unset_params(self, client: NetskopeClient) -> None:
@@ -342,7 +352,9 @@ class TestAsyncPrivateAppsResource:
     """Tests for aclient.private_apps (async)."""
 
     @respx.mock
-    async def test_list_sends_cli_filter_params(self, aclient: AsyncNetskopeClient) -> None:
+    async def test_list_folds_filters_into_the_query_expression(
+        self, aclient: AsyncNetskopeClient
+    ) -> None:
         route = respx.get(_APPS_URL).mock(
             return_value=httpx.Response(
                 200, json={"data": {"private_apps": [_APP]}, "status": {"total": 1}}
@@ -352,8 +364,8 @@ class TestAsyncPrivateAppsResource:
         assert len(apps) == 1
         assert isinstance(apps[0], PrivateApp)
         params = route.calls.last.request.url.params
-        assert params["app_name"] == "dash"
-        assert params["reachable"] == "true"
+        assert params["query"] == "name sw dash and reachable eq yes"
+        assert "app_name" not in params
 
     @respx.mock
     async def test_update_uses_patch(self, aclient: AsyncNetskopeClient) -> None:

@@ -18,7 +18,12 @@ import functools
 from typing import Any
 
 from netskope.exceptions import ValidationError
-from netskope.models.npa_policy import NpaNameValidation, NpaResourceType, NpaSearchType
+from netskope.models.npa_policy import (
+    NpaNameValidation,
+    NpaResourceType,
+    NpaSearchType,
+    NpaTagType,
+)
 from netskope.models.private_apps import PrivateApp
 from netskope.models.publishers import Publisher
 from netskope.pagination import Page
@@ -38,15 +43,44 @@ _SEARCH_BASE_PATH = "/api/v2/infrastructure/npa/search"
 
 _VALID_NAME_RESOURCE_TYPES = frozenset(t.value for t in NpaResourceType)
 _VALID_SEARCH_TYPES = frozenset(t.value for t in NpaSearchType)
+_VALID_TAG_TYPES = frozenset(t.value for t in NpaTagType)
 
 
-def _build_name_validation_params(resource_type: str, name: str) -> dict[str, Any]:
+def _build_name_validation_params(
+    resource_type: str,
+    name: str,
+    tag_type: str | int | None = None,
+) -> dict[str, Any]:
+    """Build the name-validation query, including the tag scope tags require.
+
+    ``GET /npa/namevalidation`` takes ``tag_type`` as ``"1"`` (private app) or
+    ``"2"`` (publisher), "required only for resourceType tag"
+    (npa_generic.yaml:282-292), so validating a tag name without it cannot
+    succeed.
+    """
     if resource_type not in _VALID_NAME_RESOURCE_TYPES:
         raise ValidationError(
             f"Invalid resource_type {resource_type!r}. "
             f"Must be one of: {', '.join(sorted(_VALID_NAME_RESOURCE_TYPES))}"
         )
-    return {"resourceType": resource_type, "name": name}
+    params: dict[str, Any] = {"resourceType": resource_type, "name": name}
+    if tag_type is None:
+        if resource_type == NpaResourceType.TAG.value:
+            raise ValidationError(
+                "tag_type is required when resource_type is 'tag'. "
+                f"Use one of: {', '.join(sorted(_VALID_TAG_TYPES))} "
+                "(1 = private app, 2 = publisher)."
+            )
+        return params
+    scope = str(tag_type)
+    if scope not in _VALID_TAG_TYPES:
+        raise ValidationError(
+            f"Invalid tag_type {tag_type!r}. "
+            f"Must be one of: {', '.join(sorted(_VALID_TAG_TYPES))} "
+            "(1 = private app, 2 = publisher)."
+        )
+    params["tag_type"] = scope
+    return params
 
 
 def _search_path(resource_type: str) -> str:
@@ -67,8 +101,10 @@ def _search_query(query: str) -> dict[str, str]:
 class NpaResponses(SyncResource):
     """Typed responses for NPA-wide utilities."""
 
-    def validate_name(self, resource_type: str, name: str) -> ApiResponse[NpaNameValidation]:
-        params = _build_name_validation_params(resource_type, name)
+    def validate_name(
+        self, resource_type: str, name: str, *, tag_type: str | int | None = None
+    ) -> ApiResponse[NpaNameValidation]:
+        params = _build_name_validation_params(resource_type, name, tag_type)
         response = self._transport.request("GET", _NAME_VALIDATION_PATH, params=params)
         return ApiResponse(response, lambda raw: parse_item(raw.json(), NpaNameValidation))
 
@@ -92,8 +128,10 @@ class NpaResponses(SyncResource):
 class AsyncNpaResponses(AsyncResource):
     """Typed asynchronous responses for NPA-wide utilities."""
 
-    async def validate_name(self, resource_type: str, name: str) -> ApiResponse[NpaNameValidation]:
-        params = _build_name_validation_params(resource_type, name)
+    async def validate_name(
+        self, resource_type: str, name: str, *, tag_type: str | int | None = None
+    ) -> ApiResponse[NpaNameValidation]:
+        params = _build_name_validation_params(resource_type, name, tag_type)
         response = await self._transport.request("GET", _NAME_VALIDATION_PATH, params=params)
         return ApiResponse(response, lambda raw: parse_item(raw.json(), NpaNameValidation))
 
@@ -140,7 +178,9 @@ class NpaResource(SyncResource):
         """Access the local brokers API."""
         return LocalBrokersResource(self._transport)
 
-    def validate_name(self, resource_type: str, name: str) -> dict[str, Any]:
+    def validate_name(
+        self, resource_type: str, name: str, *, tag_type: str | int | None = None
+    ) -> dict[str, Any]:
         """Validate a resource name for uniqueness and correctness.
 
         Args:
@@ -148,12 +188,17 @@ class NpaResource(SyncResource):
                 ``tag``, ``policy``, ``private_app``, ``local_broker``
                 (see :class:`~netskope.models.npa_policy.NpaResourceType`).
             name: The candidate name to validate.
+            tag_type: Which kind of tag to validate the name against —
+                ``"1"`` for a private-app tag or ``"2"`` for a publisher tag
+                (see :class:`~netskope.models.npa_policy.NpaTagType`).
+                Required when *resource_type* is ``tag``, ignored otherwise.
 
         Raises:
-            netskope.exceptions.ValidationError: If *resource_type* is not
-                a supported value.
+            netskope.exceptions.ValidationError: If *resource_type* or
+                *tag_type* is not a supported value, or a tag name is
+                validated without a *tag_type*.
         """
-        params = _build_name_validation_params(resource_type, name)
+        params = _build_name_validation_params(resource_type, name, tag_type)
         return self._get(_NAME_VALIDATION_PATH, **params)
 
     def search(self, resource_type: str, query: str) -> dict[str, Any]:
@@ -196,9 +241,11 @@ class AsyncNpaResource(AsyncResource):
         """Access the local brokers API."""
         return AsyncLocalBrokersResource(self._transport)
 
-    async def validate_name(self, resource_type: str, name: str) -> dict[str, Any]:
+    async def validate_name(
+        self, resource_type: str, name: str, *, tag_type: str | int | None = None
+    ) -> dict[str, Any]:
         """Validate a resource name.  See :meth:`NpaResource.validate_name`."""
-        params = _build_name_validation_params(resource_type, name)
+        params = _build_name_validation_params(resource_type, name, tag_type)
         return await self._get(_NAME_VALIDATION_PATH, **params)
 
     async def search(self, resource_type: str, query: str) -> dict[str, Any]:

@@ -215,10 +215,13 @@ class NsiqResource(SyncResource):
         Args:
             hashes: A single hash or a list of hashes (max 500 per request).
 
+        The operation is declared ``rbac.access: rw`` (nsiq/nsiq.yaml:88-141),
+        so the request is not replayed after a network failure.
+
         Returns:
             ``{"status": ..., "result": {<hash>: {...}}}``.
         """
-        return self._post(_RETROHUNT_GETINFO_PATH, json={"hash": _as_list(hashes)}, retry_safe=True)
+        return self._post(_RETROHUNT_GETINFO_PATH, json={"hash": _as_list(hashes)})
 
     def get_ioc(self, sample_hash: str) -> dict[str, Any]:
         """RetroHunt: get info for a single sample hash (md5 or sha256)."""
@@ -380,9 +383,7 @@ class AsyncNsiqResource(AsyncResource):
 
     async def lookup_iocs(self, hashes: str | list[str]) -> dict[str, Any]:
         """RetroHunt: batch sample-info lookup by hash.  See :meth:`NsiqResource.lookup_iocs`."""
-        return await self._post(
-            _RETROHUNT_GETINFO_PATH, json={"hash": _as_list(hashes)}, retry_safe=True
-        )
+        return await self._post(_RETROHUNT_GETINFO_PATH, json={"hash": _as_list(hashes)})
 
     async def get_ioc(self, sample_hash: str) -> dict[str, Any]:
         """RetroHunt: get info for a single sample hash (md5 or sha256)."""

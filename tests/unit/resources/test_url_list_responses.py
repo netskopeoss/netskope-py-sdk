@@ -150,8 +150,14 @@ async def test_async_typed_reads_and_writes_use_one_request_each(aclient):
     assert response.parse().id == 42
     assert sent_json(created) == {"name": "Block", "data": {"urls": ["bad.com"], "type": "regex"}}
 
-    respx.post(f"{BASE}/deploy").respond(200, json={"status": "success"})
-    assert (await aclient.url_lists.with_response.deploy()).parse().status == "success"
+    # The one deploy operation the spec declares is POST /urllist/deploy
+    # (policy/urllist.yaml:201-227), and it answers with the lists it applied
+    # (:209-217).
+    deployed = respx.post(f"{URL}/deploy").respond(200, json=[RECORD])
+    parsed = (await aclient.url_lists.with_response.deploy()).parse()
+    assert deployed.call_count == 1
+    assert [item.id for item in parsed.urllists] == [42]
+    assert parsed.status is None
 
     respx.delete(f"{URL}/42").respond(204)
     assert (await aclient.url_lists.with_response.delete(42)).parse() is None

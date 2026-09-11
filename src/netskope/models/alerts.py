@@ -74,7 +74,10 @@ class Alert(NetskopeModel, TimestampMixin):
     access_method: str | None = None
     traffic_type: str | None = None
     count: int | None = None
-    other_categories: list[str] | None = None
+    # search_alert.yaml:168-171 types the entries as objects and
+    # dataexport.yaml:255-257 leaves them untyped, so a row carrying
+    # ``[{"name": "Cloud Storage"}]`` must not reject the page it sits in.
+    other_categories: list[str | dict[str, Any]] | None = None
     insertion_epoch_timestamp: int | None = None
 
     @field_validator("other_categories", mode="before")

@@ -63,25 +63,27 @@ class TestNotificationsResource:
         assert not route.calls.last.request.url.params
 
     @respx.mock
-    def test_list_templates_sends_limit_and_offset(self, client: NetskopeClient) -> None:
+    def test_limit_and_offset_slice_locally(self, client: NetskopeClient) -> None:
+        """``GET /user/templates`` declares no parameters at all
+        (user-notifications-templates.yaml:206-239), so paging happens in the SDK."""
+        rows = [{**_TEMPLATE, "id": str(index)} for index in range(5)]
         route = respx.get(_TEMPLATES_URL).mock(
-            return_value=httpx.Response(200, json={"totalCount": 0, "result": []})
+            return_value=httpx.Response(200, json={"totalCount": 5, "result": rows})
         )
-        templates = NotificationsResource(client._transport).list_templates(limit=5, offset=10)
+        templates = NotificationsResource(client._transport).list_templates(limit=2, offset=1)
 
-        assert templates == []
-        params = route.calls.last.request.url.params
-        assert params["limit"] == "5"
-        assert params["offset"] == "10"
+        assert [template.id for template in templates] == ["1", "2"]
+        assert not route.calls.last.request.url.params
 
     @respx.mock
-    def test_list_templates_offset_zero_is_sent(self, client: NetskopeClient) -> None:
-        """offset=0 is a valid value and must not be dropped."""
+    def test_offset_zero_keeps_the_whole_collection(self, client: NetskopeClient) -> None:
+        rows = [{**_TEMPLATE, "id": str(index)} for index in range(3)]
         route = respx.get(_TEMPLATES_URL).mock(
-            return_value=httpx.Response(200, json={"totalCount": 0, "result": []})
+            return_value=httpx.Response(200, json={"totalCount": 3, "result": rows})
         )
-        NotificationsResource(client._transport).list_templates(offset=0)
-        assert route.calls.last.request.url.params["offset"] == "0"
+        templates = NotificationsResource(client._transport).list_templates(offset=0)
+        assert [template.id for template in templates] == ["0", "1", "2"]
+        assert not route.calls.last.request.url.params
 
     @respx.mock
     def test_get_template_top_level_body(self, client: NetskopeClient) -> None:
@@ -237,7 +239,7 @@ class TestAsyncNotificationsResource:
         assert len(templates) == 1
         assert isinstance(templates[0], NotificationTemplate)
         assert templates[0].id == "42"
-        assert route.calls.last.request.url.params["limit"] == "25"
+        assert not route.calls.last.request.url.params
 
     @respx.mock
     async def test_get_template(self, aclient: AsyncNetskopeClient) -> None:

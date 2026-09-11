@@ -5,7 +5,7 @@ from __future__ import annotations
 from enum import StrEnum
 from typing import Any
 
-from pydantic import AliasChoices, Field
+from pydantic import AliasChoices, AliasPath, Field
 
 from netskope.models.common import NetskopeModel, TimestampMixin
 
@@ -60,7 +60,8 @@ class NetworkEvent(Event):
     dst_ip: str | None = Field(None, validation_alias=AliasChoices("dstip", "dst_ip"))
     src_port: int | None = Field(None, validation_alias=AliasChoices("srcport", "src_port"))
     dst_port: int | None = Field(None, validation_alias=AliasChoices("dstport", "dst_port"))
-    protocol: str | None = None
+    # search_network.yaml:82-84 names the transport protocol ip_protocol.
+    protocol: str | None = Field(None, validation_alias=AliasChoices("protocol", "ip_protocol"))
     num_bytes: int | None = Field(None, alias="numbytes")
     domain: str | None = None
 
@@ -88,12 +89,27 @@ class AuditEvent(Event):
 
 
 class ClientStatusEvent(Event):
+    """One client-status record.
+
+    search_clientstatus.yaml:37-196 nests the host and last-event fields:
+    ``hostname`` and ``os`` live under ``host_info`` (:90-92, :110-112) and
+    ``status`` under ``last_seen_device_event`` (:143-145). The flat names stay
+    accepted so a tenant that already returns them keeps working.
+    """
+
     # Client identity and version fields arrive as numbers on some tenants.
     device_id: str | int | None = None
-    hostname: str | int | None = None
+    hostname: str | int | None = Field(
+        None, validation_alias=AliasChoices(AliasPath("host_info", "hostname"), "hostname")
+    )
     client_version: str | int | None = None
-    os: str | int | None = None
-    status: str | int | None = None
+    os: str | int | None = Field(
+        None, validation_alias=AliasChoices(AliasPath("host_info", "os"), "os")
+    )
+    status: str | int | None = Field(
+        None,
+        validation_alias=AliasChoices(AliasPath("last_seen_device_event", "status"), "status"),
+    )
 
 
 class IncidentEvent(Event):
@@ -107,9 +123,11 @@ class IncidentEvent(Event):
 class EventQueryCapabilities(NetskopeModel):
     """Verified one-page and scan capabilities for an event category.
 
-    ``jql`` covers both filter expressions and lookup by ``_id``, which the
-    datasearch endpoints implement through the same query language. Only the
-    audit category lacks it, so it defaults to supported.
+    ``jql`` covers both filter expressions and lookup by ``_id``. Every record
+    endpoint declares a ``query`` parameter — audit and infrastructure included
+    (events/audit.yaml:12-18, events/infrastructure.yaml:12-18) — so it is
+    ``True`` throughout and defaults to supported. What separates those two is
+    ``projection``, ``grouping``, and ``ordering``, which they do not declare.
     """
 
     page_limit: int

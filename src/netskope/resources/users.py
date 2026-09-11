@@ -37,6 +37,7 @@ from typing import Any, Literal
 from netskope.models.users import UmGroup, UmUser
 from netskope.resources._base import AsyncResource, SyncResource
 from netskope.resources._users_response import (
+    USERNAME_FILTER_FIELD,
     AsyncUserGroupsResponses,
     AsyncUsersResponses,
     UserGroupsResponses,
@@ -71,10 +72,15 @@ def _user_lookup_filter(
 
     When *by* is ``None``, identifiers containing ``"@"`` are treated as
     emails and everything else as usernames.
+
+    ``emails`` is a property of ``EnterpriseUser`` (usermanager.yaml:992) but
+    ``userName`` is not — it belongs to ``EnterpriseAccount`` (:1041), which is
+    why the username branch filters on ``accounts.userName``, as the spec's own
+    example does (:358).
     """
     if by == "email" or (by is None and "@" in identifier):
         return {"and": [{"emails": {"eq": identifier}}]}
-    return {"and": [{"userName": {"eq": identifier}}]}
+    return {"and": [{USERNAME_FILTER_FIELD: {"eq": identifier}}]}
 
 
 def _extract_records(body: dict[str, Any]) -> builtins.list[dict[str, Any]]:
@@ -184,9 +190,11 @@ class UsersResource(SyncResource):
 
         Args:
             filter: Structured filter dict (operators: eq, in, sw, co).
-                Filterable fields include ``userName``, ``emails``,
+                Filterable fields include ``emails``, ``accounts.userName``,
                 ``accounts.deleted``, ``accounts.active``,
-                ``accounts.parentGroups``, ``accounts.ou``.
+                ``accounts.parentGroups``, ``accounts.ou``.  Account
+                properties are reached through the ``accounts.`` prefix;
+                ``userName`` on its own is not a user property.
                 Example: ``{"accounts.active": {"eq": True}}``.
             limit: Maximum records to return (max 1000).
             offset: 0-based pagination offset.

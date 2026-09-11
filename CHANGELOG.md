@@ -184,6 +184,26 @@ expansion from 8 to 24 resource namespaces.
 - An empty page whose envelope establishes that the collection is complete ends iteration immediately instead of costing one more request.
 - `pages()` documents that a page contradicting its own request raises `PaginationError` mid-iteration, after earlier pages have been yielded.
 - An HTTP 200 response whose body reports `ok: 0` (or `ok: false`, which compares equal), `success: false`, `status: "error"`, or `execution: "FAILED"` raises an API error rather than being returned as data. `success: 0` is not treated as a failure: only the boolean `false` is. The raised error keeps the body's own `status_code` when it states one, and the HTTP status otherwise.
+- `UserConfidenceIndex` declares only `user_id` and `confidences`; the `user`, `score`, `severity`, and `sources` fields were never returned by the endpoint and always read as empty.
+- `incidents.get_anomalies()` no longer caps `timeframe` at 90 days; any value of at least 1 day is accepted.
+- `events.list()` and `events.list_page()` accept `insertion_start_time` and `insertion_end_time` for the audit and infrastructure event types, the only endpoints that define an ingestion-time window.
+- The transport accepts per-request `headers` for operation-specific values; the API token header cannot be overridden that way.
+- `scim.groups.get()` accepts `attributes` and `excluded_attributes`; group members are excluded by default and are returned only with `attributes="members"`.
+- `rbac.admins` returns `AdminUser`, which types the platform admin record (`metadata`, the Netskope SCIM extension, `record_type`, `provisioned_by`, and `role`). It subclasses `ScimUser`, whose `display_name`, `emails`, `name`, and `groups` fields are never populated for an admin.
+- `enrollment.create_token_set()` and `enrollment.list_token_sets()` warn with a `DeprecationWarning` when passed `name`, `max_devices`, `limit`, or `offset`; the values are no longer sent.
+- The SCIM page-size ceiling of 1000 is documented as an SDK guard rail rather than a gateway rule; the gateway declares `count` and `startIndex` as unbounded integers.
+- DNS profile and inheritance-group writes default to `interactive=True`, leaving the change pending until `deploy()` applies it; pass `interactive=False` to deploy on write as before. DNS profile deployment by ID requires a `change_note`, which the API declares required.
+- `private_apps.list()` composes its filter arguments into the single `query` expression the API documents; the arguments remain, and the previously ignored `filter_expr` joins the same expression.
+- Steering configuration accepts only the `npa` and `publishers` scopes; `nsc` and `ztna` have no endpoint and are rejected before any request.
+- IPsec tunnel bandwidth and encryption accept any positive integer and any cipher name, matching the API, instead of a fixed client-side list. Upgrade profile `timezone` is validated against the zone names the API accepts, exported as `PUBLISHER_UPGRADE_TIMEZONES`.
+- `url_lists.list()` accepts the `pending` and `field` filters the API declares.
+- `PublisherStatus.NOT_CONNECTED` is replaced by `NOT_REGISTERED`, the value the API returns. Fields absent from every API response were removed from `Publisher`, `PublisherRelease`, `LocalBroker`, `UrlList`, `PrivateApp`, `IPSecTunnel` and `Pop`; unmodelled keys remain reachable through each model's extras.
+- DEM `probes.create` requires the fields the API requires (`frequency`, `entity`, `os`, `device_classification`, `status`, an app selector and `move`); `target`, `protocol` and `interval` have no counterpart in the API and raise a message naming the fields to use instead. DEM `alert_rules.create` builds the nested `criteria` the API expects from `metric` and `threshold`; `probe_id` has no counterpart and raises.
+- DEM `alert_rules.list` sends the `category`, `type`, `enabled` and `severity` filters the API declares; `limit` and `offset` slice the result in the SDK, as do `limit`/`offset` on `notifications.list_templates`.
+- DEM `get_data` rejects `agent_status` and `client_status` and points at `get_states`; DEM `get_entities` gained `sort_by` and `user_location`; IPS `list_signature_overrides` and `search_signatures` gained `sort_by` and `sort_order`. DEM probe and alert-rule records expose the fields the API returns; fields that were always empty were removed.
+- SPM `inventory` takes the aggregation the API requires; its `filter` argument is a deprecated alias for the operation's own `ngl_query`. DSPM has no bulk connect-by-id operation, so `connect_datastores` explains that and the new `connect_datastore` sends a single datastore request.
+- NSIQ `lookup_iocs` is no longer replayed after a network failure, because the operation is declared read-write.
+- AICC queries validate the risk-level, extension-type, model-deployment and violation-severity enumerations before sending, including inside array parameters.
 
 ### Fixed
 
@@ -318,6 +338,48 @@ expansion from 8 to 24 resource namespaces.
 - `PaginationError` raised while decoding a page inside `list()` carries the request method, path and request id, as the typed `with_response` path does.
 - The shared administrative page decoder passes the envelope's echoed `offset` as received, so a garbage, negative or boolean echo is rejected rather than read as "the envelope stated nothing".
 - The request log line records the method and path only; query strings (JQL, usernames, filters) no longer reach the DEBUG log.
+- Datasearch requests send the `timeout` query parameter the API marks required, defaulting to 180 seconds; `alerts`, `events`, and `incidents` read methods accept a `timeout` argument, and `timeout=None` omits it.
+- Legacy `alerts.list()` and `events.list()` send the sort field as `orderbys` instead of `sortby`, which the datasearch endpoints do not define, so results were returned unordered.
+- `Alert.other_categories` accepts object entries; a row such as `[{"name": "Cloud Storage"}]` no longer rejects the whole page.
+- Audit events accept a JQL `query`, and `audit_type` is sent as a `type eq "..."` clause inside it rather than an undocumented `type` parameter; `events.get()` works for audit events as a result.
+- `events.list()` and `events.get()` reject the `transaction` event type with a message pointing at `events.transaction_metrics(hours=...)`, instead of paginating a metrics object and yielding nothing.
+- `incidents.get_anomalies()` reads records from the documented `results` key; the non-typed call previously returned an empty list for every response.
+- `ConfidencePoint.start` and `ConfidencePoint.confidence_score` are optional, matching a schema that requires neither.
+- A datasearch response reporting a failed execution is raised regardless of the casing the tenant uses; `Failed` and `failed` no longer decode as an empty success.
+- Errors reported inside a `data.error` field on an HTTP 200 body, such as a forensics download failure, carry the server's reason instead of "Unknown error", and a missing forensic file raises `NotFoundError`.
+- `IncidentUpdateResult.accepted` follows the `ok` flag, so the documented success body `{"ok": 1, "result": "Update Successful"}` reports acceptance; `accepted_entries` still reports only counted entries.
+- `NetworkEvent.protocol` populates from the `ip_protocol` field network events actually return.
+- `ClientStatusEvent.hostname`, `.os`, and `.status` read the nested `host_info` and `last_seen_device_event` objects the client-status endpoint returns, while still accepting the flat names.
+- `scim.users.update()` and `scim.groups.update()` no longer raise a JSON decode error on the documented success: the PATCH answers 204 with an empty body, so the methods return `None` there and still decode a body when one arrives.
+- SCIM requests send `application/scim+json;charset=utf-8` as `Accept` and `Content-Type`, the only media type the SCIM API declares; the platform admin SCIM route keeps plain JSON.
+- SCIM group patches send `path: "displayname"`, the spelling in the gateway's `path` enum, instead of `path: "displayName"`.
+- SCIM user patches send one path-scoped replace operation per attribute instead of a single operation with no `path`, matching every documented example.
+- Looking a user up by username filters on `accounts.userName`; `userName` is a property of the account, not of the user, so the previous filter silently matched nothing.
+- `SupportedOperatingSystems.available_os` defaults to an empty list, since the gateway schema marks no property required.
+- `enrollment.create_token_set()` sends no request body and `enrollment.list_token_sets()` sends no query string, because neither operation declares one.
+- RBAC role pages report the envelope's `count` as the page total, so `Page.total` and `Page.has_more` are populated for role listings.
+- `tokens.revoke()` sends the API's revoke operation (`PATCH {"operation": "revoke"}`) instead of deleting the token; `tokens.delete()` is unchanged.
+- URL list deployment posts to `/api/v2/policy/urllist/deploy`; the previous `/api/v2/policy/deploy` path does not exist and returned 404 on every call.
+- Publisher create and update send the local-broker flag under the API's `lbrokerconnect` key, so the flag is no longer silently dropped.
+- Publisher bulk upgrade sends publisher IDs as strings, matching the bulk endpoint's schema.
+- Publisher alert configuration can send `selectedUsers`, and rejects an `event_types` list outside the API's one-to-five bound.
+- `Publisher.publisher_id` and `publisher_name` are populated from single-object responses, which name the record `id` and `name`; `client.publishers.get()`, `.create()` and `.update()` previously returned `None` for both.
+- `PublisherApp` reads the publisher-apps response, which names each record `id`, `name` and `private_app_protocol`; every record previously parsed to all-`None`.
+- `PublisherUpgradeProfile.external_id` falls back to the `id` that create and update responses carry, so a newly created profile can be assigned without a second read.
+- `PrivateApp.app_id` and `app_name` are populated from NPA search results, which name the record `id` and `name`; `PrivateApp.port` is read from the app's protocol entries, where the API carries it; `service_publisher_assignments` is exposed and `publishers` reads the same value.
+- NPA policy rule creation sends `group_id` as the string the API declares.
+- DNS deployment sends `all` as a query parameter and a body carrying the fields the API requires, instead of a body the API rejects; `dns.update(log_traffic=...)` takes the API's `"Blocked DNS"` or `"All DNS"` mode rather than a boolean.
+- `npa.validate_name()` can send `tag_type`, which the API requires when validating a tag name.
+- `IPSecTunnel` and `Pop` model the fields the IPsec API returns; `LocalBroker` no longer declares a status or an owning publisher; `NpaNameValidation.is_valid_name` is optional; `UrlList.pending` is read as the integer the API returns.
+- SPM `recent_changes` POSTs the required `time_range` body to `/apps/recentchanges/getstats` instead of sending a bodyless GET that the API rejects.
+- SPM `list_apps`, `get_app`, `inventory`, `posture_score` and `list_policy_rules` address the operations the API actually exposes (`POST /inventory/getresources`, `POST /results/getposturescores`, `GET /rules/list`); the previous paths returned 404 on every tenant.
+- DSPM `list_resources` uses the same verified routes as `list_page`, and rejects the legacy resource names that have no route instead of building a 404 path; `analytics` reads the two connected-datastore reports the API declares; `scan_datastores` issues one real start-scan request per datastore.
+- ATP `scan_file` and `scan_file_path` upload the file as `multipart/form-data` with the required `scantype` query parameter, instead of a base64 JSON body the service does not accept.
+- RBI `restore_cdr` uses PUT, and `test_cdr_config` sends its settings as query parameters on a GET, with an inline API key in the `X-CDR-Api-Key` header.
+- DEM `get_data`, `get_dataset` and `get_traceroute` send `begin` and `end` as `{"absolute": "<RFC 3339>"}` objects; integer arguments are still read as epoch milliseconds and converted.
+- DEM `probes.create` and `alert_rules.create` send the request bodies the API defines, without the `data` wrapper.
+- CCI `lookup_app` omits `discovered` and `connector` rather than sending a value outside their enumeration, and validates `ccl`.
+- NSIQ URL-lookup reports and false-positive receipts no longer require fields the API marks optional; notification template writes accept any colour string the API accepts; `AiccDataCoverage` parses a response that omits `data_available_since`; RBI `list_applications` parses a response that omits the `applications` collection.
 
 ## [1.1.0] - 2026-07-03
 

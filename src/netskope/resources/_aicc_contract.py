@@ -6,7 +6,18 @@ AICC inventory endpoints; the contract definitions are not public.
 
 from __future__ import annotations
 
-# Query name, required flag, maximum page size, scalar enum values.
+# Reusable enumerations shared by several operations.
+# ``ReconciledRiskLevel`` (aicc/inventory.yaml:6851-6853).
+_RISK_LEVELS = ("Critical", "High", "Medium", "Low", "Inconclusive", "Legitimate", "Unknown")
+# Extension subtypes (aicc/inventory.yaml:1521-1531).
+_EXTENSION_TYPES = ("browser_extension", "editor_extension", "desktop_extension")
+# Model deployment shapes (aicc/inventory.yaml:3902-3914).
+_MODEL_DEPLOYMENTS = ("cloud", "endpoint", "self_hosted_vm", "self_hosted_k8s")
+# Data-protection violation severities (aicc/inventory.yaml:3752-3763).
+_VIOLATION_SEVERITIES = ("critical", "high", "medium", "low")
+
+# Query name, required flag, maximum page size, enum values. A parameter the
+# gateway types as an array is checked element by element.
 QUERY_RULES: dict[str, tuple[tuple[str, bool, int | None, tuple[str, ...]], ...]] = {
     "/analytics/counts": (
         (
@@ -70,7 +81,7 @@ QUERY_RULES: dict[str, tuple[tuple[str, bool, int | None, tuple[str, ...]], ...]
         ("category", False, None, ()),
         ("status", False, None, ()),
         ("ccl", False, None, ()),
-        ("reconciled_risk_level", False, None, ()),
+        ("reconciled_risk_level", False, None, _RISK_LEVELS),
         ("active_only", False, None, ()),
     ),
     "/analytics/mcp-servers": (
@@ -98,7 +109,7 @@ QUERY_RULES: dict[str, tuple[tuple[str, bool, int | None, tuple[str, ...]], ...]
         ("category", False, None, ()),
         ("auth_method", False, None, ()),
         ("ccl", False, None, ()),
-        ("reconciled_risk_level", False, None, ()),
+        ("reconciled_risk_level", False, None, _RISK_LEVELS),
         ("active_only", False, None, ()),
     ),
     "/analytics/identities": (
@@ -139,7 +150,7 @@ QUERY_RULES: dict[str, tuple[tuple[str, bool, int | None, tuple[str, ...]], ...]
                 "null",
             ),
         ),
-        ("reconciled_risk_level", False, None, ()),
+        ("reconciled_risk_level", False, None, _RISK_LEVELS),
         ("active_only", False, None, ()),
     ),
     "/analytics/alerts/matrix": (
@@ -180,7 +191,7 @@ QUERY_RULES: dict[str, tuple[tuple[str, bool, int | None, tuple[str, ...]], ...]
         ("category", False, None, ()),
         ("status", False, None, ()),
         ("ccl", False, None, ()),
-        ("reconciled_risk_level", False, None, ()),
+        ("reconciled_risk_level", False, None, _RISK_LEVELS),
         ("first_seen_after", False, None, ()),
         ("active_only", False, None, ()),
     ),
@@ -193,7 +204,7 @@ QUERY_RULES: dict[str, tuple[tuple[str, bool, int | None, tuple[str, ...]], ...]
         ("search", False, None, ()),
         ("category", False, None, ()),
         ("ccl", False, None, ()),
-        ("reconciled_risk_level", False, None, ()),
+        ("reconciled_risk_level", False, None, _RISK_LEVELS),
         ("active_only", False, None, ()),
     ),
     "/inventory/extensions/{extension_name}": (
@@ -228,7 +239,7 @@ QUERY_RULES: dict[str, tuple[tuple[str, bool, int | None, tuple[str, ...]], ...]
         ("search", False, None, ()),
     ),
     "/inventory/extensions/{extension_name}/identities": (
-        ("type", False, None, ()),
+        ("type", False, None, _EXTENSION_TYPES),
         ("start_time", True, None, ()),
         ("end_time", True, None, ()),
         ("offset", False, None, ()),
@@ -272,7 +283,7 @@ QUERY_RULES: dict[str, tuple[tuple[str, bool, int | None, tuple[str, ...]], ...]
         ("user_group", False, None, ()),
         ("ou", False, None, ()),
         ("activity_level", False, None, ()),
-        ("reconciled_risk_level", False, None, ()),
+        ("reconciled_risk_level", False, None, _RISK_LEVELS),
         ("first_seen_after", False, None, ()),
         ("active_only", False, None, ()),
     ),
@@ -439,7 +450,7 @@ QUERY_RULES: dict[str, tuple[tuple[str, bool, int | None, tuple[str, ...]], ...]
         ("end_time", True, None, ()),
         ("limit", False, 100, ()),
         ("offset", False, None, ()),
-        ("severity", False, None, ()),
+        ("severity", False, None, _VIOLATION_SEVERITIES),
         ("object_type", False, None, ()),
         ("search", False, None, ()),
         ("user", False, None, ()),
@@ -452,7 +463,7 @@ QUERY_RULES: dict[str, tuple[tuple[str, bool, int | None, tuple[str, ...]], ...]
         ("limit", False, 200, ()),
         ("sort", False, None, ()),
         ("search", False, None, ()),
-        ("deployment", False, None, ()),
+        ("deployment", False, None, _MODEL_DEPLOYMENTS),
         ("provider", False, None, ()),
         ("active_only", False, None, ()),
         ("first_seen_after", False, None, ()),

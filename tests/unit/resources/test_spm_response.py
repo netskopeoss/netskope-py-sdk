@@ -1,4 +1,11 @@
-"""SPM typed responses retain their completed HTTP payload without another request."""
+"""SPM typed responses retain their completed HTTP payload without another request.
+
+Every case below decodes a body shaped like the one its operation declares in
+``production/endpoints/spm``: ``ResourceAggregationResponse``
+(inventory.yaml:386-452), ``PostureScoreResponse``
+(saas_posture_score.yaml:105-142), ``RulesSummaryList`` (policy.yaml,
+``GET /rules/list``) and ``RecentChangesResponse`` (apps.yaml:650).
+"""
 
 from __future__ import annotations
 
@@ -8,53 +15,83 @@ import respx
 from netskope import AsyncNetskopeClient, NetskopeClient
 from netskope.exceptions import ResponseValidationError
 
+_INVENTORY_ROWS = {
+    "data": [
+        {
+            "instance_name": "triremeresearch.onmicrosoft.com",
+            "app_suite": "AzureAD",
+            "failed_rules": 3,
+            "passed_rules": 12,
+        }
+    ],
+    "next_offset": -1,
+    "total_count": 1,
+}
+
 CASES = [
     (
         "list_apps",
-        "GET",
-        "apps",
-        {"data": [{"name": "Box", "posture_score": "007"}]},
+        "POST",
+        "inventory/getresources",
+        _INVENTORY_ROWS,
         {},
-        lambda parsed: [(app.name, app.posture_score) for app in parsed] == [("Box", 7)],
+        lambda parsed: (
+            [(row.instance_name, row.failed_rules) for row in parsed]
+            == [("triremeresearch.onmicrosoft.com", 3)]
+        ),
     ),
     (
         "get_app",
-        "GET",
-        "apps/Box",
-        {"data": {"name": "Box", "future": [None, 1]}},
-        {"app_name": "Box"},
-        lambda parsed: parsed.name == "Box" and parsed.model_extra["future"] == [None, 1],
+        "POST",
+        "inventory/getresources",
+        {"data": [{"resource_type": "Policies", "app_name": "AzureAD", "total_resources": 4}]},
+        {"app_name": "AzureAD"},
+        lambda parsed: parsed[0].resource_type == "Policies" and parsed[0].total_resources == 4,
     ),
     (
         "inventory",
         "POST",
-        "inventory",
+        "inventory/getresources",
         {"data": [{"resource_id": "r1", "resource_type": "bucket"}]},
         {},
         lambda parsed: parsed[0].resource_id == "r1" and parsed[0].resource_type == "bucket",
     ),
     (
         "posture_score",
-        "GET",
-        "saas_posture_score",
-        {"data": {"posture_score": "082"}},
+        "POST",
+        "results/getposturescores",
+        {
+            "score": {"posture_confidence_index": 60, "posture_confidence_level": "Medium"},
+            "app_suites": [
+                {
+                    "name": "Microsoft365",
+                    "score": {"posture_risk_score": 40},
+                    "instances": [
+                        {"name": "m365", "apps": [{"name": "Defender", "score": {}}]},
+                    ],
+                }
+            ],
+        },
         {},
-        lambda parsed: parsed.posture_score == 82,
+        lambda parsed: (
+            parsed.score.posture_confidence_index == 60
+            and parsed.app_suites[0].instances[0].apps[0].name == "Defender"
+        ),
     ),
     (
         "list_policy_rules",
         "GET",
-        "policy/rules",
-        {"data": [{"name": "MFA", "severity": "High"}]},
+        "rules/list",
+        {"rules": [{"id": "7", "name": "MFA", "appsuite": "AzureAD", "type": "Predefined"}]},
         {},
-        lambda parsed: [(rule.name, rule.severity) for rule in parsed] == [("MFA", "High")],
+        lambda parsed: [(rule.name, rule.type) for rule in parsed] == [("MFA", "Predefined")],
     ),
     (
         "recent_changes",
-        "GET",
+        "POST",
         "apps/recentchanges/getstats",
         {"trends": {"samples": [{"timestamp": 1722052800, "posture_confidence_index": 4}]}},
-        {},
+        {"start": 1722052800, "end": 1722139200},
         lambda parsed: (
             parsed.trends.samples[0].timestamp == 1722052800
             and parsed.trends.samples[0].posture_confidence_index == 4
@@ -76,8 +113,6 @@ def test_sync(name, method, path, body, kwargs, check):
         assert response.parse() is parsed
         assert response.json() == body
     assert route.call_count == 1
-    if method == "POST":
-        assert route.calls.last.request.content == b""
 
 
 @pytest.mark.parametrize(("name", "method", "path", "body", "kwargs", "check"), CASES)
@@ -97,8 +132,8 @@ async def test_async(name, method, path, body, kwargs, check):
 
 @respx.mock
 def test_schema_error_does_not_discard_original_response():
-    body = {"data": [{"name": "Box", "posture_score": "sensitive-invalid"}]}
-    respx.get("https://test.goskope.com/api/v2/spm/apps").respond(200, json=body)
+    body = {"data": [{"instance_name": "Box", "failed_rules": "sensitive-invalid"}]}
+    respx.post("https://test.goskope.com/api/v2/spm/inventory/getresources").respond(200, json=body)
     with NetskopeClient(tenant="test.goskope.com", api_token="test-token") as client:
         response = client.spm.with_response.list_apps()
         with pytest.raises(ResponseValidationError) as caught:
@@ -109,11 +144,14 @@ def test_schema_error_does_not_discard_original_response():
 
 @respx.mock
 def test_inventory_body_and_typed_rows():
-    route = respx.post("https://test.goskope.com/api/v2/spm/inventory").respond(
+    """``filter`` is the deprecated alias for the operation's own ``ngl_query``."""
+    route = respx.post("https://test.goskope.com/api/v2/spm/inventory/getresources").respond(
         200, json={"data": [{"resource_id": "r1", "future": {"enabled": False}}]}
     )
     with NetskopeClient(tenant="test.goskope.com", api_token="test-token") as client:
         rows = client.spm.with_response.inventory(filter="app:Box").parse()
         assert rows[0].resource_id == "r1"
         assert rows[0].model_extra == {"future": {"enabled": False}}
-    assert route.calls.last.request.content == b'{"filter":"app:Box"}'
+    sent = route.calls.last.request.read()
+    assert b'"ngl_query":"app:Box"' in sent
+    assert b'"group_by":"resource_name"' in sent

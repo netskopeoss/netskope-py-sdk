@@ -85,25 +85,31 @@ class IncidentNote(NetskopeModel):
 
 
 class ConfidencePoint(NetskopeModel):
-    """One UCI observation; ``start`` uses epoch milliseconds."""
+    """One UCI observation; ``start`` uses epoch milliseconds.
 
-    start: int
-    confidence_score: int = Field(alias="confidenceScore")
+    ubadatasvc.yaml:52-60 declares both fields without a ``required`` list, so
+    a point that carries only one of them must still decode.
+    """
+
+    start: int | None = None
+    confidence_score: int | None = Field(None, alias="confidenceScore")
 
 
 class UserConfidenceIndex(NetskopeModel):
-    """User Confidence Index (UCI) risk score.
+    """User Confidence Index (UCI) time series for one user.
+
+    ubadatasvc.yaml:61-69 defines the response as ``confidences`` plus
+    ``userId`` and nothing else, so there is no aggregate score field to read.
+    The latest point in *confidences* carries the current score.
 
     Example::
 
         uci = client.incidents.get_uci("user@example.com")
-        print(f"Risk score: {uci.score}")
+        latest = (uci.confidences or [])[-1:]
+        for point in latest:
+            print(f"Risk score: {point.confidence_score}")
     """
 
-    user: str | None = None
-    score: float | None = None
-    severity: str | None = None
-    sources: list[dict[str, Any]] = Field(default_factory=list)
     user_id: str | None = Field(None, alias="userId")
     confidences: list[ConfidencePoint] | None = None
 
@@ -177,13 +183,17 @@ class IncidentUpdateResult(NetskopeModel):
 
     @property
     def accepted(self) -> bool:
-        """Whether every entry reported a positive count of accepted updates.
+        """Whether every entry reported success through its ``ok`` flag.
 
-        A message-only or absent ``result`` states no count, so it does not
-        claim a change was applied, and neither does a negative one.
+        incident_update.yaml:8-14 types the entry as ``{ok, result}`` with
+        ``result`` a string, and the documented success body is
+        ``{"result": [{"ok": 1, "result": "Update Successful"}]}``
+        (incident_update.yaml:69-75) — so ``ok`` is the acceptance signal and a
+        message carries no count. A reported count of zero still contradicts
+        acceptance; read :attr:`accepted_entries` for the count itself.
         """
         return bool(self.outcomes) and all(
-            outcome.ok == 1 and outcome.count is not None and outcome.count > 0
+            outcome.ok == 1 and (outcome.count is None or outcome.count > 0)
             for outcome in self.outcomes
         )
 

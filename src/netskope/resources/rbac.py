@@ -13,9 +13,9 @@ Example::
         api_groups=[{"apiGroupId": 1, "permission": "r"}],
     )
 
-    # List admin users (SCIM)
+    # List admin users (SCIM, served by ms-platform)
     for admin in client.rbac.admins.list():
-        print(f"{admin.user_name} active={admin.active}")
+        print(f"{admin.user_name} {admin.record_type} role={admin.role}")
 """
 
 from __future__ import annotations
@@ -34,6 +34,7 @@ from netskope._pagination import (
     coerce_total,
 )
 from netskope.exceptions import PaginationError, ValidationError
+from netskope.models.administration import AdminUser
 from netskope.models.rbac import (
     RbacRole,
     RbacRoleDetail,
@@ -42,12 +43,11 @@ from netskope.models.rbac import (
     RoleMutationReceipt,
     RolePatch,
 )
-from netskope.models.scim import ScimUser
 from netskope.pagination import Page
 from netskope.resources._base import AsyncResource, SyncResource
 from netskope.resources._extract import extract_item, validate_id
 from netskope.resources._response_list import parse_response_list
-from netskope.resources._scim_response import _MAX_COUNT, validate_page_size
+from netskope.resources._scim_response import MAX_SCIM_PAGE_SIZE, validate_page_size
 
 if TYPE_CHECKING:
     from netskope.resources._rbac_response import (
@@ -191,8 +191,8 @@ def _build_admins_page_params(
     for name, value, minimum in (("count", count, 0), ("start_index", start_index, 1)):
         if isinstance(value, bool) or not isinstance(value, int) or value < minimum:
             raise ValidationError(f"Invalid {name}: expected an integer >= {minimum}.")
-    if count > _MAX_COUNT:
-        raise ValidationError(f"Invalid count: the maximum SCIM page size is {_MAX_COUNT}.")
+    if count > MAX_SCIM_PAGE_SIZE:
+        raise ValidationError(f"Invalid count: the maximum SCIM page size is {MAX_SCIM_PAGE_SIZE}.")
     return {**_build_admins_params(filter_expr), "count": count, "startIndex": start_index}
 
 
@@ -214,8 +214,21 @@ def _parse_roles_page(body: Any, model: type[T], offset: int, limit: int | None)
         metadata.pop(_ROLES_LIST_KEY)
     elif "Resources" in metadata:
         metadata.pop("Resources")
-    # The documented role count has no verified cross-page meaning.
-    return Page(items=items, total=None, offset=offset, limit=limit, metadata=metadata)
+    # GetRolesResponseDto requires ``count`` and documents it as the total number
+    # of roles fitting the search criteria (ms-rbac.yaml:1670-1687), so it is this
+    # page's total. It is deliberately not used to reject records the way
+    # build_page does: no live tenant has confirmed whether the service counts the
+    # filtered collection or only the page it returned, and guessing wrong there
+    # would turn ordinary second-page traversal into an error.
+    total = coerce_total(metadata.get("count"))
+    return Page(
+        items=items,
+        total=total,
+        offset=offset,
+        limit=limit,
+        metadata=metadata,
+        has_more=None if total is None else offset + len(items) < total,
+    )
 
 
 def _parse_role(body: Any, model: type[T]) -> T:
@@ -233,14 +246,14 @@ def _parse_role(body: Any, model: type[T]) -> T:
     return model.model_validate(record)
 
 
-def _parse_admins_page(body: Any, start_index: int, count: int) -> Page[ScimUser]:
+def _parse_admins_page(body: Any, start_index: int, count: int) -> Page[AdminUser]:
     if not isinstance(body, dict) or not isinstance(body.get("Resources"), list):
         raise ValueError("Invalid admin response: expected a SCIM Resources collection.")
     if len(body["Resources"]) > count:
         raise PaginationError(
             "The admin response exceeded the requested page size.", offset=start_index - 1
         )
-    items = parse_response_list(body["Resources"], ScimUser)
+    items = parse_response_list(body["Resources"], AdminUser)
     metadata = {key: value for key, value in body.items() if key != "Resources"}
     returned_index = metadata.get("startIndex", start_index)
     if (
@@ -443,7 +456,7 @@ class RbacAdminsResource(SyncResource):
         filter_expr: str | None = None,
         count: int = 100,
         start_index: int = 1,
-    ) -> Page[ScimUser]:
+    ) -> Page[AdminUser]:
         """Fetch one SCIM page, without traversing subsequent pages.
 
         ``count`` is the requested page size and may be zero for a total-only
@@ -459,7 +472,7 @@ class RbacAdminsResource(SyncResource):
         *,
         filter_expr: str | None = None,
         page_size: int = 100,
-    ) -> SyncScimPaginatedResponse[ScimUser]:
+    ) -> SyncScimPaginatedResponse[AdminUser]:
         """List admin users.
 
         Args:
@@ -473,7 +486,7 @@ class RbacAdminsResource(SyncResource):
             method="GET",
             path=_ADMINS_PATH,
             params=_build_admins_params(filter_expr),
-            model=ScimUser,
+            model=AdminUser,
             page_size=validate_page_size(page_size),
         )
 
@@ -618,7 +631,7 @@ class AsyncRbacAdminsResource(AsyncResource):
         filter_expr: str | None = None,
         count: int = 100,
         start_index: int = 1,
-    ) -> Page[ScimUser]:
+    ) -> Page[AdminUser]:
         """Fetch one SCIM page. See :meth:`RbacAdminsResource.list_page`."""
         response = await self.with_response.list_page(
             filter_expr=filter_expr, count=count, start_index=start_index
@@ -630,14 +643,14 @@ class AsyncRbacAdminsResource(AsyncResource):
         *,
         filter_expr: str | None = None,
         page_size: int = 100,
-    ) -> AsyncScimPaginatedResponse[ScimUser]:
+    ) -> AsyncScimPaginatedResponse[AdminUser]:
         """List admin users.  See :meth:`RbacAdminsResource.list`."""
         return AsyncScimPaginatedResponse(
             transport=self._transport,
             method="GET",
             path=_ADMINS_PATH,
             params=_build_admins_params(filter_expr),
-            model=ScimUser,
+            model=AdminUser,
             page_size=validate_page_size(page_size),
         )
 

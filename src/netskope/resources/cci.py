@@ -55,13 +55,38 @@ _APPS_SEPARATOR = ";"
 _TAGS_SEPARATOR = ","
 
 
+# ``GET /cci/app`` enumerates ccl, and types connector and discovered as
+# presence flags with no "off" value (services/cci.yaml:2911-2942).
+_CCL_VALUES = ("poor", "low", "medium", "high", "excellent")
+_PRESENCE_VALUES = ("1", "true")
+
+
+def _presence_flag(value: bool | str | None, name: str) -> str | None:
+    """Render a CCI presence flag, or ``None`` to leave the parameter out.
+
+    The gateway enumerates ``connector`` and ``discovered`` as ``1``/``true``.
+    There is no "false" form and no inverse mode, so a falsy value omits the
+    parameter rather than asking for the complement.
+    """
+    if value is None or value is False:
+        return None
+    if value is True:
+        return "true"
+    if value in _PRESENCE_VALUES:
+        return str(value)
+    raise ValidationError(
+        f"{name} is a presence flag: pass True (or one of {', '.join(_PRESENCE_VALUES)}) "
+        f"to select those applications, or omit it. There is no {name}=false mode."
+    )
+
+
 def _build_lookup_params(
     app_name: str,
     category: str | None,
     ccl: str | None,
     tag: str | None,
-    connector: str | None,
-    discovered: bool | None,
+    connector: bool | str | None,
+    discovered: bool | str | None,
     limit: int | None,
     offset: int | None,
 ) -> dict[str, Any]:
@@ -69,13 +94,17 @@ def _build_lookup_params(
     if category is not None:
         params["category"] = category
     if ccl is not None:
+        if ccl not in _CCL_VALUES:
+            raise ValidationError(f"ccl must be one of: {', '.join(_CCL_VALUES)}")
         params["ccl"] = ccl
     if tag is not None:
         params["tag"] = tag
-    if connector is not None:
-        params["connector"] = connector
-    if discovered is not None:
-        params["discovered"] = discovered
+    connector_flag = _presence_flag(connector, "connector")
+    if connector_flag is not None:
+        params["connector"] = connector_flag
+    discovered_flag = _presence_flag(discovered, "discovered")
+    if discovered_flag is not None:
+        params["discovered"] = discovered_flag
     if limit is not None:
         params["limit"] = limit
     if offset is not None:
@@ -342,8 +371,8 @@ class CciResource(SyncResource):
         category: str | None = None,
         ccl: str | None = None,
         tag: str | None = None,
-        connector: str | None = None,
-        discovered: bool | None = None,
+        connector: bool | str | None = None,
+        discovered: bool | str | None = None,
         limit: int | None = None,
         offset: int | None = None,
     ) -> dict[str, Any]:
@@ -356,14 +385,21 @@ class CciResource(SyncResource):
         Args:
             app_name: Exact application name as indexed by Netskope CCI.
             category: Filter by application category (e.g. ``"Cloud Storage"``).
-            ccl: Filter by Cloud Confidence Level (``"excellent"``, ``"high"``,
-                ``"medium"``, ``"low"``, or ``"poor"``).
+            ccl: Filter by Cloud Confidence Level — ``"poor"``, ``"low"``,
+                ``"medium"``, ``"high"`` or ``"excellent"``.
             tag: Filter by tag name.
-            connector: Filter by connector type.
-            discovered: ``True`` for discovered (shadow IT) apps only,
-                ``False`` for sanctioned apps only.
+            connector: Presence flag: ``True`` keeps only applications with a
+                dedicated connector.  Omit it (or pass ``False``) for no
+                filtering — the parameter has no "false" form.
+            discovered: Presence flag: ``True`` keeps only discovered (shadow
+                IT) applications.  Omit it (or pass ``False``) for no
+                filtering; there is no sanctioned-only mode.
             limit: Maximum number of results to return.
             offset: Number of results to skip for pagination.
+
+        Raises:
+            netskope.exceptions.ValidationError: If *ccl* is outside the
+                enumeration, or a presence flag carries an unsupported value.
         """
         params = _build_lookup_params(
             app_name, category, ccl, tag, connector, discovered, limit, offset
@@ -476,8 +512,8 @@ class AsyncCciResource(AsyncResource):
         category: str | None = None,
         ccl: str | None = None,
         tag: str | None = None,
-        connector: str | None = None,
-        discovered: bool | None = None,
+        connector: bool | str | None = None,
+        discovered: bool | str | None = None,
         limit: int | None = None,
         offset: int | None = None,
     ) -> dict[str, Any]:

@@ -293,13 +293,16 @@ for event in client.events.list(
 ):
     print(event.src_ip, event.dst_ip)
 
-# Audit events have no JQL support: filter them with audit_type instead of
-# query, and look them up by listing rather than events.get().
+# Audit events take a JQL query too; audit_type is folded into it as a
+# `type eq "admin"` clause.
 for event in client.events.list("audit", audit_type="admin"):
     print(event.user, event.activity)
 
 # Supported types: alert, application, network, page, incident,
-#   audit, infrastructure, clientstatus, epdlp, transaction
+#   audit, infrastructure, clientstatus, epdlp
+# "transaction" is not a record endpoint — list() rejects it. Its hourly
+# backlog metrics come from transaction_metrics():
+metrics = client.events.transaction_metrics(hours=24)
 ```
 
 ### URL Lists
@@ -333,8 +336,8 @@ before any request is built. A response that carries no single URL list raises
 for pub in client.publishers.list():
     print(f"{pub.publisher_name}: {pub.status} ({pub.apps_count} apps)")
 
-# Create a publisher
-new_pub = client.publishers.create(name="aws-us-east-1")
+# Create a publisher. lbroker_connect goes out as the API's `lbrokerconnect`.
+new_pub = client.publishers.create(name="aws-us-east-1", lbroker_connect=True)
 
 # Get by ID
 pub = client.publishers.get(publisher_id=42)
@@ -353,8 +356,10 @@ config = client.publishers.get_alerts_configuration()
 ### Private Apps (ZTNA)
 
 ```python
-# List private apps
-for app in client.private_apps.list():
+# List private apps. Each filter argument becomes one term of the single
+# `query` expression the endpoint takes, joined with `and`, so this is sent
+# as query=name sw dash and in_policy eq yes.
+for app in client.private_apps.list(app_name="dash", in_policy=True):
     print(f"{app.app_name} → {app.host}:{app.port}")
 
 # Create a private app. protocols is required: the API carries the port inside
@@ -396,13 +401,20 @@ user = client.scim.users.create(
     display_name="Alice Smith",
 )
 
-# Groups
+# Groups. Members are excluded unless you ask for them by name.
 for group in client.scim.groups.list():
-    print(f"{group.display_name}: {len(group.members)} members")
+    print(group.display_name)
+
+group = client.scim.groups.get("group-id", attributes="members")
+print(f"{group.display_name}: {len(group.members)} members")
 ```
 
 `page_size` on these iterators, and on `client.rbac.admins.list()`, must be
 between 1 and 1000, the ceiling the SCIM `count` parameter already had.
+`client.rbac.admins` yields `AdminUser`, which carries the platform admin's
+`record_type`, `provisioned_by`, and `role`; the SCIM profile fields it
+inherits (`display_name`, `emails`, `name`, `groups`) stay empty for an admin.
+A SCIM user `update()` returns `None` for the documented 204.
 
 ### Incidents
 
@@ -413,7 +425,8 @@ for incident in client.incidents.list(query='severity eq "critical"'):
 
 # Get user risk score
 uci = client.incidents.get_uci("user@example.com")
-print(f"Risk score: {uci.score}")
+latest = uci.confidences[-1] if uci.confidences else None
+print(f"Latest confidence: {latest.confidence_score if latest else 'n/a'}")
 
 # Get UBA anomalies. The endpoint has no server-side severity filter, so
 # passing severity= is rejected rather than silently dropped.
@@ -428,16 +441,18 @@ client.incidents.delete_note("dlp-incident-id", note.note_id)
 ### Steering & Infrastructure
 
 ```python
-# Get steering config
+# Get steering config. The only scopes with an endpoint are "npa" and
+# "publishers"; anything else is rejected before a request is built.
 config = client.steering.get_config("npa")
 
 # List PoPs
 for pop in client.steering.list_pops():
-    print(f"{pop.name} — {pop.region}")
+    print(f"{pop.name} — {pop.region} ({pop.location})")
 
-# List IPSec tunnels
+# List IPSec tunnels. The record is keyed by site, and reports `enabled`
+# even though create_tunnel()/update_tunnel() write the API's `enable`.
 for tunnel in client.steering.list_tunnels():
-    print(f"{tunnel.name}: {tunnel.status}")
+    print(f"{tunnel.site}: enabled={tunnel.enabled}")
 ```
 
 ### NPA Policy & Infrastructure
@@ -469,9 +484,18 @@ for profile in client.dns.list():
     print(profile.name)
 profile = client.dns.get(profile_id="uuid-here")
 
+# Writes default to interactive=True, so the change waits in a Pending-*
+# state. Pass interactive=False to deploy on write instead.
+profile = client.dns.create("corp-dns")
+client.dns.update(profile.id, description="Corporate resolver")
+
+# Deploying by ID requires a change_note; deploy(all=True) does not.
+client.dns.deploy(ids=[profile.id], change_note="quarterly update")
+
 # Domain inheritance groups and reference data
 for group in client.dns.inheritance_groups.list():
     print(group.name)
+client.dns.inheritance_groups.deploy(all=True)
 categories = client.dns.list_domain_categories()
 record_types = client.dns.list_record_types()
 ```
@@ -514,10 +538,12 @@ client.devices.supported_os()
 ### Enrollment
 
 ```python
-# Client enrollment token sets
+# Client enrollment token sets. Neither call takes arguments: the list
+# operation declares no parameters and the create operation no body, so
+# name/max_devices/limit/offset warn and are not sent.
 for token_set in client.enrollment.list_token_sets():
-    print(token_set)
-new_set = client.enrollment.create_token_set(...)
+    print(token_set.id, token_set.enforce_status)
+new_set = client.enrollment.create_token_set()
 ```
 
 ### RBAC (Roles & Admins)
@@ -570,6 +596,8 @@ new_token = client.tokens.create(
     expires=datetime(2027, 1, 1),
 )
 client.tokens.reissue(new_token.id)  # rotate the secret
+client.tokens.revoke(new_token.id)  # PATCH {"operation": "revoke"} — the record stays
+client.tokens.delete(new_token.id)  # DELETE — a separate operation
 ```
 
 ### Notification Templates
@@ -591,8 +619,9 @@ template = client.notifications.create_template(
 ```python
 status = client.ips.status()
 signatures = client.ips.list_signatures()
+hits = client.ips.search_signatures(cvss_severity=["critical"], limit=50)
 mode = client.ips.get_alert_only_mode()
-client.ips.update_allowlist(...)
+client.ips.update_allowlist(domain=["intranet.example.com"])
 ```
 
 ### DEM / ADEM (Digital Experience Monitoring)
@@ -600,41 +629,86 @@ client.ips.update_allowlist(...)
 ```python
 from datetime import datetime
 
-# Synthetic and network probes
+# Application probes. An app probe follows an app named by app_name
+# (predefined) or app_id (custom); frequency is in minutes. There is no
+# target, protocol, or interval — passing one raises ValidationError.
 for probe in client.dem.probes.list().get("data", []):
     print(probe)
 
-# ADEM per-user experience
+client.dem.probes.create(
+    "slack-probe",
+    frequency=5,
+    entity={"user": ["alice@example.com"], "group": [], "ou": []},
+    os=["windows", "mac"],
+    device_classification=["managed"],
+    app_name="Slack",
+)
+
+# Alert rules. metric/threshold build the nested criteria the API expects;
+# there is no probe_id — scope a rule with criteria.condition.filter.
+rules = client.dem.alert_rules.list(category="User Experience", enabled=True)
+client.dem.alert_rules.create(
+    "low-experience-score",
+    metric="userDemScore",
+    threshold=2000,
+    severity="high",
+    category="User Experience",
+    type="Experience Score",
+)
+
+# DEM alerts
+alerts = client.dem.alerts.search(severity=["high"], limit=50)
+
+# Ad-hoc query. begin/end go out as {"absolute": "<RFC 3339>"} objects; a
+# bare int is read as epoch milliseconds. agent_status and client_status
+# are state sources — read them with get_states(), not get_data().
+data = client.dem.query.get_data(
+    "ux_score",
+    select=["user", "exp_score"],
+    begin=datetime(2026, 1, 1),
+    end=datetime(2026, 1, 2),
+)
+
+# ADEM per-user experience (epoch seconds on the wire)
 info = client.dem.users.info(
     "alice@example.com",
     start_time=datetime(2026, 1, 1),
     end_time=datetime(2026, 1, 2),
 )
-
-# DEM alerts and rules
-alerts = client.dem.alerts.search(...)
-rules = client.dem.alert_rules.list()
 ```
 
 ### Security Services (ATP, NSIQ, RBI, DSPM, SPM)
 
 ```python
-# Advanced Threat Protection — file/URL scanning
+# Advanced Threat Protection. The sandbox upload is multipart with a
+# required scantype; the file must be a ZipCrypto archive (password
+# "infected") holding one exe/pdf/doc/xls/ppt/rtf member of at most 16 MB.
 result = client.atp.scan_url("http://example.com")
-client.atp.scan_file_path("/path/to/sample.exe")
+job = client.atp.scan_file_path("/path/to/sample.zip")
+report = client.atp.get_report(job["jobid"])
 
 # NSIQ — URL categorization, recategorization, IOC lookup
 client.nsiq.url_lookup("http://example.com")
 client.nsiq.lookup_iocs(["<sha256>"])
 
-# Remote Browser Isolation — templates and CDR config
-client.rbi.list_templates()
+# Remote Browser Isolation — templates and CDR config. restore_cdr() is a
+# PUT that empties the CDR config; test_cdr_config() is a GET whose
+# settings travel as query values, with an inline api_key sent as the
+# X-CDR-Api-Key header.
+client.rbi.list_templates(limit=10)
+client.rbi.test_cdr_config(vendor="votiro", endpoint_url="https://votiro.example.com")
+client.rbi.restore_cdr()
 
-# Data Security Posture Management — resource inventory
+# Data Security Posture Management. list_resources() routes by the resource
+# names DspmResource.supported_resource_types() reports. There is no bulk
+# connect-by-id: connect_datastore() sends one DataStoreRequest, and
+# scan_datastores() loops the single-datastore start-scan operation.
 client.dspm.list_resources("databases")
+client.dspm.scan_datastores(["datastore-id"])
 
-# SaaS Security Posture Management — app posture
+# SaaS Security Posture Management. recent_changes requires a time range.
 client.spm.list_apps()
+client.spm.recent_changes(start=1758127874, end=1759127874)
 ```
 
 ## Error Handling
@@ -674,6 +748,29 @@ before a request is built, `ResponseValidationError` reports a response the SDK
 cannot decode, `PaginationError` reports a page it cannot continue from, and
 `ClientClosedError` is raised when the client is already closed. All of them
 derive from `NetskopeError` and import from `netskope` or `netskope.exceptions`.
+
+## Contract Source
+
+Request and response shapes in this SDK are checked against a pinned revision
+of the Netskope API gateway contract — the internal OpenAPI definitions the
+gateway is built from. Those definitions are not public, so this repository
+carries neither a copy nor a link to them.
+
+The conformance checks live in `tests/unit/resources/test_spec_*.py`
+(`test_spec_events.py`, `test_spec_identity.py`, `test_spec_infra.py`,
+`test_spec_services.py`). Each assertion cites the contract file and line the
+shape comes from, for example:
+
+```python
+def test_transaction_metrics_sends_only_hours(client: NetskopeClient) -> None:
+    """transaction_metrics.yaml:74-83 declares `hours` as the only parameter."""
+```
+
+Those citations are the record of why a parameter is spelled the way it is, why
+a field was removed from a model, and why an argument is rejected before a
+request is built. Response fixtures use the contract's own example values
+wherever it publishes them. Every test runs against `respx` mocks on
+`example.goskope.com`; none of them reaches a live tenant.
 
 ## Context Managers
 

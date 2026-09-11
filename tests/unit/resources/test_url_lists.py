@@ -108,9 +108,19 @@ class TestUrlListsResource:
         client.url_lists.delete(42)  # Should not raise
 
     @respx.mock
-    def test_deploy(self, client: NetskopeClient) -> None:
-        respx.post("https://t.goskope.com/api/v2/policy/deploy").mock(
+    def test_deploy_posts_to_the_urllist_deploy_path(self, client: NetskopeClient) -> None:
+        """The only deploy operation is POST /urllist/deploy (policy/urllist.yaml:201-227).
+
+        The SDK posted to a bare ``/api/v2/policy/deploy``, which appears in no
+        path in the spec and answered 404.
+        """
+        stale = respx.post("https://t.goskope.com/api/v2/policy/deploy").mock(
+            return_value=httpx.Response(404, json={"status": "not found"})
+        )
+        route = respx.post(f"{_URL}/deploy").mock(
             return_value=httpx.Response(200, json={"status": "deployed"})
         )
         result = client.url_lists.deploy()
+        assert route.call_count == 1
+        assert stale.call_count == 0
         assert result["status"] == "deployed"

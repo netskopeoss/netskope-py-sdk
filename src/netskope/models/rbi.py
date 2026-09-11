@@ -16,7 +16,13 @@ class RbiApplication(NetskopeModel):
 
 
 class RbiApplications(NetskopeModel):
-    applications: dict[str, RbiApplication]
+    """``GET /rbi/applications`` 200 body (rbi/templates.yaml:7).
+
+    Only ``message`` and ``status`` are required there, so a reply that omits
+    ``applications`` still decodes as an empty mapping.
+    """
+
+    applications: dict[str, RbiApplication] = Field(default_factory=dict)
     status: str | None = None
     message: str | None = None
 

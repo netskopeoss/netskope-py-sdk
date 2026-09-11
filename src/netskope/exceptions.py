@@ -221,6 +221,13 @@ def _extract_message(body: dict[str, Any]) -> str:
     if raw is None:
         raw = body.get("error")
     if raw is None:
+        # The forensics and notes endpoints report the reason inside `data`
+        # even on HTTP 200 (incidents/ims_forensics.yaml:25-36 and :60-94,
+        # incidents/ims_notes.yaml:70-81).
+        data = body.get("data")
+        if isinstance(data, dict):
+            raw = data.get("error")
+    if raw is None:
         result = body.get("result")
         if isinstance(result, str):
             raw = result
@@ -243,6 +250,11 @@ def _extract_message(body: dict[str, Any]) -> str:
     if raw is not None:
         return str(raw)
     return ""
+
+
+def _reports_failed(execution: Any) -> bool:
+    """Whether a datasearch ``execution`` value states the query failed."""
+    return isinstance(execution, str) and execution.strip().casefold() == "failed"
 
 
 def _failed_execution_message(
@@ -281,8 +293,11 @@ def raise_for_status(response: httpx.Response) -> None:
         # Datasearch reports execution either inside the status envelope or
         # beside it, depending on the endpoint.
         status_envelope = status if isinstance(status, dict) else {}
-        status_failed = status_envelope.get("execution") == "FAILED"
-        failed_execution = status_failed or body.get("execution") == "FAILED"
+        # search_alert.yaml:249-255 spells the enum Success/Failed while its own
+        # example shows SUCCESS, so the reported casing is not dependable
+        # (same at search_incident.yaml:423-429, search_clientstatus.yaml:204-210).
+        status_failed = _reports_failed(status_envelope.get("execution"))
+        failed_execution = status_failed or _reports_failed(body.get("execution"))
         if (
             status == "error"
             or body.get("ok") == 0

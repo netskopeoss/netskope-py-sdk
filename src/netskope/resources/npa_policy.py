@@ -107,7 +107,9 @@ def _build_rule_create_payload(
     if rule_name is not None:
         payload["rule_name"] = rule_name
     if group_id is not None:
-        payload["group_id"] = group_id
+        # ``npa_policy_request.group_id`` is a string (policy/npa_policy.yaml:11-13),
+        # as the typed path already sends it (NpaPolicyRulePatch.serialize_group_id).
+        payload["group_id"] = str(group_id)
     payload["enabled"] = "1" if enabled else "0"
     if rule_data is not None:
         payload["rule_data"] = rule_data
@@ -175,6 +177,15 @@ def _build_group_create_payload(
     order: str,
     anchor_group_id: int | str | None,
 ) -> dict[str, Any]:
+    """Build the policy-group create body with a single ``group_order`` level.
+
+    ``npa_policygroup_request`` (policy/npa_policygroup.yaml:7-20) nests a
+    second ``group_order`` inside the first, and that inner wrapper is the only
+    property the outer one has — an authoring slip rather than a shape the
+    gateway wants.  The SDK sends one level, matching the typed
+    :class:`~netskope.models.npa_policy.NpaGroupOrder` path; do not double-nest
+    it without a live check.
+    """
     payload: dict[str, Any] = {"group_name": group_name}
     if anchor_group_id is not None:
         payload["group_order"] = {"group_id": str(anchor_group_id), "order": order}

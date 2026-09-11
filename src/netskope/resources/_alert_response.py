@@ -11,6 +11,7 @@ import httpx
 from netskope._transport import AsyncTransport, SyncTransport
 from netskope.datasearch import (
     DATASEARCH_PAGE_CAP,
+    DATASEARCH_TIMEOUT_DEFAULT,
     AsyncScanIterator,
     DatasearchWindow,
     ScanIterator,
@@ -69,8 +70,9 @@ def _scan_alerts(
     page_size: int = DATASEARCH_PAGE_CAP,
     max_records: int | None = None,
     max_pages: int = 1_000,
+    timeout: int | None = DATASEARCH_TIMEOUT_DEFAULT,
 ) -> ScanIterator[T]:
-    params = _build_scan_params(window, query, fields, order_by, descending)
+    params = _build_scan_params(window, query, fields, order_by, descending, timeout=timeout)
 
     def fetch(offset: int, limit: int) -> _ScanPage[T]:
         raw = transport.request("GET", _PATH, params={**params, "offset": offset, "limit": limit})
@@ -95,8 +97,9 @@ def _scan_alerts_async(
     page_size: int = DATASEARCH_PAGE_CAP,
     max_records: int | None = None,
     max_pages: int = 1_000,
+    timeout: int | None = DATASEARCH_TIMEOUT_DEFAULT,
 ) -> AsyncScanIterator[T]:
-    params = _build_scan_params(window, query, fields, order_by, descending)
+    params = _build_scan_params(window, query, fields, order_by, descending, timeout=timeout)
 
     async def fetch(offset: int, limit: int) -> _ScanPage[T]:
         raw = await transport.request(
@@ -125,10 +128,19 @@ class AlertResponses(SyncResource):
         descending: bool | None = None,
         offset: int | None = None,
         limit: int | None = None,
+        timeout: int | None = DATASEARCH_TIMEOUT_DEFAULT,
     ) -> ApiResponse[Page[Alert]]:
         """Fetch exactly one record page; omitted request parameters stay omitted."""
         params = _build_page_params(
-            query, fields, start_time, end_time, order_by, descending, offset, limit
+            query,
+            fields,
+            start_time,
+            end_time,
+            order_by,
+            descending,
+            offset,
+            limit,
+            timeout=timeout,
         )
         raw = self._transport.request("GET", _PATH, params=params or None)
         return _page_response(raw, offset, limit)
@@ -144,18 +156,32 @@ class AlertResponses(SyncResource):
         order_by: str | None = None,
         descending: bool | None = None,
         limit: int | None = None,
+        timeout: int | None = DATASEARCH_TIMEOUT_DEFAULT,
     ) -> ApiResponse[Page[DatasearchBucket]]:
         """Fetch one grouped result page without implying source-event completeness."""
         params = _build_aggregate_params(
-            group_by, query, fields, start_time, end_time, order_by, descending, limit
+            group_by,
+            query,
+            fields,
+            start_time,
+            end_time,
+            order_by,
+            descending,
+            limit,
+            timeout=timeout,
         )
         raw = self._transport.request("GET", _PATH, params=params)
         return ApiResponse(raw, lambda response: _parse_aggregate_page(response.json(), limit))
 
-    def get(self, alert_id: str) -> ApiResponse[Alert]:
+    def get(
+        self, alert_id: str, *, timeout: int | None = DATASEARCH_TIMEOUT_DEFAULT
+    ) -> ApiResponse[Alert]:
         """Look up an alert by its hex ID and retain the result envelope."""
         _validate_alert_id(alert_id)
-        raw = self._transport.request("GET", _PATH, params={"query": f'_id eq "{alert_id}"'})
+        params = _build_page_params(
+            f'_id eq "{alert_id}"', None, None, None, None, None, None, None, timeout=timeout
+        )
+        raw = self._transport.request("GET", _PATH, params=params)
         return ApiResponse(raw, lambda response: _parse_alert(response, alert_id))
 
     def scan_pages(
@@ -169,6 +195,7 @@ class AlertResponses(SyncResource):
         page_size: int = DATASEARCH_PAGE_CAP,
         max_records: int | None = None,
         max_pages: int = 1_000,
+        timeout: int | None = DATASEARCH_TIMEOUT_DEFAULT,
     ) -> ScanIterator[ApiResponse[Page[Alert]]]:
         """Lazily scan a fixed interval, retaining one response per yielded page."""
         return _scan_alerts(
@@ -182,6 +209,7 @@ class AlertResponses(SyncResource):
             page_size=page_size,
             max_records=max_records,
             max_pages=max_pages,
+            timeout=timeout,
         )
 
 
@@ -199,10 +227,19 @@ class AsyncAlertResponses(AsyncResource):
         descending: bool | None = None,
         offset: int | None = None,
         limit: int | None = None,
+        timeout: int | None = DATASEARCH_TIMEOUT_DEFAULT,
     ) -> ApiResponse[Page[Alert]]:
         """Fetch exactly one record page; omitted request parameters stay omitted."""
         params = _build_page_params(
-            query, fields, start_time, end_time, order_by, descending, offset, limit
+            query,
+            fields,
+            start_time,
+            end_time,
+            order_by,
+            descending,
+            offset,
+            limit,
+            timeout=timeout,
         )
         raw = await self._transport.request("GET", _PATH, params=params or None)
         return _page_response(raw, offset, limit)
@@ -218,18 +255,32 @@ class AsyncAlertResponses(AsyncResource):
         order_by: str | None = None,
         descending: bool | None = None,
         limit: int | None = None,
+        timeout: int | None = DATASEARCH_TIMEOUT_DEFAULT,
     ) -> ApiResponse[Page[DatasearchBucket]]:
         """Fetch one grouped result page without implying source-event completeness."""
         params = _build_aggregate_params(
-            group_by, query, fields, start_time, end_time, order_by, descending, limit
+            group_by,
+            query,
+            fields,
+            start_time,
+            end_time,
+            order_by,
+            descending,
+            limit,
+            timeout=timeout,
         )
         raw = await self._transport.request("GET", _PATH, params=params)
         return ApiResponse(raw, lambda response: _parse_aggregate_page(response.json(), limit))
 
-    async def get(self, alert_id: str) -> ApiResponse[Alert]:
+    async def get(
+        self, alert_id: str, *, timeout: int | None = DATASEARCH_TIMEOUT_DEFAULT
+    ) -> ApiResponse[Alert]:
         """Look up an alert by its hex ID and retain the result envelope."""
         _validate_alert_id(alert_id)
-        raw = await self._transport.request("GET", _PATH, params={"query": f'_id eq "{alert_id}"'})
+        params = _build_page_params(
+            f'_id eq "{alert_id}"', None, None, None, None, None, None, None, timeout=timeout
+        )
+        raw = await self._transport.request("GET", _PATH, params=params)
         return ApiResponse(raw, lambda response: _parse_alert(response, alert_id))
 
     def scan_pages(
@@ -243,6 +294,7 @@ class AsyncAlertResponses(AsyncResource):
         page_size: int = DATASEARCH_PAGE_CAP,
         max_records: int | None = None,
         max_pages: int = 1_000,
+        timeout: int | None = DATASEARCH_TIMEOUT_DEFAULT,
     ) -> AsyncScanIterator[ApiResponse[Page[Alert]]]:
         """Create a lazy async scan without sending a request until iteration."""
         return _scan_alerts_async(
@@ -256,4 +308,5 @@ class AsyncAlertResponses(AsyncResource):
             page_size=page_size,
             max_records=max_records,
             max_pages=max_pages,
+            timeout=timeout,
         )

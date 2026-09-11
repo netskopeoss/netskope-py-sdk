@@ -199,14 +199,36 @@ class DemProbeResponses(_DemResponses):
     def create(
         self,
         name: str,
-        target: str,
+        target: str | None = None,
         *,
-        protocol: str = "https",
+        frequency: int | None = None,
+        entity: dict[str, builtins.list[str]] | None = None,
+        os: builtins.list[str] | None = None,
+        device_classification: builtins.list[str] | None = None,
+        status: int = 1,
+        app_name: str | None = None,
+        app_id: int | None = None,
+        move: dict[str, Any] | None = None,
+        protocol: str | None = None,
         interval: int | None = None,
         additional_fields: dict[str, Any] | None = None,
     ) -> ApiResponse[DemProbe]:
-        body = api._probe_create_body(name, target, protocol, interval, additional_fields)
-        body["data"] = _validated(DemProbeCreate, body["data"])
+        body = _validated(
+            DemProbeCreate,
+            api._probe_create_body(
+                name,
+                frequency=frequency,
+                entity=entity,
+                os=os,
+                device_classification=device_classification,
+                status=status,
+                app_name=app_name,
+                app_id=app_id,
+                move=move,
+                retired={"target": target, "protocol": protocol, "interval": interval},
+                additional_fields=additional_fields,
+            ),
+        )
         return self._response(
             "POST", api._APPPROBES_PATH, _item(DemProbe), json=body, retry_safe=False
         )
@@ -226,13 +248,24 @@ class DemNetworkProbeResponses(_DemResponses):
 
 class DemAlertRuleResponses(_DemResponses):
     def list(
-        self, *, limit: int | None = None, offset: int | None = None
+        self,
+        *,
+        category: str | None = None,
+        type: str | None = None,
+        enabled: bool | None = None,
+        severity: str | None = None,
+        limit: int | None = None,
+        offset: int | None = None,
     ) -> ApiResponse[builtins.list[DemAlertRule]]:
+        """``GET /alert/rules`` declares no limit/offset, so they slice here."""
+        _paging(limit, offset)
+        params = api._alert_rule_params(category, type, enabled, severity)
+        parser = _collection(DemAlertRule, "rules")
         return self._response(
             "GET",
             api._ALERT_RULES_PATH,
-            _collection(DemAlertRule, "rules"),
-            params=_paging(limit, offset),
+            lambda body: parser(api._slice_rules(body, limit, offset)),
+            params=params,
         )
 
     def create(
@@ -243,12 +276,37 @@ class DemAlertRuleResponses(_DemResponses):
         *,
         severity: str = "medium",
         probe_id: str | None = None,
+        category: str | None = None,
+        type: str | None = None,
+        enabled: bool = True,
+        email_receiver: str | None = None,
+        criteria_type: str | None = None,
+        window: int | None = None,
+        filter: dict[str, Any] | None = None,
+        duration: int | None = None,
+        criteria: dict[str, Any] | None = None,
         additional_fields: dict[str, Any] | None = None,
     ) -> ApiResponse[DemAlertRule]:
-        body = api._alert_rule_create_body(
-            name, metric, threshold, severity, probe_id, additional_fields
+        body = _validated(
+            DemAlertRuleCreate,
+            api._alert_rule_create_body(
+                name,
+                metric,
+                threshold,
+                severity,
+                probe_id,
+                category=category,
+                alert_type=type,
+                enabled=enabled,
+                email_receiver=email_receiver,
+                criteria_type=criteria_type,
+                window=window,
+                filter=filter,
+                duration=duration,
+                criteria=criteria,
+                additional_fields=additional_fields,
+            ),
         )
-        body["data"] = _validated(DemAlertRuleCreate, body["data"])
         return self._response(
             "POST", api._ALERT_RULES_PATH, _item(DemAlertRule), json=body, retry_safe=False
         )
@@ -318,8 +376,10 @@ class DemQueryResponses(_DemResponses):
         exp_score: builtins.list[str] | None = None,
         pop: builtins.list[str] | None = None,
         source_ip: str | None = None,
+        user_location: builtins.list[dict[str, str]] | None = None,
         limit: int | None = None,
         offset: int | None = None,
+        sort_by: str | None = None,
         sort_order: str | None = None,
     ) -> ApiResponse[builtins.list[DemEntity]]:
         _time_bounds(start_time, end_time, millis=False)
@@ -336,9 +396,10 @@ class DemQueryResponses(_DemResponses):
             exp_score,
             pop,
             source_ip,
+            user_location,
         )
         _paging(limit, offset)
-        params = api._getentities_params(limit, offset, sort_order)
+        params = api._getentities_params(limit, offset, sort_order, sort_by)
         return self._response(
             "POST",
             api._QUERY_GETENTITIES_PATH,
@@ -701,14 +762,36 @@ class AsyncDemProbeResponses(_AsyncDemResponses):
     async def create(
         self,
         name: str,
-        target: str,
+        target: str | None = None,
         *,
-        protocol: str = "https",
+        frequency: int | None = None,
+        entity: dict[str, builtins.list[str]] | None = None,
+        os: builtins.list[str] | None = None,
+        device_classification: builtins.list[str] | None = None,
+        status: int = 1,
+        app_name: str | None = None,
+        app_id: int | None = None,
+        move: dict[str, Any] | None = None,
+        protocol: str | None = None,
         interval: int | None = None,
         additional_fields: dict[str, Any] | None = None,
     ) -> ApiResponse[DemProbe]:
-        body = api._probe_create_body(name, target, protocol, interval, additional_fields)
-        body["data"] = _validated(DemProbeCreate, body["data"])
+        body = _validated(
+            DemProbeCreate,
+            api._probe_create_body(
+                name,
+                frequency=frequency,
+                entity=entity,
+                os=os,
+                device_classification=device_classification,
+                status=status,
+                app_name=app_name,
+                app_id=app_id,
+                move=move,
+                retired={"target": target, "protocol": protocol, "interval": interval},
+                additional_fields=additional_fields,
+            ),
+        )
         return await self._response(
             "POST", api._APPPROBES_PATH, _item(DemProbe), json=body, retry_safe=False
         )
@@ -728,13 +811,24 @@ class AsyncDemNetworkProbeResponses(_AsyncDemResponses):
 
 class AsyncDemAlertRuleResponses(_AsyncDemResponses):
     async def list(
-        self, *, limit: int | None = None, offset: int | None = None
+        self,
+        *,
+        category: str | None = None,
+        type: str | None = None,
+        enabled: bool | None = None,
+        severity: str | None = None,
+        limit: int | None = None,
+        offset: int | None = None,
     ) -> ApiResponse[builtins.list[DemAlertRule]]:
+        """``GET /alert/rules`` declares no limit/offset, so they slice here."""
+        _paging(limit, offset)
+        params = api._alert_rule_params(category, type, enabled, severity)
+        parser = _collection(DemAlertRule, "rules")
         return await self._response(
             "GET",
             api._ALERT_RULES_PATH,
-            _collection(DemAlertRule, "rules"),
-            params=_paging(limit, offset),
+            lambda body: parser(api._slice_rules(body, limit, offset)),
+            params=params,
         )
 
     async def create(
@@ -745,12 +839,37 @@ class AsyncDemAlertRuleResponses(_AsyncDemResponses):
         *,
         severity: str = "medium",
         probe_id: str | None = None,
+        category: str | None = None,
+        type: str | None = None,
+        enabled: bool = True,
+        email_receiver: str | None = None,
+        criteria_type: str | None = None,
+        window: int | None = None,
+        filter: dict[str, Any] | None = None,
+        duration: int | None = None,
+        criteria: dict[str, Any] | None = None,
         additional_fields: dict[str, Any] | None = None,
     ) -> ApiResponse[DemAlertRule]:
-        body = api._alert_rule_create_body(
-            name, metric, threshold, severity, probe_id, additional_fields
+        body = _validated(
+            DemAlertRuleCreate,
+            api._alert_rule_create_body(
+                name,
+                metric,
+                threshold,
+                severity,
+                probe_id,
+                category=category,
+                alert_type=type,
+                enabled=enabled,
+                email_receiver=email_receiver,
+                criteria_type=criteria_type,
+                window=window,
+                filter=filter,
+                duration=duration,
+                criteria=criteria,
+                additional_fields=additional_fields,
+            ),
         )
-        body["data"] = _validated(DemAlertRuleCreate, body["data"])
         return await self._response(
             "POST", api._ALERT_RULES_PATH, _item(DemAlertRule), json=body, retry_safe=False
         )
@@ -820,8 +939,10 @@ class AsyncDemQueryResponses(_AsyncDemResponses):
         exp_score: builtins.list[str] | None = None,
         pop: builtins.list[str] | None = None,
         source_ip: str | None = None,
+        user_location: builtins.list[dict[str, str]] | None = None,
         limit: int | None = None,
         offset: int | None = None,
+        sort_by: str | None = None,
         sort_order: str | None = None,
     ) -> ApiResponse[builtins.list[DemEntity]]:
         _time_bounds(start_time, end_time, millis=False)
@@ -838,9 +959,10 @@ class AsyncDemQueryResponses(_AsyncDemResponses):
             exp_score,
             pop,
             source_ip,
+            user_location,
         )
         _paging(limit, offset)
-        params = api._getentities_params(limit, offset, sort_order)
+        params = api._getentities_params(limit, offset, sort_order, sort_by)
         return await self._response(
             "POST",
             api._QUERY_GETENTITIES_PATH,

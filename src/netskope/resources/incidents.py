@@ -5,9 +5,12 @@ Example::
     for incident in client.incidents.list():
         print(f"{incident.incident_id} — {incident.severity}")
 
-    # Get user confidence index (risk score)
+    # Get user confidence index (risk score). The response is a time series
+    # of confidence points, not a single score; the last point is current.
     uci = client.incidents.get_uci("user@example.com")
-    print(f"Risk score: {uci.score}")
+    latest = (uci.confidences or [])[-1:]
+    for point in latest:
+        print(f"Risk score: {point.confidence_score}")
 """
 
 from __future__ import annotations
@@ -18,6 +21,7 @@ from datetime import UTC, datetime, timedelta
 from typing import TYPE_CHECKING, Any
 
 from netskope._pagination import AsyncPaginatedResponse, SyncPaginatedResponse
+from netskope.datasearch import DATASEARCH_TIMEOUT_DEFAULT
 from netskope.exceptions import ValidationError
 from netskope.models.incidents import (
     Anomaly,
@@ -27,6 +31,7 @@ from netskope.models.incidents import (
     UserConfidenceIndex,
 )
 from netskope.pagination import Page
+from netskope.resources._alert_query import _validate_timeout
 from netskope.resources._base import AsyncResource, SyncResource
 from netskope.resources._extract import extract_item, extract_list, quote_id, validate_id
 
@@ -52,8 +57,13 @@ def _build_list_params(
     fields: builtins.list[str] | None,
     start_time: datetime | int | None,
     end_time: datetime | int | None,
+    timeout: int | None = DATASEARCH_TIMEOUT_DEFAULT,
 ) -> dict[str, Any]:
     params: dict[str, Any] = {}
+    resolved_timeout = _validate_timeout(timeout)
+    if resolved_timeout is not None:
+        # search_incident.yaml:459-465 marks the query timeout required.
+        params["timeout"] = resolved_timeout
     if query:
         params["query"] = query
     if fields:
@@ -133,8 +143,10 @@ def _build_anomalies_request(
         or any(not isinstance(user, str) or not user.strip() for user in users)
     ):
         raise ValidationError("users must contain at least one nonempty username.")
-    if isinstance(timeframe, bool) or not isinstance(timeframe, int) or not 1 <= timeframe <= 90:
-        raise ValidationError(f"Invalid timeframe {timeframe!r}. Must be between 1 and 90 days.")
+    if isinstance(timeframe, bool) or not isinstance(timeframe, int) or timeframe < 1:
+        # uba.yaml:608-615 declares no upper bound on timeframe, so the SDK
+        # only rejects values the field cannot mean (unit is whole days).
+        raise ValidationError(f"Invalid timeframe {timeframe!r}. Must be at least 1 day.")
     if isinstance(limit, bool) or not isinstance(limit, int) or not 1 <= limit <= 10000:
         raise ValidationError(f"Invalid limit {limit!r}. Must be between 1 and 10000.")
     if isinstance(offset, bool) or not isinstance(offset, int) or offset < 0:
@@ -180,6 +192,7 @@ class IncidentsResource(SyncResource):
         descending: bool | None = None,
         offset: int | None = None,
         limit: int | None = None,
+        timeout: int | None = DATASEARCH_TIMEOUT_DEFAULT,
     ) -> Page[Incident]:
         """Fetch and validate exactly one incident event page."""
         return self.with_response.list_page(
@@ -191,6 +204,7 @@ class IncidentsResource(SyncResource):
             descending=descending,
             offset=offset,
             limit=limit,
+            timeout=timeout,
         ).parse()
 
     def update_one(
@@ -235,6 +249,7 @@ class IncidentsResource(SyncResource):
         start_time: datetime | int | None = None,
         end_time: datetime | int | None = None,
         page_size: int = 100,
+        timeout: int | None = DATASEARCH_TIMEOUT_DEFAULT,
     ) -> SyncPaginatedResponse[Incident]:
         """List incidents with optional JQL filtering.
 
@@ -249,7 +264,7 @@ class IncidentsResource(SyncResource):
             transport=self._transport,
             method="GET",
             path=_SEARCH_PATH,
-            params=_build_list_params(query, fields, start_time, end_time),
+            params=_build_list_params(query, fields, start_time, end_time, timeout),
             model=Incident,
             page_size=page_size,
             extract=extract_list,
@@ -337,13 +352,17 @@ class IncidentsResource(SyncResource):
 
         Args:
             users: List of user email addresses.
-            timeframe: Number of days to look back (1-90, default 30).
+            timeframe: Number of days to look back (at least 1, default 30).
+                The endpoint declares no upper bound.
             severity: Unsupported — the endpoint has no server-side severity
                 filter, so a value here is rejected instead of silently dropped.
             limit: Maximum number of results (1-10000, default 100).
             offset: Pagination offset.
             sort_by: Field to sort results by (default ``"time"``).
-            sort_order: ``"asc"`` or ``"desc"`` (default ``"desc"``).
+            sort_order: ``"asc"`` or ``"desc"``. The SDK default is
+                ``"desc"`` (newest first); the endpoint's own default is
+                ``"asc"`` (uba.yaml:2205-2216), so leaving this unset still
+                sends an explicit ``sortorder``.
 
         Raises:
             netskope.exceptions.ValidationError: If *severity* is supplied or a
@@ -353,7 +372,8 @@ class IncidentsResource(SyncResource):
             users, timeframe, severity, limit, offset, sort_by, sort_order
         )
         body = self._post(_ANOMALIES_PATH, json=payload, retry_safe=True, **params)
-        return [Anomaly.model_validate(item) for item in extract_list(body)]
+        # uba.yaml:926-937 requires both `results` and `totalCount`.
+        return [Anomaly.model_validate(item) for item in extract_list(body, "results")]
 
     def list_notes(self, dlp_incident_id: str) -> builtins.list[IncidentNote]:
         """List notes attached to a DLP incident.
@@ -415,6 +435,7 @@ class AsyncIncidentsResource(AsyncResource):
         descending: bool | None = None,
         offset: int | None = None,
         limit: int | None = None,
+        timeout: int | None = DATASEARCH_TIMEOUT_DEFAULT,
     ) -> Page[Incident]:
         """Fetch and validate exactly one incident event page."""
         return (
@@ -427,6 +448,7 @@ class AsyncIncidentsResource(AsyncResource):
                 descending=descending,
                 offset=offset,
                 limit=limit,
+                timeout=timeout,
             )
         ).parse()
 
@@ -476,13 +498,14 @@ class AsyncIncidentsResource(AsyncResource):
         start_time: datetime | int | None = None,
         end_time: datetime | int | None = None,
         page_size: int = 100,
+        timeout: int | None = DATASEARCH_TIMEOUT_DEFAULT,
     ) -> AsyncPaginatedResponse[Incident]:
         """List incidents with optional JQL filtering."""
         return AsyncPaginatedResponse(
             transport=self._transport,
             method="GET",
             path=_SEARCH_PATH,
-            params=_build_list_params(query, fields, start_time, end_time),
+            params=_build_list_params(query, fields, start_time, end_time, timeout),
             model=Incident,
             page_size=page_size,
             extract=extract_list,
@@ -546,7 +569,8 @@ class AsyncIncidentsResource(AsyncResource):
             users, timeframe, severity, limit, offset, sort_by, sort_order
         )
         body = await self._post(_ANOMALIES_PATH, json=payload, retry_safe=True, **params)
-        return [Anomaly.model_validate(item) for item in extract_list(body)]
+        # uba.yaml:926-937 requires both `results` and `totalCount`.
+        return [Anomaly.model_validate(item) for item in extract_list(body, "results")]
 
     async def list_notes(self, dlp_incident_id: str) -> builtins.list[IncidentNote]:
         """List notes attached to a DLP incident."""

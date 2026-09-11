@@ -19,7 +19,7 @@ from netskope.exceptions import APIError, NotFoundError
 from netskope.models.enrollment import EnrollmentTokenSet
 from netskope.resources.enrollment import EnrollmentResource
 
-from .conftest import skip_if_unavailable, unique_name
+from .conftest import skip_if_unavailable
 
 
 @pytest.fixture
@@ -38,7 +38,7 @@ class TestEnrollmentIntegration:
         ``skip_if_unavailable`` treats that as a skip, not a failure.
         """
         try:
-            token_sets = enrollment.list_token_sets(limit=10)
+            token_sets = enrollment.list_token_sets()
         except APIError as e:
             skip_if_unavailable(e, "Enrollment token sets")
         else:
@@ -49,9 +49,8 @@ class TestEnrollmentIntegration:
 
     def test_token_set_write_cycle(self, enrollment: EnrollmentResource) -> None:
         """Create → list contains it → delete an enrollment token set."""
-        name = unique_name("enroll")
         try:
-            created = enrollment.create_token_set(name)
+            created = enrollment.create_token_set()
         except APIError as e:
             skip_if_unavailable(e, "Enrollment token sets")
             return

@@ -407,15 +407,17 @@ class TestCdr:
         assert sent_json(route) == {"vendor": "opswat"}
 
     @respx.mock
-    def test_restore_cdr(self, client: NetskopeClient) -> None:
-        route = respx.post(f"{_CDR_URL}/default").mock(return_value=httpx.Response(200, json=_OK))
+    def test_restore_cdr_uses_put(self, client: NetskopeClient) -> None:
+        """``RestoreCdr`` is ``PUT /cdr/default``; the path has no ``post`` (rbi/cdr.yaml:164)."""
+        route = respx.put(f"{_CDR_URL}/default").mock(return_value=httpx.Response(200, json=_OK))
         assert _rbi(client).restore_cdr() == _OK
-        assert route.calls.last.request.method == "POST"
+        assert route.calls.last.request.method == "PUT"
 
     @respx.mock
     async def test_restore_cdr_async(self, aclient: AsyncNetskopeClient) -> None:
-        respx.post(f"{_CDR_URL}/default").mock(return_value=httpx.Response(200, json=_OK))
+        route = respx.put(f"{_CDR_URL}/default").mock(return_value=httpx.Response(200, json=_OK))
         assert await _arbi(aclient).restore_cdr() == _OK
+        assert route.calls.last.request.method == "PUT"
 
     @respx.mock
     def test_list_cdr_vendors(self, client: NetskopeClient) -> None:
@@ -429,26 +431,79 @@ class TestCdr:
         assert await _arbi(aclient).list_cdr_vendors() == _OK
 
     @respx.mock
-    def test_test_cdr_config(self, client: NetskopeClient) -> None:
-        route = respx.post(f"{_CDR_URL}/testconfig").mock(
-            return_value=httpx.Response(200, json=_OK)
+    def test_test_cdr_config_is_a_get_with_query(self, client: NetskopeClient) -> None:
+        """``TestCdrConfig`` is ``GET /cdr/testconfig`` with query params (cdr.yaml:380-480)."""
+        route = respx.get(f"{_CDR_URL}/testconfig").mock(return_value=httpx.Response(200, json=_OK))
+
+        result = _rbi(client).test_cdr_config(
+            vendor="votiro",
+            endpoint_url="https://api.example.test/v4",
+            workflow_rule_name="cdr",
         )
-        payload = {
+
+        assert result == _OK
+        request = route.calls.last.request
+        assert request.method == "GET"
+        assert request.content == b""
+        assert dict(request.url.params) == {
             "vendor": "votiro",
-            "endpoint_url": "https://x",
-            "api_key": "k",
-            "workflow_rule_name": "r",
+            "endpoint_url": "https://api.example.test/v4",
+            "workflow_rule_name": "cdr",
         }
 
-        _rbi(client).test_cdr_config(payload)
+    @respx.mock
+    def test_legacy_mapping_becomes_the_query(self, client: NetskopeClient) -> None:
+        route = respx.get(f"{_CDR_URL}/testconfig").mock(return_value=httpx.Response(200, json=_OK))
 
-        assert route.calls.last.request.method == "POST"
-        assert sent_json(route) == payload
+        _rbi(client).test_cdr_config({"id": "0b2f1a3e-0000-4000-8000-000000000001"})
+
+        assert dict(route.calls.last.request.url.params) == {
+            "id": "0b2f1a3e-0000-4000-8000-000000000001"
+        }
+
+    @respx.mock
+    @pytest.mark.parametrize(
+        ("payload", "message"),
+        [
+            ({"api_key": "k"}, "needs either config_id"),
+            ({"nope": 1}, "does not accept"),
+        ],
+    )
+    def test_rejected_arguments_never_reach_the_wire(
+        self, client: NetskopeClient, payload: dict[str, object], message: str
+    ) -> None:
+        route = respx.route(url__regex=r".*").mock(return_value=httpx.Response(200, json={}))
+        with pytest.raises(ValidationError, match=message):
+            _rbi(client).test_cdr_config(payload)
+        assert route.call_count == 0
+
+    @respx.mock
+    def test_no_selector_is_rejected(self, client: NetskopeClient) -> None:
+        route = respx.route(url__regex=r".*").mock(return_value=httpx.Response(200, json={}))
+        with pytest.raises(ValidationError, match="needs either config_id"):
+            _rbi(client).test_cdr_config()
+        assert route.call_count == 0
 
     @respx.mock
     async def test_test_cdr_config_async(self, aclient: AsyncNetskopeClient) -> None:
-        route = respx.post(f"{_CDR_URL}/testconfig").mock(
-            return_value=httpx.Response(200, json=_OK)
-        )
+        route = respx.get(f"{_CDR_URL}/testconfig").mock(return_value=httpx.Response(200, json=_OK))
         await _arbi(aclient).test_cdr_config({"vendor": "votiro"})
-        assert sent_json(route) == {"vendor": "votiro"}
+        assert route.calls.last.request.method == "GET"
+        assert dict(route.calls.last.request.url.params) == {"vendor": "votiro"}
+
+
+class TestInlineCdrApiKey:
+    """Inline mode carries the key in ``X-CDR-Api-Key`` (rbi/cdr.yaml:472-480)."""
+
+    @respx.mock
+    def test_api_key_travels_as_a_header_not_a_query_value(self, client: NetskopeClient) -> None:
+        route = respx.get(url__regex=r".*/api/v2/rbi/cdr/testconfig.*").mock(
+            return_value=httpx.Response(200, json={"test_result": {"success": True}})
+        )
+        _rbi(client).test_cdr_config(
+            {"vendor": "votiro", "api_key": "sk-abc", "endpoint_url": "https://v.example.com"}
+        )
+        request = route.calls.last.request
+        assert request.headers["X-CDR-Api-Key"] == "sk-abc"
+        assert "api_key" not in str(request.url)
+        assert request.url.params["vendor"] == "votiro"

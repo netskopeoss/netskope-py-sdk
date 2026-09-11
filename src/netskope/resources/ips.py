@@ -39,6 +39,24 @@ _THREAT_HUNTING_CONFIG_PATH = "/api/v2/ips/threathuntingconfig"
 
 _VALID_OVERRIDE_ACTIONS = ("disabled", "alert", "reject")
 _VALID_TRAFFIC_TYPES = ("web", "nonweb")
+# ms-ips.yaml:692 (getsignaturelist body) and :1153 (signatureoverrides query)
+# both enumerate the same two sort fields and directions.
+_VALID_SORT_FIELDS = ("sig_id", "name")
+_VALID_SORT_ORDERS = ("asc", "desc")
+
+
+def _sort_values(sort_by: str | None, sort_order: str | None) -> dict[str, Any]:
+    """Validate and pair the IPS sort field and direction."""
+    values: dict[str, Any] = {}
+    if sort_by is not None:
+        if sort_by not in _VALID_SORT_FIELDS:
+            raise ValidationError(f"sort_by must be one of: {', '.join(_VALID_SORT_FIELDS)}")
+        values["sortby"] = sort_by
+    if sort_order is not None:
+        if sort_order not in _VALID_SORT_ORDERS:
+            raise ValidationError(f"sort_order must be one of: {', '.join(_VALID_SORT_ORDERS)}")
+        values["sortorder"] = sort_order
+    return values
 
 
 def _build_status_payload(
@@ -90,12 +108,18 @@ def _build_reference_params(
     return params
 
 
-def _build_paging_params(limit: int | None, offset: int | None) -> dict[str, Any]:
+def _build_paging_params(
+    limit: int | None,
+    offset: int | None,
+    sort_by: str | None = None,
+    sort_order: str | None = None,
+) -> dict[str, Any]:
     params: dict[str, Any] = {}
     if limit is not None:
         params["limit"] = limit
     if offset is not None:
         params["offset"] = offset
+    params.update(_sort_values(sort_by, sort_order))
     return params
 
 
@@ -108,12 +132,15 @@ def _build_signature_search_payload(
     sig_id: str | None,
     name: str | None,
     keyword: str | None,
+    sort_by: str | None = None,
+    sort_order: str | None = None,
 ) -> dict[str, Any]:
     payload: dict[str, Any] = {}
     if limit is not None:
         payload["limit"] = limit
     if offset is not None:
         payload["offset"] = offset
+    payload.update(_sort_values(sort_by, sort_order))
     filters: dict[str, Any] = {}
     if reference is not None:
         filters["reference"] = list(reference)
@@ -279,6 +306,8 @@ class IpsResource(SyncResource):
         sig_id: str | None = None,
         name: str | None = None,
         keyword: str | None = None,
+        sort_by: str | None = None,
+        sort_order: str | None = None,
     ) -> dict[str, Any]:
         """Search the signature list with filters.
 
@@ -292,17 +321,28 @@ class IpsResource(SyncResource):
             sig_id: Partial signature ID string.
             name: Partial signature name string.
             keyword: Partial signature ID or name string.
+            sort_by: ``"sig_id"`` (API default) or ``"name"``.
+            sort_order: ``"asc"`` (API default) or ``"desc"``.
 
         Returns:
             The response body; ``data`` holds ``total`` and ``signature``
             (a list of signature detail objects).
 
         Raises:
-            netskope.exceptions.ValidationError: If *traffic_type* contains
-                an unsupported value.
+            netskope.exceptions.ValidationError: If *traffic_type*, *sort_by*
+                or *sort_order* contains an unsupported value.
         """
         payload = _build_signature_search_payload(
-            limit, offset, reference, cvss_severity, traffic_type, sig_id, name, keyword
+            limit,
+            offset,
+            reference,
+            cvss_severity,
+            traffic_type,
+            sig_id,
+            name,
+            keyword,
+            sort_by,
+            sort_order,
         )
         return self._post(_SIGNATURE_SEARCH_PATH, json=payload, retry_safe=True)
 
@@ -324,17 +364,28 @@ class IpsResource(SyncResource):
         *,
         limit: int | None = None,
         offset: int | None = None,
+        sort_by: str | None = None,
+        sort_order: str | None = None,
     ) -> dict[str, Any]:
         """List IPS signature overrides.
 
         Args:
             limit: Max items to retrieve (API default 10, max 100).
             offset: Zero-based offset of the first item (API default 0).
+            sort_by: ``"sig_id"`` (API default) or ``"name"``.
+            sort_order: ``"asc"`` (API default) or ``"desc"``.
 
         Returns:
             The response body; ``data`` holds ``total`` and ``overrides``.
+
+        Raises:
+            netskope.exceptions.ValidationError: If *sort_by* or *sort_order*
+                is outside its enumeration.
         """
-        return self._get(_SIGNATURE_OVERRIDES_PATH, **_build_paging_params(limit, offset))
+        return self._get(
+            _SIGNATURE_OVERRIDES_PATH,
+            **_build_paging_params(limit, offset, sort_by, sort_order),
+        )
 
     def update_signature_overrides(
         self,
@@ -482,13 +533,24 @@ class AsyncIpsResource(AsyncResource):
         sig_id: str | None = None,
         name: str | None = None,
         keyword: str | None = None,
+        sort_by: str | None = None,
+        sort_order: str | None = None,
     ) -> dict[str, Any]:
         """Search the signature list with filters.
 
         See :meth:`IpsResource.search_signatures`.
         """
         payload = _build_signature_search_payload(
-            limit, offset, reference, cvss_severity, traffic_type, sig_id, name, keyword
+            limit,
+            offset,
+            reference,
+            cvss_severity,
+            traffic_type,
+            sig_id,
+            name,
+            keyword,
+            sort_by,
+            sort_order,
         )
         return await self._post(_SIGNATURE_SEARCH_PATH, json=payload, retry_safe=True)
 
@@ -505,12 +567,17 @@ class AsyncIpsResource(AsyncResource):
         *,
         limit: int | None = None,
         offset: int | None = None,
+        sort_by: str | None = None,
+        sort_order: str | None = None,
     ) -> dict[str, Any]:
         """List IPS signature overrides.
 
         See :meth:`IpsResource.list_signature_overrides`.
         """
-        return await self._get(_SIGNATURE_OVERRIDES_PATH, **_build_paging_params(limit, offset))
+        return await self._get(
+            _SIGNATURE_OVERRIDES_PATH,
+            **_build_paging_params(limit, offset, sort_by, sort_order),
+        )
 
     async def update_signature_overrides(
         self,

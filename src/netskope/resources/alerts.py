@@ -9,6 +9,7 @@ from functools import cached_property
 from netskope._pagination import AsyncPaginatedResponse, SyncPaginatedResponse
 from netskope.datasearch import (
     DATASEARCH_PAGE_CAP,
+    DATASEARCH_TIMEOUT_DEFAULT,
     AsyncScanIterator,
     DatasearchWindow,
     ScanIterator,
@@ -44,6 +45,7 @@ class AlertsResource(SyncResource):
         order_by: str | None = None,
         descending: bool = True,
         page_size: int = 100,
+        timeout: int | None = DATASEARCH_TIMEOUT_DEFAULT,
     ) -> SyncPaginatedResponse[Alert]:
         """Lazily list alert records with the legacy pagination contract.
 
@@ -51,7 +53,9 @@ class AlertsResource(SyncResource):
         grouped IDs do not fit Alert. Use aggregate_page for typed grouped
         results. Use scan_pages when completion evidence matters.
         """
-        params = _build_params(query, fields, start_time, end_time, group_by, order_by, descending)
+        params = _build_params(
+            query, fields, start_time, end_time, group_by, order_by, descending, timeout=timeout
+        )
         return SyncPaginatedResponse(
             transport=self._transport,
             method="GET",
@@ -73,6 +77,7 @@ class AlertsResource(SyncResource):
         descending: bool | None = None,
         offset: int | None = None,
         limit: int | None = None,
+        timeout: int | None = DATASEARCH_TIMEOUT_DEFAULT,
     ) -> Page[Alert]:
         """Fetch exactly one typed page, retaining envelope metadata.
 
@@ -88,6 +93,7 @@ class AlertsResource(SyncResource):
             descending=descending,
             offset=offset,
             limit=limit,
+            timeout=timeout,
         ).parse()
 
     def aggregate_page(
@@ -101,6 +107,7 @@ class AlertsResource(SyncResource):
         order_by: str | None = None,
         descending: bool | None = None,
         limit: int | None = None,
+        timeout: int | None = DATASEARCH_TIMEOUT_DEFAULT,
     ) -> Page[DatasearchBucket]:
         """Fetch one grouped page, without asserting source-event completeness."""
         return self.with_response.aggregate_page(
@@ -112,11 +119,12 @@ class AlertsResource(SyncResource):
             order_by=order_by,
             descending=descending,
             limit=limit,
+            timeout=timeout,
         ).parse()
 
-    def get(self, alert_id: str) -> Alert:
+    def get(self, alert_id: str, *, timeout: int | None = DATASEARCH_TIMEOUT_DEFAULT) -> Alert:
         """Get an alert by its hex ID, or raise NotFoundError."""
-        return self.with_response.get(alert_id).parse()
+        return self.with_response.get(alert_id, timeout=timeout).parse()
 
     def scan_pages(
         self,
@@ -129,6 +137,7 @@ class AlertsResource(SyncResource):
         page_size: int = DATASEARCH_PAGE_CAP,
         max_records: int | None = None,
         max_pages: int = 1_000,
+        timeout: int | None = DATASEARCH_TIMEOUT_DEFAULT,
     ) -> ScanIterator[Page[Alert]]:
         """Lazily scan a fixed interval with explicit termination evidence.
 
@@ -147,6 +156,7 @@ class AlertsResource(SyncResource):
             page_size=page_size,
             max_records=max_records,
             max_pages=max_pages,
+            timeout=timeout,
         )
 
 
@@ -169,9 +179,12 @@ class AsyncAlertsResource(AsyncResource):
         order_by: str | None = None,
         descending: bool = True,
         page_size: int = 100,
+        timeout: int | None = DATASEARCH_TIMEOUT_DEFAULT,
     ) -> AsyncPaginatedResponse[Alert]:
         """Lazily list records. Use aggregate_page for object-valued grouped IDs."""
-        params = _build_params(query, fields, start_time, end_time, group_by, order_by, descending)
+        params = _build_params(
+            query, fields, start_time, end_time, group_by, order_by, descending, timeout=timeout
+        )
         return AsyncPaginatedResponse(
             transport=self._transport,
             method="GET",
@@ -193,6 +206,7 @@ class AsyncAlertsResource(AsyncResource):
         descending: bool | None = None,
         offset: int | None = None,
         limit: int | None = None,
+        timeout: int | None = DATASEARCH_TIMEOUT_DEFAULT,
     ) -> Page[Alert]:
         """Fetch one typed page using the endpoint's orderbys parameter."""
         response = await self.with_response.list_page(
@@ -204,6 +218,7 @@ class AsyncAlertsResource(AsyncResource):
             descending=descending,
             offset=offset,
             limit=limit,
+            timeout=timeout,
         )
         return response.parse()
 
@@ -218,6 +233,7 @@ class AsyncAlertsResource(AsyncResource):
         order_by: str | None = None,
         descending: bool | None = None,
         limit: int | None = None,
+        timeout: int | None = DATASEARCH_TIMEOUT_DEFAULT,
     ) -> Page[DatasearchBucket]:
         """Fetch one grouped page, without asserting source-event completeness."""
         response = await self.with_response.aggregate_page(
@@ -229,12 +245,15 @@ class AsyncAlertsResource(AsyncResource):
             order_by=order_by,
             descending=descending,
             limit=limit,
+            timeout=timeout,
         )
         return response.parse()
 
-    async def get(self, alert_id: str) -> Alert:
+    async def get(
+        self, alert_id: str, *, timeout: int | None = DATASEARCH_TIMEOUT_DEFAULT
+    ) -> Alert:
         """Get an alert by its hex ID, or raise NotFoundError."""
-        response = await self.with_response.get(alert_id)
+        response = await self.with_response.get(alert_id, timeout=timeout)
         return response.parse()
 
     def scan_pages(
@@ -248,6 +267,7 @@ class AsyncAlertsResource(AsyncResource):
         page_size: int = DATASEARCH_PAGE_CAP,
         max_records: int | None = None,
         max_pages: int = 1_000,
+        timeout: int | None = DATASEARCH_TIMEOUT_DEFAULT,
     ) -> AsyncScanIterator[Page[Alert]]:
         """Create a lazy async scan with the same evidence as the synchronous API."""
         return _scan_alerts_async(
@@ -261,4 +281,5 @@ class AsyncAlertsResource(AsyncResource):
             page_size=page_size,
             max_records=max_records,
             max_pages=max_pages,
+            timeout=timeout,
         )
