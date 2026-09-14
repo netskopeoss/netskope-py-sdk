@@ -15,7 +15,7 @@ import pytest
 from netskope import NetskopeClient
 from netskope.exceptions import APIError
 from netskope.models.users import UmGroup, UmUser
-from netskope.resources.users import UsersResource
+from netskope.resources.users.resource import UsersResource
 
 from .conftest import skip_if_unavailable
 

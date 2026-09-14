@@ -9,7 +9,7 @@ from pathlib import Path
 import pytest
 from pydantic import SecretStr
 
-from netskope._config import NetskopeConfig, find_netskope_ca_cert
+from netskope.core.config import NetskopeConfig, find_netskope_ca_cert
 from netskope.exceptions import ValidationError
 
 _CA_BUNDLE_ENV_VARS = (
@@ -58,7 +58,7 @@ class TestNetskopeConfig:
 
     def test_missing_token_raises(self, monkeypatch: pytest.MonkeyPatch) -> None:
         monkeypatch.delenv("NETSKOPE_API_TOKEN", raising=False)
-        with pytest.raises(ValidationError, match="API token is required"):
+        with pytest.raises(ValidationError, match="API token or ci_session is required"):
             NetskopeConfig.resolve(tenant="test.goskope.com")
 
     def test_base_url_with_https_prefix(self) -> None:
@@ -147,6 +147,60 @@ class TestNetskopeConfig:
         with pytest.raises(AttributeError):
             config.tenant = "new"  # type: ignore[misc]
 
+    def test_session_cookie_overrides_environment_token(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.setenv("NETSKOPE_API_TOKEN", "ambient-token")
+        config = NetskopeConfig.resolve(tenant="test.goskope.com", ci_session="session-secret")
+        assert config.api_token is None
+        assert config.ci_session is not None
+        assert config.ci_session.get_secret_value() == "session-secret"
+        assert "session-secret" not in repr(config)
+        assert "session-secret" not in repr(dataclasses.asdict(config))
+
+    @pytest.mark.parametrize("token, cookie", [("token", "cookie"), ("", "cookie"), ("token", "")])
+    def test_explicit_credentials_are_mutually_exclusive(self, token: str, cookie: str) -> None:
+        with pytest.raises(ValidationError, match="mutually exclusive"):
+            NetskopeConfig.resolve(tenant="test.goskope.com", api_token=token, ci_session=cookie)
+
+    def test_empty_cookie_does_not_select_environment_token(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.setenv("NETSKOPE_API_TOKEN", "ambient-token")
+        with pytest.raises(ValidationError, match="API token or ci_session is required"):
+            NetskopeConfig.resolve(tenant="test.goskope.com", ci_session="")
+
+    def test_direct_config_rejects_conflicting_credentials(self) -> None:
+        with pytest.raises(ValidationError, match="mutually exclusive"):
+            NetskopeConfig(
+                tenant="test.goskope.com",
+                api_token=SecretStr("token"),
+                ci_session=SecretStr("cookie"),
+            )
+
+    def test_empty_retry_statuses_are_respected(self) -> None:
+        config = NetskopeConfig.resolve(
+            tenant="test.goskope.com", api_token="token", retry_on_status=frozenset()
+        )
+        assert config.retry_on_status == frozenset()
+
+    def test_negative_retry_budget_is_rejected(self) -> None:
+        with pytest.raises(ValidationError, match="max_retries"):
+            NetskopeConfig.resolve(tenant="test.goskope.com", api_token="token", max_retries=-1)
+
+    @pytest.mark.parametrize(
+        "tenant",
+        [
+            "other.example/path/test.goskope.com",
+            "user@test.goskope.com",
+            "test.goskope.com?redirect=other.goskope.com",
+            "other.example\\test.goskope.com",
+        ],
+    )
+    def test_tenant_must_be_a_hostname(self, tenant: str) -> None:
+        with pytest.raises(ValidationError, match="hostname without credentials"):
+            NetskopeConfig.resolve(tenant=tenant, api_token="token")
+
 
 @pytest.mark.usefixtures("no_ca_env")
 class TestVerifyResolution:
@@ -234,10 +288,10 @@ class TestFindNetskopeCaCert:
     """Tests for find_netskope_ca_cert()."""
 
     def test_returns_none_when_no_paths_exist(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        monkeypatch.setattr("netskope._config.os.path.isfile", lambda _path: False)
+        monkeypatch.setattr("netskope.core.config.os.path.isfile", lambda _path: False)
         assert find_netskope_ca_cert() is None
 
     def test_returns_first_existing_path(self, monkeypatch: pytest.MonkeyPatch) -> None:
         target = "/opt/netskope/stagent/nsca/nscacert.pem"
-        monkeypatch.setattr("netskope._config.os.path.isfile", lambda path: path == target)
+        monkeypatch.setattr("netskope.core.config.os.path.isfile", lambda path: path == target)
         assert find_netskope_ca_cert() == target

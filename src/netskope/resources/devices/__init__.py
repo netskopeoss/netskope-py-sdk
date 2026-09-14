@@ -1,0 +1,1 @@
+"""The devices resource namespace."""

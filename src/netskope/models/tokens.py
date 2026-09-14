@@ -3,10 +3,32 @@
 from __future__ import annotations
 
 from enum import StrEnum
+from typing import Literal
 
 from pydantic import Field
 
+from netskope.models.administration import AdminRequest
 from netskope.models.common import NetskopeModel
+
+
+class ApiTokenGrant(AdminRequest):
+    """An endpoint permission, explicitly read-only or read/write."""
+
+    endpoint: str = Field(min_length=1)
+    permissions: Literal["r", "rw"]
+
+
+class ApiTokenWrite(AdminRequest):
+    """Complete token metadata required for create and ordinary PATCH.
+
+    Expiration is explicit Unix-epoch seconds. Grants replace the complete
+    scope list; partial metadata updates and empty grant clearing are not
+    inferred by this contract.
+    """
+
+    name: str = Field(min_length=1)
+    expires: int = Field(ge=0)
+    endpoints: list[ApiTokenGrant] = Field(min_length=1)
 
 
 class TokenPermission(StrEnum):
@@ -33,7 +55,7 @@ class ApiToken(NetskopeModel):
 
     .. warning::
         The :attr:`token` secret is returned by the API exactly once — in the
-        response to :meth:`~netskope.resources.tokens.TokensResource.create`
+        response to :meth:`~netskope.resources.tokens.resource.TokensResource.create`
         (and to a ``reissue``).  Store it securely immediately; it cannot be
         retrieved again, and it is never printed by the SDK.  ``list``, ``get``,
         and plain updates return ``token=None``.
@@ -48,8 +70,13 @@ class ApiToken(NetskopeModel):
 
     id: str | None = None
     name: str | None = None
-    expires: int | None = None
-    """Expiry as seconds since the Unix epoch."""
+    expires: int | float | None = None
+    """Expiry as seconds since the Unix epoch.
+
+    ``ApiTokenReadResponse.expires`` (auth/api-tokens.yaml:59-61), and the
+    create and update responses (:31-33, :95-97), declare it `type: number`,
+    which admits a fraction, so it is not narrowed to int.
+    """
     endpoints: list[ApiTokenEndpoint] = Field(default_factory=list)
     token: str | None = None
     """The token secret. Only present on create/reissue responses — see warning above."""

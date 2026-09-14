@@ -3,12 +3,14 @@
 from __future__ import annotations
 
 import httpx
+import pytest
 import respx
 
 from netskope import AsyncNetskopeClient, NetskopeClient
+from netskope.exceptions import ValidationError
 from netskope.models.users import UmGroup, UmUser
-from netskope.resources.users import AsyncUsersResource, UsersResource
-from tests.unit.resources.conftest import sent_json
+from netskope.resources.users.resource import AsyncUsersResource, UsersResource
+from tests.unit.resources.conftest import CONTRACT_BASE, sent_json
 
 _BASE = "https://t.goskope.com"
 _GET_USERS_URL = f"{_BASE}/api/v2/users/getusers"
@@ -117,27 +119,27 @@ class TestUsersResource:
 
     @respx.mock
     def test_get_autodetects_username(self, client: NetskopeClient) -> None:
-        """Identifiers without '@' are looked up via the userName filter."""
+        """Identifiers without '@' filter on accounts.userName (usermanager.yaml:358)."""
         route = respx.post(_GET_USERS_URL).mock(
             return_value=httpx.Response(200, json=_USERS_ENVELOPE)
         )
         UsersResource(client._transport).get("alice")
         assert sent_json(route) == {
             "query": {
-                "filter": {"and": [{"userName": {"eq": "alice"}}]},
+                "filter": {"and": [{"accounts.userName": {"eq": "alice"}}]},
                 "paging": {"offset": 0, "limit": 1},
             }
         }
 
     @respx.mock
     def test_get_by_username_overrides_autodetect(self, client: NetskopeClient) -> None:
-        """by='username' forces a userName lookup even for '@' identifiers."""
+        """by='username' forces an accounts.userName lookup even for '@' identifiers."""
         route = respx.post(_GET_USERS_URL).mock(
             return_value=httpx.Response(200, json=_USERS_ENVELOPE)
         )
         UsersResource(client._transport).get("alice@example.com", by="username")
         assert sent_json(route)["query"]["filter"] == {
-            "and": [{"userName": {"eq": "alice@example.com"}}]
+            "and": [{"accounts.userName": {"eq": "alice@example.com"}}]
         }
 
     @respx.mock
@@ -298,7 +300,9 @@ class TestAsyncUsersResource:
             return_value=httpx.Response(200, json=_USERS_ENVELOPE)
         )
         await AsyncUsersResource(aclient._transport).get("alice")
-        assert sent_json(route)["query"]["filter"] == {"and": [{"userName": {"eq": "alice"}}]}
+        assert sent_json(route)["query"]["filter"] == {
+            "and": [{"accounts.userName": {"eq": "alice"}}]
+        }
 
     @respx.mock
     async def test_get_returns_none_on_empty(self, aclient: AsyncNetskopeClient) -> None:
@@ -339,3 +343,114 @@ class TestAsyncUsersResource:
             }
         }
         assert len(members) == 1
+
+
+# --- Gateway contract conformance -------------------------------------------------------------
+#
+# Folded in from the spec-conformance reviews: each test cites the
+# production/endpoints file and line whose shape it pins.
+
+_CONTRACT_GET_USERS_URL = f"{CONTRACT_BASE}/api/v2/users/getusers"
+_CONTRACT_GET_GROUPS_URL = f"{CONTRACT_BASE}/api/v2/users/getgroups"
+_contract_mock = respx.mock(assert_all_mocked=True, assert_all_called=False)
+
+
+@pytest.mark.parametrize(
+    "call",
+    [
+        pytest.param(lambda c: c.users.list(limit=5000), id="users.list-limit"),
+        pytest.param(lambda c: c.users.list(offset=-1), id="users.list-offset"),
+        pytest.param(lambda c: c.users.groups.list(limit=5000), id="groups.list"),
+        pytest.param(lambda c: c.users.groups.members("G", limit=5000), id="groups.members"),
+    ],
+)
+@_contract_mock
+def test_legacy_user_paging_is_bounded_before_http(
+    contract_client: NetskopeClient, call: object
+) -> None:
+    with pytest.raises(ValidationError, match=r"limit must be 0\.\.1000"):
+        call(contract_client)
+    assert not _contract_mock.calls
+
+
+@_contract_mock
+async def test_async_legacy_user_paging_is_bounded_before_http(
+    contract_aclient: AsyncNetskopeClient,
+) -> None:
+    for call in (
+        contract_aclient.users.list(limit=5000),
+        contract_aclient.users.groups.list(limit=5000),
+        contract_aclient.users.groups.members("G", offset=-1),
+    ):
+        with pytest.raises(ValidationError):
+            await call
+    assert not _contract_mock.calls
+
+
+@_contract_mock
+def test_a_legal_legacy_page_still_reaches_the_wire(contract_client: NetskopeClient) -> None:
+    """usermanager.yaml:1190-1204 permits limit 1000 and offset 0."""
+    users = _contract_mock.post(_CONTRACT_GET_USERS_URL).respond(
+        200, json={"data": [], "counts": {}}
+    )
+    groups = _contract_mock.post(_CONTRACT_GET_GROUPS_URL).respond(
+        200, json={"data": [], "counts": {}}
+    )
+    contract_client.users.list(limit=1000, offset=0)
+    contract_client.users.groups.list(limit=0)
+    assert sent_json(users) == {"query": {"paging": {"limit": 1000, "offset": 0}}}
+    assert sent_json(groups) == {"query": {"paging": {"limit": 0, "offset": 0}}}
+
+
+@_contract_mock
+def test_a_legacy_filter_still_travels_with_the_paging_block(
+    contract_client: NetskopeClient,
+) -> None:
+    route = _contract_mock.post(_CONTRACT_GET_USERS_URL).respond(
+        200, json={"data": [], "counts": {}}
+    )
+    contract_client.users.get("alice@example.com")
+    assert sent_json(route) == {
+        "query": {
+            "paging": {"limit": 1, "offset": 0},
+            "filter": {"and": [{"emails": {"eq": "alice@example.com"}}]},
+        }
+    }
+
+
+class TestUserLookupFilter:
+    """SPEC-I6: userName belongs to EnterpriseAccount, not EnterpriseUser."""
+
+    @respx.mock
+    def test_username_lookup_is_account_scoped(self, client: NetskopeClient) -> None:
+        """The spec's own getusers example filters on accounts.userName (:358-359)."""
+        route = respx.post(_GET_USERS_URL).mock(
+            return_value=httpx.Response(200, json={"counts": {"totalResults": 0}, "data": []})
+        )
+        client.users.get("itadmin", by="username")
+        assert sent_json(route)["query"]["filter"] == {
+            "and": [{"accounts.userName": {"eq": "itadmin"}}]
+        }
+
+    @respx.mock
+    def test_email_lookup_stays_on_the_user_property(self, client: NetskopeClient) -> None:
+        """``emails`` is a genuine EnterpriseUser property (usermanager.yaml:992-995)."""
+        route = respx.post(_GET_USERS_URL).mock(
+            return_value=httpx.Response(200, json={"counts": {"totalResults": 0}, "data": []})
+        )
+        client.users.get("test@netskope.local")
+        assert sent_json(route)["query"]["filter"] == {
+            "and": [{"emails": {"eq": "test@netskope.local"}}]
+        }
+
+    @respx.mock
+    async def test_async_typed_username_page_is_account_scoped(
+        self, aclient: AsyncNetskopeClient
+    ) -> None:
+        route = respx.post(_GET_USERS_URL).mock(
+            return_value=httpx.Response(200, json={"counts": {"totalResults": 0}, "data": []})
+        )
+        await aclient.users.with_response.get_page("itadmin", by="username")
+        assert sent_json(route)["query"]["filter"] == {
+            "and": [{"accounts.userName": {"eq": "itadmin"}}]
+        }

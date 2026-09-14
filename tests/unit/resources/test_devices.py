@@ -12,9 +12,14 @@ import pytest
 import respx
 
 from netskope import AsyncNetskopeClient, NetskopeClient
-from netskope.exceptions import NotFoundError, ValidationError
-from netskope.models.devices import Device, DeviceTag
-from netskope.resources.devices import AsyncDevicesResource, DevicesResource
+from netskope.exceptions import (
+    NotFoundError,
+    PaginationError,
+    ResponseValidationError,
+    ValidationError,
+)
+from netskope.models.devices import Device, DeviceTag, SupportedOperatingSystems
+from netskope.resources.devices.resource import AsyncDevicesResource, DevicesResource
 from tests.unit.resources.conftest import sent_json
 
 _DEVICES_URL = "https://t.goskope.com/api/v2/steering/devices"
@@ -86,6 +91,86 @@ class TestDevicesList:
         )
         devices = [d async for d in _adevices(aclient).list()]
         assert [d.device_id for d in devices] == ["d2"]
+
+
+class TestDevicesPage:
+    """The typed page uses the declared ``devices`` key, or refuses to guess."""
+
+    @respx.mock
+    def test_declared_key_is_not_shadowed_by_an_empty_result(self, client: NetskopeClient) -> None:
+        body = {
+            "result": [],
+            "devices": [{"device_id": "d1", "hostname": "LAPTOP-1"}],
+            "total": 9,
+        }
+        route = respx.get(_DEVICES_URL).mock(return_value=httpx.Response(200, json=body))
+        response = _devices(client).with_response.list_page(limit=25)
+
+        page = response.parse()
+        assert [device.device_id for device in page.items] == ["d1"]
+        assert page.total == 9 and response.json() == body
+        assert route.call_count == 1
+
+    @respx.mock
+    def test_nested_envelope_keeps_its_own_total(self, client: NetskopeClient) -> None:
+        """A total inside ``data`` belongs to the collection beside it."""
+        body = {"data": {"devices": [{"device_id": "d1"}], "total": 100}, "status": "success"}
+        route = respx.get(_DEVICES_URL).mock(return_value=httpx.Response(200, json=body))
+        page = _devices(client).with_response.list_page(limit=25).parse()
+
+        assert page.total == 100 and page.has_more is True
+        assert page.metadata == {"status": "success", "total": 100}
+        assert route.call_count == 1
+
+    @respx.mock
+    def test_page_rejects_an_offset_the_service_ignored(self, client: NetskopeClient) -> None:
+        body = {"data": {"devices": [{"device_id": "d1"}], "total": 100, "offset": 0}}
+        route = respx.get(_DEVICES_URL).mock(
+            return_value=httpx.Response(200, json=body, headers={"x-request-id": "stale-offset"})
+        )
+        response = _devices(client).with_response.list_page(offset=25)
+
+        with pytest.raises(PaginationError, match="offset does not match") as caught:
+            response.parse()
+        assert (caught.value.offset, caught.value.request_id) == (25, "stale-offset")
+        assert response.json() == body and route.call_count == 1
+
+    @respx.mock
+    def test_page_accepts_the_offset_it_asked_for(self, client: NetskopeClient) -> None:
+        body = {"data": {"devices": [{"device_id": "d1"}], "total": 100, "offset": 25}}
+        respx.get(_DEVICES_URL).mock(return_value=httpx.Response(200, json=body))
+        page = _devices(client).with_response.list_page(offset=25).parse()
+
+        assert (page.offset, page.total) == (25, 100)
+
+    @respx.mock
+    def test_page_rejects_more_devices_than_requested(self, client: NetskopeClient) -> None:
+        body = {"devices": [{"device_id": "d1"}, {"device_id": "d2"}], "total": 9}
+        respx.get(_DEVICES_URL).mock(return_value=httpx.Response(200, json=body))
+        response = _devices(client).with_response.list_page(limit=1)
+
+        with pytest.raises(PaginationError, match="exceeded the requested page size"):
+            response.parse()
+
+    @respx.mock
+    def test_ambiguous_envelope_is_rejected(self, client: NetskopeClient) -> None:
+        body = {"result": [], "data": [{"device_id": "d1"}], "total": 9}
+        route = respx.get(_DEVICES_URL).mock(return_value=httpx.Response(200, json=body))
+        response = _devices(client).with_response.list_page()
+
+        with pytest.raises(ResponseValidationError):
+            response.parse()
+        assert response.json() == body and route.call_count == 1
+
+    @respx.mock
+    async def test_async_ambiguous_envelope_is_rejected(self, aclient: AsyncNetskopeClient) -> None:
+        body = {"result": [], "data": [{"device_id": "d1"}], "total": 9}
+        route = respx.get(_DEVICES_URL).mock(return_value=httpx.Response(200, json=body))
+        response = await _adevices(aclient).with_response.list_page()
+
+        with pytest.raises(ResponseValidationError):
+            response.parse()
+        assert response.json() == body and route.call_count == 1
 
 
 class TestSupportedOs:
@@ -328,3 +413,31 @@ class TestTagsSubresourceCaching:
     async def test_async_tags_property_is_cached(self, aclient: AsyncNetskopeClient) -> None:
         devices = _adevices(aclient)
         assert devices.tags is devices.tags
+
+
+# --- Gateway contract conformance -------------------------------------------------------------
+#
+# Folded in from the spec-conformance reviews: each test cites the
+# production/endpoints file and line whose shape it pins.
+
+
+class TestSupportedOperatingSystems:
+    """SPEC-I5: AvailableOsFamily has no required properties."""
+
+    def test_a_missing_available_os_is_an_empty_list(self) -> None:
+        """devices/provisioner-core.yaml:320-333 declares no ``required:`` list."""
+        assert SupportedOperatingSystems.model_validate({}).available_os == []
+
+    def test_the_documented_example_parses(self) -> None:
+        families = ["windows", "mac", "android", "ios", "chromeos", "linux"]
+        assert (
+            SupportedOperatingSystems.model_validate({"available_os": families}).available_os
+            == families
+        )
+
+    @respx.mock
+    def test_typed_supported_os_tolerates_an_empty_body(self, client: NetskopeClient) -> None:
+        respx.get("https://t.goskope.com/api/v2/devices/supportedos").mock(
+            return_value=httpx.Response(200, json={})
+        )
+        assert client.devices.with_response.supported_os().parse().available_os == []

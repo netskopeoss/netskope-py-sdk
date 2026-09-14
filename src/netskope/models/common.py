@@ -5,9 +5,12 @@ from __future__ import annotations
 from datetime import UTC, datetime
 from typing import Any, Generic, TypeVar
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator
+from pydantic import BaseModel, ConfigDict, Field, TypeAdapter, field_validator
+from pydantic import ValidationError as PydanticValidationError
 
 T = TypeVar("T")
+
+_DATETIME_ADAPTER: TypeAdapter[datetime] = TypeAdapter(datetime)
 
 
 class NetskopeModel(BaseModel):
@@ -15,7 +18,7 @@ class NetskopeModel(BaseModel):
 
     Configures Pydantic to:
     - Populate fields by attribute name *and* alias.
-    - Ignore unknown fields (forward-compatible with new API fields).
+    - Preserve unknown fields (forward-compatible with new API fields).
     - Forbid mutation (responses are read-only value objects).
     """
 
@@ -27,20 +30,46 @@ class NetskopeModel(BaseModel):
 
 
 class TimestampMixin(BaseModel):
-    """Mixin that parses Unix-epoch timestamps into :class:`datetime`."""
+    """Mixin that parses Unix-epoch timestamps into a UTC-aware :class:`datetime`."""
 
     timestamp: datetime | int | None = None
 
     @field_validator("timestamp", mode="before")
     @classmethod
-    def _parse_epoch(cls, v: Any) -> datetime | None:
-        if v is None:
+    def _parse_epoch(cls, v: Any) -> Any:
+        """Read epoch numbers and datetime strings; treat anything else as absent.
+
+        Datasearch rows carry ``""`` for a missing timestamp, and these models
+        decode whole pages, so one unreadable value must not reject the record
+        it sits in (and with it the rest of the page).
+        """
+        if v is None or isinstance(v, datetime):
+            return v
+        if isinstance(v, bool):
             return None
         if isinstance(v, (int, float)):
-            return datetime.fromtimestamp(v, tz=UTC)
-        if isinstance(v, datetime):
-            return v
+            try:
+                return datetime.fromtimestamp(v, tz=UTC)
+            except (OverflowError, OSError, ValueError):
+                return None
+        if isinstance(v, str):
+            try:
+                return _DATETIME_ADAPTER.validate_python(v)
+            except PydanticValidationError:
+                return None
         return None
+
+    @field_validator("timestamp", mode="after")
+    @classmethod
+    def _assume_utc(cls, v: datetime | int | None) -> datetime | int | None:
+        """Netskope reports UTC, so a string without an offset is a UTC reading.
+
+        Without this, epoch rows and string rows in the same page would produce
+        aware and naive values that cannot be compared with each other.
+        """
+        if isinstance(v, datetime) and v.tzinfo is None:
+            return v.replace(tzinfo=UTC)
+        return v
 
 
 class PaginatedResponse(BaseModel, Generic[T]):

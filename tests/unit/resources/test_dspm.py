@@ -1,11 +1,15 @@
 """Tests for the DSPM resource with mocked HTTP.
 
-Pins the wire shapes for the DSPM API: resources list via
-``GET /api/v2/dspm/{resource_type}`` with ``filter``/``sortby``/``sortorder``/
-``offset``/``limit`` query params, analytics via
-``GET /api/v2/dspm/analytics/{metric_type}``, and connect/scan via
-``POST`` with an ``{"ids": [...]}`` body.  Unknown resource types are rejected
-client-side (no HTTP) with :class:`ValidationError`.
+Pins the wire shapes declared in ``production/endpoints/dspm/dspm_external.yaml``:
+``list_resources`` reads the same routes as the typed surface (e.g.
+``connected_datastores`` → ``GET /datastores/connected``, :6539) with
+``filter``/``sortby``/``sortorder``/``offset``/``limit`` query params
+(:6600-6637); ``analytics`` reads the two declared connected-datastore reports
+(``sensitivityscoresdistribution`` :6508, ``privilegerisks`` :8039);
+``scan_datastores`` loops over ``POST /datastores/connected/startscan``
+(:6720); and ``connect_datastores`` is rejected client-side because no bulk
+connect-by-id operation exists.  Resource names with no declared route are
+rejected client-side (no HTTP) with :class:`ValidationError`.
 """
 
 from __future__ import annotations
@@ -15,12 +19,34 @@ import pytest
 import respx
 
 from netskope import AsyncNetskopeClient, NetskopeClient
-from netskope.exceptions import ValidationError
-from netskope.models.dspm import DspmResourceType, SortOrder
-from netskope.resources.dspm import AsyncDspmResource, DspmResource
-from tests.unit.resources.conftest import sent_json
+from netskope.exceptions import NetskopeError, ResponseValidationError, ValidationError
+from netskope.models.dspm import DspmFileSensitiveType, DspmResourceType, SortOrder
+from netskope.resources.dspm.resource import AsyncDspmResource, DspmResource
+from tests.unit.resources.conftest import contract_router, sent_json
 
 _BASE_URL = "https://t.goskope.com/api/v2/dspm"
+
+# resource name -> the path dspm_external.yaml declares for it.
+_ROUTED = {
+    "connected_datastores": "/datastores/connected",
+    "discovered_datastores": "/datastores/discovered",
+    "archived_datastores": "/datastores/archived",
+    "databases": "/datastores/connected/databases",
+    "schemas": "/datastores/connected/schemas",
+    "tables": "/datastores/connected/tables",
+    "classification_columns": "/classificationmanagement/columns",
+    "classification_files": "/classificationmanagement/files",
+    "data_tags": "/classificationmanagement/datatags",
+    "data_tag_categories": "/classificationmanagement/datatagcategories",
+    "sensitive_data_types": "/classificationmanagement/sensitivedatatypes",
+    "sensitive_data_type_categories": "/classificationmanagement/sensitivedatatypecategories",
+    "sensitivity_levels": "/classificationmanagement/sensitivedatatypes/sensitivitylevels",
+    "sidecar_pools": "/administration/sidecarpools",
+    "infrastructure_connections": "/administration/infrastructureconnections",
+    "infrastructure_platforms": "/administration/infrastructureconnections/platforms",
+}
+# Legacy names the SDK still accepts but the gateway never declared.
+_UNROUTED = sorted({rt.value for rt in DspmResourceType} - set(_ROUTED))
 
 
 def _dspm(client: NetskopeClient) -> DspmResource:
@@ -36,8 +62,8 @@ class TestListResources:
 
     @respx.mock
     def test_list_no_params(self, client: NetskopeClient) -> None:
-        body = {"data": [{"id": "db-1"}], "status": "success"}
-        route = respx.get(f"{_BASE_URL}/databases").mock(
+        body = {"success": True, "data": {"total": 1, "results": [{"id": "db-1"}]}}
+        route = respx.get(f"{_BASE_URL}/datastores/connected/databases").mock(
             return_value=httpx.Response(200, json=body)
         )
         result = _dspm(client).list_resources("databases")
@@ -49,8 +75,8 @@ class TestListResources:
 
     @respx.mock
     def test_list_all_params(self, client: NetskopeClient) -> None:
-        route = respx.get(f"{_BASE_URL}/connected_datastores").mock(
-            return_value=httpx.Response(200, json={"data": []})
+        route = respx.get(f"{_BASE_URL}/datastores/connected").mock(
+            return_value=httpx.Response(200, json={"success": True, "data": {"results": []}})
         )
         _dspm(client).list_resources(
             "connected_datastores",
@@ -70,26 +96,38 @@ class TestListResources:
 
     @respx.mock
     def test_list_accepts_enum_members(self, client: NetskopeClient) -> None:
-        route = respx.get(f"{_BASE_URL}/policy_violations").mock(
-            return_value=httpx.Response(200, json={"data": []})
+        route = respx.get(f"{_BASE_URL}/classificationmanagement/columns").mock(
+            return_value=httpx.Response(200, json={"success": True, "data": {"results": []}})
         )
         _dspm(client).list_resources(
-            DspmResourceType.POLICY_VIOLATIONS,
+            DspmResourceType.CLASSIFICATION_COLUMNS,
             sort_order=SortOrder.ASC,
-            sort_by="created_at",
+            sort_by="name",
         )
         request = route.calls.last.request
-        assert request.url.path == "/api/v2/dspm/policy_violations"
-        assert dict(request.url.params) == {"sortby": "created_at", "sortorder": "asc"}
+        assert request.url.path == "/api/v2/dspm/classificationmanagement/columns"
+        assert dict(request.url.params) == {"sortby": "name", "sortorder": "asc"}
 
     @respx.mock
-    @pytest.mark.parametrize("resource_type", [rt.value for rt in DspmResourceType])
-    def test_path_interpolation_all_types(self, client: NetskopeClient, resource_type: str) -> None:
-        route = respx.get(f"{_BASE_URL}/{resource_type}").mock(
-            return_value=httpx.Response(200, json={"data": []})
+    @pytest.mark.parametrize(("resource_type", "path"), sorted(_ROUTED.items()))
+    def test_every_routed_name_reaches_its_declared_path(
+        self, client: NetskopeClient, resource_type: str, path: str
+    ) -> None:
+        route = respx.get(f"{_BASE_URL}{path}").mock(
+            return_value=httpx.Response(200, json={"success": True, "data": {"results": []}})
         )
         _dspm(client).list_resources(resource_type)
-        assert route.calls.last.request.url.path == f"/api/v2/dspm/{resource_type}"
+        assert route.calls.last.request.url.path == f"/api/v2/dspm{path}"
+
+    @respx.mock
+    @pytest.mark.parametrize("resource_type", _UNROUTED)
+    def test_unrouted_names_raise_without_http(
+        self, client: NetskopeClient, resource_type: str
+    ) -> None:
+        route = respx.get(url__regex=r".*").mock(return_value=httpx.Response(200, json={}))
+        with pytest.raises(ValidationError, match="No verified public DSPM read contract"):
+            _dspm(client).list_resources(resource_type)
+        assert route.call_count == 0
 
     @respx.mock
     def test_invalid_resource_type_raises_without_http(self, client: NetskopeClient) -> None:
@@ -100,14 +138,16 @@ class TestListResources:
 
     @respx.mock
     async def test_list_async(self, aclient: AsyncNetskopeClient) -> None:
-        body = {"data": [{"id": "t-1"}]}
-        route = respx.get(f"{_BASE_URL}/tables").mock(return_value=httpx.Response(200, json=body))
+        body = {"success": True, "data": {"results": [{"id": "t-1"}]}}
+        route = respx.get(f"{_BASE_URL}/datastores/connected/tables").mock(
+            return_value=httpx.Response(200, json=body)
+        )
         result = await _adspm(aclient).list_resources("tables", limit=5)
 
         assert result == body
         request = route.calls.last.request
         assert request.method == "GET"
-        assert request.url.path == "/api/v2/dspm/tables"
+        assert request.url.path == "/api/v2/dspm/datastores/connected/tables"
         assert dict(request.url.params) == {"limit": "5"}
 
     @respx.mock
@@ -119,83 +159,208 @@ class TestListResources:
 
 
 class TestAnalytics:
-    """Tests for DspmResource.analytics."""
+    """Tests for DspmResource.analytics — the two declared reports."""
 
     @respx.mock
-    def test_analytics(self, client: NetskopeClient) -> None:
-        body = {"data": {"total": 42}}
-        route = respx.get(f"{_BASE_URL}/analytics/summary").mock(
+    def test_sensitivity_score_distribution(self, client: NetskopeClient) -> None:
+        body = {"success": True, "data": {"distribution": []}}
+        route = respx.get(f"{_BASE_URL}/datastores/connected/sensitivityscoresdistribution").mock(
             return_value=httpx.Response(200, json=body)
         )
-        result = _dspm(client).analytics("summary")
+        result = _dspm(client).analytics("sensitivity_score_distribution")
 
         assert result == body
         request = route.calls.last.request
         assert request.method == "GET"
-        assert request.url.path == "/api/v2/dspm/analytics/summary"
+        assert dict(request.url.params) == {}
 
     @respx.mock
-    def test_analytics_metric_is_path_encoded(self, client: NetskopeClient) -> None:
-        route = respx.get(f"{_BASE_URL}/analytics/risk%2Fscore").mock(
-            return_value=httpx.Response(200, json={})
+    def test_privilege_risks_takes_the_declared_query(self, client: NetskopeClient) -> None:
+        route = respx.get(f"{_BASE_URL}/datastores/connected/privilegerisks").mock(
+            return_value=httpx.Response(200, json={"success": True, "data": {"results": []}})
         )
-        _dspm(client).analytics("risk/score")
-        # quote_id encodes '/' so it cannot alter the request path.
-        assert route.calls.last.request.url.raw_path.endswith(b"/analytics/risk%2Fscore")
+        _dspm(client).analytics(
+            "privilege_risks",
+            filter_expr="cloud_provider_name eq 'AWS'",
+            sort_by="name",
+            sort_order="asc",
+            limit=10,
+            offset=5,
+        )
+        assert dict(route.calls.last.request.url.params) == {
+            "filter": "cloud_provider_name eq 'AWS'",
+            "sortby": "name",
+            "sortorder": "asc",
+            "limit": "10",
+            "offset": "5",
+        }
+
+    @respx.mock
+    def test_unknown_report_raises_without_http(self, client: NetskopeClient) -> None:
+        route = respx.get(url__regex=r".*").mock(return_value=httpx.Response(200, json={}))
+        with pytest.raises(ValidationError, match="Unknown DSPM analytics report"):
+            _dspm(client).analytics("summary")
+        assert route.call_count == 0
+
+    @respx.mock
+    def test_distribution_rejects_query_parameters(self, client: NetskopeClient) -> None:
+        route = respx.get(url__regex=r".*").mock(return_value=httpx.Response(200, json={}))
+        with pytest.raises(ValidationError, match="takes no query parameters"):
+            _dspm(client).analytics("sensitivity_score_distribution", limit=5)
+        assert route.call_count == 0
 
     @respx.mock
     async def test_analytics_async(self, aclient: AsyncNetskopeClient) -> None:
-        body = {"data": {"score": 1}}
-        route = respx.get(f"{_BASE_URL}/analytics/risk_score").mock(
+        body = {"success": True, "data": {"results": []}}
+        route = respx.get(f"{_BASE_URL}/datastores/connected/privilegerisks").mock(
             return_value=httpx.Response(200, json=body)
         )
-        result = await _adspm(aclient).analytics("risk_score")
+        result = await _adspm(aclient).analytics("privilege_risks")
 
         assert result == body
-        assert route.calls.last.request.url.path == "/api/v2/dspm/analytics/risk_score"
+        assert (
+            route.calls.last.request.url.path == "/api/v2/dspm/datastores/connected/privilegerisks"
+        )
 
 
 class TestConnectDatastores:
-    """Tests for DspmResource.connect_datastores."""
+    """The gateway has no bulk connect-by-id; the single create is a DataStoreRequest."""
 
     @respx.mock
-    def test_connect(self, client: NetskopeClient) -> None:
-        route = respx.post(f"{_BASE_URL}/connected_datastores").mock(
-            return_value=httpx.Response(200, json={"status": "success"})
-        )
-        result = _dspm(client).connect_datastores(["ds-1", "ds-2"])
-
-        assert result == {"status": "success"}
-        assert route.calls.last.request.method == "POST"
-        assert sent_json(route) == {"ids": ["ds-1", "ds-2"]}
+    def test_bulk_connect_raises_without_http(self, client: NetskopeClient) -> None:
+        route = respx.post(url__regex=r".*").mock(return_value=httpx.Response(200, json={}))
+        with pytest.raises(ValidationError, match="no bulk connect-by-id operation"):
+            _dspm(client).connect_datastores(["ds-1", "ds-2"])
+        assert route.call_count == 0
 
     @respx.mock
-    async def test_connect_async(self, aclient: AsyncNetskopeClient) -> None:
-        route = respx.post(f"{_BASE_URL}/connected_datastores").mock(
-            return_value=httpx.Response(200, json={"status": "success"})
+    def test_connect_datastore_posts_the_request_body(self, client: NetskopeClient) -> None:
+        """``POST /datastores/connected`` takes a DataStoreRequest (dspm_external.yaml:6542)."""
+        request_body = {
+            "service_id": 3,
+            "name": "prod-postgres",
+            "endpoint": "prod.example.internal:5432",
+            "authentication_method": "USERNAME_PASSWORD",
+            "username": "scanner",
+            "password": "secret",
+        }
+        route = respx.post(f"{_BASE_URL}/datastores/connected").mock(
+            return_value=httpx.Response(201, json={"success": True})
         )
-        await _adspm(aclient).connect_datastores(["ds-9"])
-        assert sent_json(route) == {"ids": ["ds-9"]}
+        result = _dspm(client).connect_datastore(request_body)
+
+        assert result == {"success": True}
+        assert sent_json(route) == request_body
+
+    @respx.mock
+    async def test_bulk_connect_async_raises(self, aclient: AsyncNetskopeClient) -> None:
+        route = respx.post(url__regex=r".*").mock(return_value=httpx.Response(200, json={}))
+        with pytest.raises(ValidationError, match="no bulk connect-by-id operation"):
+            await _adspm(aclient).connect_datastores(["ds-9"])
+        assert route.call_count == 0
 
 
 class TestScanDatastores:
-    """Tests for DspmResource.scan_datastores."""
+    """``POST /datastores/connected/startscan`` scans one datastore and answers 202."""
 
     @respx.mock
-    def test_scan(self, client: NetskopeClient) -> None:
-        route = respx.post(f"{_BASE_URL}/scans").mock(
-            return_value=httpx.Response(200, json={"status": "success"})
+    def test_scan_posts_one_request_per_id(self, client: NetskopeClient) -> None:
+        route = respx.post(f"{_BASE_URL}/datastores/connected/startscan").mock(
+            return_value=httpx.Response(202, json={"success": True})
         )
-        result = _dspm(client).scan_datastores(["ds-1"])
+        assert _dspm(client).scan_datastores(["ds-1", "ds-2"]) is None
 
-        assert result == {"status": "success"}
-        assert route.calls.last.request.method == "POST"
-        assert sent_json(route) == {"ids": ["ds-1"]}
+        assert route.call_count == 2
+        bodies = [call.request.content for call in route.calls]
+        assert bodies == [b'{"id":"ds-1"}', b'{"id":"ds-2"}']
+
+    @respx.mock
+    def test_scan_stops_at_the_first_failure(self, client: NetskopeClient) -> None:
+        route = respx.post(f"{_BASE_URL}/datastores/connected/startscan").mock(
+            side_effect=[httpx.Response(202, json={}), httpx.Response(200, json={})]
+        )
+        with pytest.raises(ResponseValidationError, match="acknowledged with HTTP 202"):
+            _dspm(client).scan_datastores(["ds-1", "ds-2", "ds-3"])
+        assert route.call_count == 2
 
     @respx.mock
     async def test_scan_async(self, aclient: AsyncNetskopeClient) -> None:
-        route = respx.post(f"{_BASE_URL}/scans").mock(
-            return_value=httpx.Response(200, json={"status": "success"})
+        route = respx.post(f"{_BASE_URL}/datastores/connected/startscan").mock(
+            return_value=httpx.Response(202, json={"success": True})
         )
         await _adspm(aclient).scan_datastores(["ds-1", "ds-2"])
-        assert sent_json(route) == {"ids": ["ds-1", "ds-2"]}
+        assert route.call_count == 2
+
+
+# --- Gateway contract conformance -------------------------------------------------------------
+#
+# Folded in from the spec-conformance reviews: each test cites the
+# production/endpoints file and line whose shape it pins.
+
+
+def test_dspm_data_tags_accepts_strings_and_integers() -> None:
+    """dspm_external.yaml:7162 declares `dataTags` with untyped items.
+
+    Every sibling tag list in the same file is `items: {type: string}`.
+    """
+    record = DspmFileSensitiveType.model_validate({"dataTags": ["pii", 7]})
+    assert record.data_tags == ["pii", 7]
+
+
+class TestDspmLegacyRoutes:
+    def test_legacy_list_uses_the_verified_path(self, contract_client: NetskopeClient) -> None:
+        """``GET /datastores/connected`` (dspm/dspm_external.yaml) is the route
+        both surfaces resolve; the module docstring now says so."""
+        with contract_router() as mock:
+            route = mock.get("/api/v2/dspm/datastores/connected").mock(
+                return_value=httpx.Response(200, json={"success": True, "data": {"results": []}})
+            )
+            contract_client.dspm.list_resources("connected_datastores")
+        assert route.call_count == 1
+
+    def test_an_unmapped_resource_name_raises_instead_of_building_a_path(
+        self, contract_client: NetskopeClient
+    ) -> None:
+        with contract_router() as mock:
+            route = mock.route(url__regex=r".*").mock(return_value=httpx.Response(200, json={}))
+            with pytest.raises(ValidationError, match="No verified public DSPM read contract"):
+                contract_client.dspm.list_resources("columns")
+            assert route.call_count == 0
+
+
+class TestAnalyticsParameterValidation:
+    """analytics() refuses a bad parameter as a NetskopeError, before any request.
+
+    ``analytics`` builds its query with ``_build_list_params``, whose
+    ``SortOrder(...)`` lookup raises a bare ``ValueError`` — not a
+    ``NetskopeError``, so the documented ``except NetskopeError`` misses it. The
+    sibling ``list_resources`` validates the same argument through ``_prepare``
+    and raises ``ValidationError``; both surfaces have to agree. The guard on
+    reports that take no parameters must also run before the query is built, or
+    a bad value on such a report reports the wrong problem.
+    """
+
+    @respx.mock
+    def test_an_unknown_sort_order_raises_a_netskope_error(self, client: NetskopeClient) -> None:
+        with pytest.raises(ValidationError) as caught:
+            client.dspm.analytics("privilege_risks", sort_by="name", sort_order="ASC")
+        assert isinstance(caught.value, NetskopeError)
+        assert "sort_order" in str(caught.value)
+        assert len(respx.calls) == 0
+
+    @respx.mock
+    async def test_async_unknown_sort_order_raises_a_netskope_error(
+        self, aclient: AsyncNetskopeClient
+    ) -> None:
+        with pytest.raises(ValidationError):
+            await aclient.dspm.analytics("privilege_risks", sort_order="ASC")
+        assert len(respx.calls) == 0
+
+    @respx.mock
+    def test_a_no_parameter_report_reports_the_parameter_not_the_enum(
+        self, client: NetskopeClient
+    ) -> None:
+        with pytest.raises(ValidationError) as caught:
+            client.dspm.analytics("sensitivity_score_distribution", sort_order="ASC")
+        assert "takes no query parameters" in str(caught.value)
+        assert len(respx.calls) == 0

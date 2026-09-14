@@ -30,27 +30,44 @@ For async usage::
             print(alert.alert_name)
 """
 
-from netskope._client import AsyncNetskopeClient, NetskopeClient
-from netskope._config import find_netskope_ca_cert
 from netskope._version import __version__
+from netskope.core.client import AsyncNetskopeClient, NetskopeClient
+from netskope.core.config import find_netskope_ca_cert
+from netskope.datasearch import (
+    AsyncScanIterator,
+    DatasearchWindow,
+    ScanIterator,
+    ScanStopReason,
+    ScanSummary,
+)
 from netskope.exceptions import (
     APIError,
     AuthenticationError,
+    ClientClosedError,
     ConflictError,
     ConnectionError,
     ForbiddenError,
     NetskopeError,
     NotFoundError,
+    PaginationError,
     RateLimitError,
+    ResponseValidationError,
     ServerError,
     TimeoutError,
     ValidationError,
 )
+from netskope.response import ApiResponse
 
 __all__ = [
     # Clients
     "NetskopeClient",
     "AsyncNetskopeClient",
+    "ApiResponse",
+    "DatasearchWindow",
+    "ScanIterator",
+    "AsyncScanIterator",
+    "ScanStopReason",
+    "ScanSummary",
     # Version
     "__version__",
     # Helpers
@@ -61,8 +78,11 @@ __all__ = [
     "AuthenticationError",
     "ForbiddenError",
     "NotFoundError",
+    "PaginationError",
+    "ClientClosedError",
     "ConflictError",
     "RateLimitError",
+    "ResponseValidationError",
     "ServerError",
     "ConnectionError",
     "TimeoutError",

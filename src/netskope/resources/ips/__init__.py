@@ -1,0 +1,1 @@
+"""The ips resource namespace."""

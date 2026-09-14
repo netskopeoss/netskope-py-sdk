@@ -1,0 +1,1 @@
+"""The notifications resource namespace."""

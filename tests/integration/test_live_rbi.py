@@ -6,9 +6,13 @@ Run with: pytest tests/integration/ -m integration -v
 Credentials come from environment variables only (see conftest.py).
 
 RBI is a licensed feature, so every smoke is wrapped with
-:func:`skip_if_unavailable` — tenants without RBI return 403/404 and are
-skipped rather than failed.  These are strictly read-only smokes; no template,
-Cloud Storage, or CDR mutations are performed.
+:func:`skip_if_unavailable` — tenants without RBI return 402/403/501 or a
+licensing message and are skipped rather than failed.  A 404 fails instead,
+because it is what a mistyped path returns; if an unlicensed tenant turns out
+to answer 404 here, mark the call ``unrouted_ok=True`` with what you observed.
+
+These are strictly read-only smokes; no template, Cloud Storage, or CDR
+mutations are performed.
 """
 
 from __future__ import annotations

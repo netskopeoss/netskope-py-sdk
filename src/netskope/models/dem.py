@@ -4,20 +4,28 @@ DEM covers application/network probes, experience-alert rules, a privileged
 metrics query surface, and ADEM (Advanced DEM) per-user/per-device telemetry
 exposed in the CLI as ``dem users``.
 
-Most DEM/ADEM responses are deeply nested, endpoint-specific graph or
-time-series structures with no stable public schema, so the resource layer
-returns raw ``dict``/``list`` payloads for those.  The typed models below cover
-only the handful of list-shaped, stable responses (experience alerts and the
-common ADEM entity summaries).
+Typed response accessors expose endpoint-specific graph, time-series, and
+entity models. Query aliases remain dynamic columns inside a validated row
+and metadata contract. Legacy raw-returning resource methods remain available.
 """
 
 from __future__ import annotations
 
+from datetime import datetime
 from enum import StrEnum
+from typing import Any, Literal, Self, get_args
 
-from pydantic import Field
+from pydantic import BaseModel, ConfigDict, Field, RootModel, field_validator, model_validator
 
 from netskope.models.common import NetskopeModel
+
+
+def _parse_rfc3339(value: str) -> datetime:
+    """Read one RFC 3339 query bound, rejecting anything the gateway would."""
+    try:
+        return datetime.fromisoformat(value.replace("Z", "+00:00"))
+    except (AttributeError, ValueError):
+        raise ValueError("A query bound must be an RFC 3339 timestamp.") from None
 
 
 class QueryDataSource(StrEnum):
@@ -63,14 +71,70 @@ class NetworkMetricType(StrEnum):
 
 
 # Data sources valid for the stateless ``getstates`` query (no time window).
+# ``StateQueryFrom`` (dem-workbench-query.yaml:516-521).
 STATE_DATA_SOURCES: frozenset[str] = frozenset(
     {QueryDataSource.AGENT_STATUS, QueryDataSource.CLIENT_STATUS}
+)
+
+# Data sources valid for ``getdata``/``getdataset``. ``DataQueryFrom``
+# (dem-workbench-query.yaml:15-33) is the 16-value set without ``agent_status``
+# and ``client_status``, which belong to ``StateQueryFrom`` alone.
+DATA_QUERY_SOURCES: frozenset[str] = frozenset(
+    set(QueryDataSource) - {QueryDataSource.AGENT_STATUS, QueryDataSource.CLIENT_STATUS}
 )
 
 # Data sources valid for the ``gettraceroute`` query.
 TRACEROUTE_DATA_SOURCES: frozenset[str] = frozenset(
     {QueryDataSource.TRACEROUTE_POP, QueryDataSource.TRACEROUTE_BYPASSED}
 )
+
+# ``AlertCategory`` (dem_alert.yaml:79-86), ``AlertType`` (:304-314) and
+# ``AlertSeverity`` (:288-296).  ``GET /alert/rules`` (:1292-1316),
+# ``POST /alert/rules`` (``PostAlertRuleRequest``, :441-462) and
+# ``POST /alerts/getalerts`` (``AlertQuery``, :138-173) all refer to these
+# three enumerations, so one tuple each serves every DEM alert surface.
+AlertCategoryValue = Literal["Network", "Platform", "Private Apps", "User Experience", "Site"]
+AlertTypeValue = Literal[
+    "Tunnel Status",
+    "Tunnel Flapping",
+    "Service Status",
+    "Publisher Resource Consumption",
+    "Experience Score",
+    "Site POP Connectivity",
+    "Site Application Performance",
+    "Site Application Availability",
+]
+AlertSeverityValue = Literal["info", "low", "medium", "high", "critical"]
+ALERT_CATEGORIES: tuple[str, ...] = get_args(AlertCategoryValue)
+ALERT_TYPES: tuple[str, ...] = get_args(AlertTypeValue)
+ALERT_SEVERITIES: tuple[str, ...] = get_args(AlertSeverityValue)
+
+# ``GetEntitiesQueryInput.deviceOs`` (dem-workbench-query.yaml:309-321) and
+# ``.monitoring`` (:334-341).
+EntityDeviceOsValue = Literal[
+    "Windows",
+    "Windows Server",
+    "MacOS",
+    "Android",
+    "IOS",
+    "ChromeOS",
+    "Linux",
+    "Unknown OS",
+]
+EntityMonitoringValue = Literal["all", "synthetic", "proactive"]
+ENTITY_DEVICE_OS: tuple[str, ...] = get_args(EntityDeviceOsValue)
+ENTITY_MONITORING: tuple[str, ...] = get_args(EntityMonitoringValue)
+
+# ``os`` and ``deviceClassification`` on the app-probe bodies
+# (``AppProbeUpdateCreateCommon``, demconfig.yaml:2690-2704).
+ProbeOsValue = Literal["windows", "mac"]
+ProbeDeviceClassificationValue = Literal["managed", "unmanaged", "not configured"]
+PROBE_OPERATING_SYSTEMS: tuple[str, ...] = get_args(ProbeOsValue)
+PROBE_DEVICE_CLASSIFICATIONS: tuple[str, ...] = get_args(ProbeDeviceClassificationValue)
+
+# ``sortorder`` on ``/query/getentities`` (dem-workbench-query.yaml:1237-1246).
+SortOrderValue = Literal["asc", "desc"]
+SORT_ORDERS: tuple[str, ...] = get_args(SortOrderValue)
 
 
 class DemAlert(NetskopeModel):
@@ -116,3 +180,443 @@ class NpaHost(NetskopeModel):
     npa_host: str | None = Field(None, alias="npaHost")
     exp_score: float | None = Field(None, alias="expScore")
     npa_applications: list[str] = Field(default_factory=list, alias="npaApplications")
+
+
+class DemQueryRow(RootModel[dict[str, Any]]):
+    """One dynamic select/alias row. Column names are chosen by the caller."""
+
+    model_config = ConfigDict(frozen=True)
+
+
+class DemQueryMetadata(NetskopeModel):
+    """Query execution information, not proof of complete pagination."""
+
+    fields: list[str] = Field(default_factory=list)
+    elapsed: float | None = None
+    total: int | None = Field(default=None, ge=0)
+    is_timeseries: bool | None = None
+    sampling_enabled: bool | None = None
+    extra_points: bool | None = None
+    slot_size: int | None = None
+    begin: str | int | None = None
+    end: str | int | None = None
+    call_date: str | None = None
+
+
+class DemQueryResult(NetskopeModel):
+    """A bounded query result with typed metadata and dynamic selected columns."""
+
+    data: list[DemQueryRow]
+    meta: DemQueryMetadata | None = None
+
+
+class DemProbeEntity(NetskopeModel):
+    """The users, groups and OUs a probe runs for (demconfig.yaml:2670-2684)."""
+
+    user: list[str] = Field(default_factory=list)
+    group: list[str] = Field(default_factory=list)
+    ou: list[str] = Field(default_factory=list)
+
+
+class DemProbe(NetskopeModel):
+    """An app or network probe row.
+
+    Fields follow ``AppProbeCreateUpdateResp`` (demconfig.yaml:2753-2811) plus
+    the two collection flags ``NetworkProbeCreateUpdateResp`` adds
+    (:2813-2870).  ``status`` is an integer (1 enabled, 0 disabled), not a
+    boolean.
+    """
+
+    id: str | int | None = None
+    name: str | None = None
+    app_id: int | None = Field(default=None, alias="appID")
+    app_name: str | None = Field(default=None, alias="appName")
+    app_type: str | None = Field(default=None, alias="appType")
+    app_domains: list[str] = Field(default_factory=list, alias="appDomains")
+    frequency: int | None = None
+    entity: DemProbeEntity | None = None
+    os: list[str] = Field(default_factory=list)
+    device_classification: list[str] = Field(default_factory=list, alias="deviceClassification")
+    status: int | None = None
+    priority: int | None = None
+    network_path_device_health_collection: bool | None = Field(
+        default=None, alias="networkPathDeviceHealthCollection"
+    )
+    process_info_collection: bool | None = Field(default=None, alias="processInfoCollection")
+    modified_time: str | None = Field(default=None, alias="modifiedTime")
+    created_time: str | None = Field(default=None, alias="createdTime")
+
+
+class DemAlertRuleReceiver(NetskopeModel):
+    id: str | None = None
+
+
+class DemAlertRule(NetskopeModel):
+    """An experience-alert rule.
+
+    Fields follow ``AlertRuleResponse`` = ``PostAlertRuleRequest`` plus ``id``,
+    ``lastUpdateTime`` and ``numOfAlerts`` (dem_alert.yaml:274-287, :441-467).
+    The measured metric lives at ``criteria.condition.measure`` and its
+    threshold at ``criteria.condition.thresholds``.
+    """
+
+    id: str | None = None
+    name: str | None = None
+    category: str | None = None
+    type: str | None = None
+    severity: str | None = None
+    enabled: bool | None = None
+    criteria: dict[str, Any] | None = None
+    criteria_type: str | None = Field(default=None, alias="criteriaType")
+    email_receiver: str | None = Field(default=None, alias="emailReceiver")
+    webhook_receivers: list[DemAlertRuleReceiver] = Field(
+        default_factory=list, alias="webhookReceivers"
+    )
+    last_update_time: int | None = Field(default=None, alias="lastUpdateTime")
+    num_of_alerts: int | None = Field(default=None, alias="numOfAlerts")
+
+
+class DemApp(NetskopeModel):
+    id: str | int | None = None
+    name: str | None = Field(default=None, alias="appName")
+    type: str | None = Field(default=None, alias="appType")
+
+
+class DemAlertMetricValue(NetskopeModel):
+    """One ``MetricValue`` sample (dem_alert.yaml:382-391)."""
+
+    timestamp: int | None = None
+    value: int | None = None
+
+
+class DemAlertEntity(NetskopeModel):
+    """One entity impacted by an alert.
+
+    ``GET /alerts/{id}/entities`` returns ``AlertEntityDetail``
+    (dem_alert.yaml:87-105), whose ``entities[]`` items are ``ImpactEntity``
+    (:342-381).  That schema declares no ``required`` list, and it shares no
+    property with the ``/query/getentities`` rows :class:`DemEntity` models.
+    """
+
+    name: str | None = None
+    impact_type: str | None = Field(default=None, alias="impactType")
+    metric_type: str | None = Field(default=None, alias="metricType")
+    metric_values: list[DemAlertMetricValue] = Field(default_factory=list, alias="metricValues")
+    pop: str | None = None
+    publisher: str | None = None
+    resource: str | None = None
+    service: str | None = None
+    site: str | None = None
+    source_ip: str | None = Field(default=None, alias="sourceIP")
+    status: str | None = None
+
+
+class DemEntity(NetskopeModel):
+    """One ``/query/getentities`` row (``User``, dem-workbench-query.yaml)."""
+
+    user: str | None = None
+    user_id: str | None = None
+    exp_score: float | None = None
+    user_score: float | None = None
+    location: str | None = None
+    applications_count: int | None = Field(default=None, alias="applicationsCount")
+    devices: list[AdemDevice] = Field(default_factory=list)
+    user_groups: list[str] = Field(default_factory=list, alias="userGroups")
+
+
+class DemDefinitionField(NetskopeModel):
+    name: str
+    description: str | None = None
+    unit: str | None = None
+    sources: list[str] | None = None
+
+
+class DemDefinitionFunction(NetskopeModel):
+    name: str
+    valid_on_keys: bool | None = None
+
+
+class DemDefinitionComparison(NetskopeModel):
+    name: str
+    type: str | None = None
+
+
+class DemDefinitions(NetskopeModel):
+    metrics: list[DemDefinitionField]
+    keys: list[DemDefinitionField]
+    functions: list[DemDefinitionFunction | str]
+    comparisons: list[DemDefinitionComparison] = Field(default_factory=list)
+
+
+class AdemLocation(NetskopeModel):
+    city: str | None = None
+    country: str | None = None
+    region: str | None = None
+    latitude: float | None = None
+    longitude: float | None = None
+
+
+class AdemDeviceDetails(AdemDevice):
+    client_status: str | None = Field(default=None, alias="clientStatus")
+    client_version: str | None = Field(default=None, alias="clientVersion")
+    classification: str | None = Field(default=None, alias="deviceClassification")
+    device_score: float | None = Field(default=None, alias="deviceScore")
+    cpu: str | None = None
+    memory: str | None = None
+    model: str | None = None
+    geo: AdemLocation | None = None
+    gateway: str | None = None
+    pop: str | None = None
+    private_ip: str | None = Field(default=None, alias="privateIp")
+    public_ip: str | None = Field(default=None, alias="publicIp")
+    last_activity: int | None = Field(default=None, alias="lastActivity")
+
+
+class AdemScores(NetskopeModel):
+    exp_score: float | None = Field(default=None, alias="expScore")
+    device_score: float | None = Field(default=None, alias="deviceScore")
+    network_score: float | None = Field(default=None, alias="networkScore")
+    app_score: float | None = Field(default=None, alias="appScore")
+    npa_host_score: float | None = Field(default=None, alias="npaHostScore")
+
+
+class AdemAggregatedScores(NetskopeModel):
+    aggregation_type: str | None = Field(default=None, alias="aggregationType")
+    metrics: AdemScores
+
+
+class AdemMetricPoint(NetskopeModel):
+    timestamp: int | None = None
+    exp_score: float | None = Field(default=None, alias="expScore")
+    latency: float | None = None
+    packet_loss: float | None = Field(default=None, alias="packetLoss")
+    jitter: float | None = None
+    pop: str | None = None
+
+
+class AdemEvidence(NetskopeModel):
+    key: str | None = None
+    value: Any | None = None
+    obs: dict[str, Any] = Field(default_factory=dict)
+
+
+class AdemCause(NetskopeModel):
+    name: str | None = None
+    weight: float | None = None
+    evidence: AdemEvidence | None = None
+    caused_by: list[AdemCause] | None = Field(default=None, alias="causedBy")
+
+
+class AdemRcaItem(NetskopeModel):
+    starttime: int | None = None
+    endtime: int | None = None
+    root_cause: AdemCause | None = Field(default=None, alias="rootCause")
+    score_summary: dict[str, float | None] = Field(default_factory=dict, alias="scoreSummary")
+
+
+class AdemComponentScore(NetskopeModel):
+    score: float | None = None
+    utilization: float | None = None
+
+
+class AdemRootCause(NetskopeModel):
+    """Current RCA trees and older component-score responses."""
+
+    items: list[AdemRcaItem] = Field(default_factory=list)
+    cpu: AdemComponentScore | None = Field(default=None, alias="CPU_SCORE")
+    memory: AdemComponentScore | None = Field(default=None, alias="MEMORY_SCORE")
+    disk: AdemComponentScore | None = Field(default=None, alias="DISK_SCORE")
+
+
+class AdemGraphNode(NetskopeModel):
+    """A node of either network graph.
+
+    ``NetworkNode`` (adem_backend_api.yaml:1277-1314) declares no ``required``
+    list; the ``TracerNode`` variants (:1640-1755) each require ``id`` and
+    ``hopType``.  Nothing is required here so a node from either operation
+    decodes.
+    """
+
+    id: str | int | None = None
+    name: str | None = None
+    type: str | None = None
+    hop_type: str | None = Field(default=None, alias="hopType")
+    ip: str | None = None
+    latency_ms: float | None = Field(default=None, alias="latencyms")
+    packet_loss: float | None = Field(default=None, alias="packetLoss")
+    npa_host_details: NpaHost | None = Field(default=None, alias="npaHostDetails")
+
+
+class AdemGraphEdge(NetskopeModel):
+    """An edge of either network graph.
+
+    ``TracerEdge`` (adem_backend_api.yaml:1756-1766) requires ``source`` and
+    ``destination``; ``NetworkEdge`` (:1315-1331), which
+    ``getnetworkpaths`` returns, requires neither, so both are optional here.
+    """
+
+    source: str | int | None = None
+    destination: str | int | None = None
+    average_latency: float | None = Field(default=None, alias="avgLatency")
+    median_latency: float | None = Field(default=None, alias="medianLatency")
+    sessions: int | None = Field(default=None, alias="noOfSessions")
+    latency_ms: float | None = Field(default=None, alias="latencyms")
+
+
+class AdemNetworkGraph(NetskopeModel):
+    """A network-path or traceroute graph.
+
+    ``NetworkPathsResponse`` (adem_backend_api.yaml:1332-1345) requires
+    ``nodes`` and ``edges``; ``TracerData`` (:1767-1782), returned by
+    ``gettraceroute``, requires neither, so a sparse graph from either
+    operation decodes into empty collections.
+    """
+
+    nodes: list[AdemGraphNode] = Field(default_factory=list)
+    edges: list[AdemGraphEdge] = Field(default_factory=list)
+    complete: bool | None = Field(default=None, alias="isComplete")
+    device_to_pop_latency_ms: float | None = Field(default=None, alias="deviceToPopLatencyms")
+
+
+class DemProbeMove(BaseModel):
+    """``MoveProbeReqBody`` (demconfig.yaml:2494-2508); ``position`` is required
+    for ``after``/``before``."""
+
+    model_config = ConfigDict(extra="forbid", strict=True, frozen=True)
+
+    operation: Literal["top", "bottom", "after", "before"]
+    position: int | None = None
+
+    @model_validator(mode="after")
+    def _position_required(self) -> Self:
+        if self.operation in ("after", "before") and self.position is None:
+            raise ValueError("A move after or before another probe needs its 0-based position.")
+        return self
+
+
+class DemProbeCreate(BaseModel):
+    """``AppProbeCreateRequest`` (demconfig.yaml:2744-2752).
+
+    ``AppProbeUpdateCreateCommon`` requires ``name``, ``frequency``,
+    ``entity``, ``os``, ``deviceClassification`` and ``status``; the ``oneOf``
+    adds ``appName`` for a predefined app or ``appID`` for a custom one, and
+    the create variant also requires ``move``.
+    """
+
+    model_config = ConfigDict(extra="allow", strict=True, frozen=True, populate_by_name=True)
+
+    name: str = Field(min_length=1)
+    frequency: int
+    entity: dict[str, list[str]]
+    os: list[ProbeOsValue] = Field(min_length=1)
+    device_classification: list[ProbeDeviceClassificationValue] = Field(
+        min_length=1, alias="deviceClassification"
+    )
+    status: int
+    app_type: Literal["predefined", "custom"] = Field(alias="appType")
+    app_name: str | None = Field(default=None, alias="appName")
+    app_id: int | None = Field(default=None, alias="appID")
+    move: DemProbeMove
+
+    @model_validator(mode="after")
+    def _app_selector(self) -> Self:
+        if self.app_type == "predefined" and not self.app_name:
+            raise ValueError("A predefined app probe requires appName.")
+        if self.app_type == "custom" and self.app_id is None:
+            raise ValueError("A custom app probe requires appID.")
+        return self
+
+
+class DemAlertRuleCreate(BaseModel):
+    """``PostAlertRuleRequest`` (dem_alert.yaml:441-467).
+
+    The schema lists no required properties, but a rule without a name or a
+    measurable criterion cannot be acted on, so both are required here.
+    """
+
+    model_config = ConfigDict(extra="allow", strict=True, frozen=True, populate_by_name=True)
+
+    name: str = Field(min_length=1)
+    criteria: dict[str, Any]
+    severity: AlertSeverityValue = "medium"
+    enabled: bool = True
+    category: AlertCategoryValue | None = None
+    type: AlertTypeValue | None = None
+    criteria_type: str | None = Field(default=None, alias="criteriaType")
+    email_receiver: str | None = Field(default=None, alias="emailReceiver")
+
+
+class DemQueryRequest(BaseModel):
+    """Native DEM query arguments; arbitrary select expressions remain dynamic."""
+
+    model_config = ConfigDict(extra="forbid", populate_by_name=True, strict=True, frozen=True)
+
+    data_source: str = Field(alias="from")
+    select: list[Any] = Field(min_length=1)
+    begin: dict[str, str] | None = None
+    end: dict[str, str] | None = None
+    where: Any | None = None
+    group_by: list[str] | None = Field(default=None, alias="groupby")
+    order_by: list[Any] | None = Field(default=None, alias="orderby")
+    # ``QueryInput.limit``/``.offset`` (dem-workbench-query.yaml:447-461) bound
+    # the pair with ``minimum: 0`` and an **exclusive** maximum of 10000 and
+    # 100000; ``DataSetQueryInput`` (:73-87) and ``StateQueryInput`` (:534-548)
+    # repeat both bounds, so one rule covers getdata, getdataset and getstates.
+    limit: int | None = Field(default=None, ge=0, lt=10000)
+    offset: int | None = Field(default=None, ge=0, lt=100000)
+
+    @field_validator("begin", "end")
+    @classmethod
+    def _query_bound(cls, value: dict[str, str] | None) -> dict[str, str] | None:
+        """``QueryInput.begin``/``.end`` accept one RFC 3339 bound.
+
+        ``AbsoluteDate``/``RelativeDate`` (dem-workbench-query.yaml:5-14,
+        :499-507) each carry exactly one key, and ``QueryInput`` sets
+        ``additionalProperties: false`` (:420).
+        """
+        if value is None:
+            return value
+        if len(value) != 1 or next(iter(value)) not in ("absolute", "relative"):
+            raise ValueError('A query bound is {"absolute": <RFC3339>} or {"relative": <RFC3339>}.')
+        _parse_rfc3339(next(iter(value.values())))
+        return value
+
+    @model_validator(mode="after")
+    def _ordered_window(self) -> Self:
+        """Reject only a same-mode window whose end precedes its begin.
+
+        ``QueryInput`` types ``begin`` and ``end`` as independent
+        ``anyOf[AbsoluteDate, RelativeDate, null]`` values
+        (dem-workbench-query.yaml:422-433) with no ordering rule, so an equal
+        pair is legal and a mixed absolute/relative pair is left to the
+        gateway; the two modes are not comparable here.
+        """
+        if self.begin is None or self.end is None:
+            return self
+        begin_key, end_key = next(iter(self.begin)), next(iter(self.end))
+        if begin_key != end_key:
+            return self
+        if _parse_rfc3339(self.end[end_key]) < _parse_rfc3339(self.begin[begin_key]):
+            raise ValueError("end must not precede begin.")
+        return self
+
+
+class AdemQueryRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid", populate_by_name=True, strict=True, frozen=True)
+
+    start_time: int = Field(alias="starttime", ge=0)
+    end_time: int = Field(alias="endtime", ge=0)
+    user: str | None = None
+    device_id: str | None = Field(default=None, alias="deviceId")
+    user_location: list[AdemLocation] | None = Field(default=None, alias="userLocation")
+    aggregation_type: Literal["avg", "p95"] | None = Field(default=None, alias="aggregationType")
+    metric_type: Literal["all", "latency", "packet_loss", "jitter"] | None = Field(
+        default=None, alias="metricType"
+    )
+    npa_host: str | None = Field(default=None, alias="npaHost")
+
+    @model_validator(mode="after")
+    def _ordered_window(self) -> Self:
+        if self.end_time < self.start_time:
+            raise ValueError("end_time must not precede start_time.")
+        return self

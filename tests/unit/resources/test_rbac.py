@@ -11,11 +11,12 @@ import pytest
 import respx
 
 from netskope import AsyncNetskopeClient, NetskopeClient
-from netskope.exceptions import ValidationError
+from netskope.exceptions import NetskopeError, ResponseValidationError, ValidationError
+from netskope.models.administration import AdminUser
 from netskope.models.rbac import RbacRole
 from netskope.models.scim import ScimUser
-from netskope.resources.rbac import AsyncRbacResource, RbacResource
-from tests.unit.resources.conftest import sent_json
+from netskope.resources.rbac.resource import AsyncRbacResource, RbacResource
+from tests.unit.resources.conftest import CONTRACT_BASE, sent_json
 
 _ROLES_URL = "https://t.goskope.com/api/v2/rbac/roles"
 _ADMINS_URL = "https://t.goskope.com/api/v2/platform/administration/scim/Users"
@@ -315,3 +316,199 @@ class TestAsyncRbacAdminsResource:
         assert params["count"] == "25"
         assert params["startIndex"] == "1"
         assert params["filter"] == 'userName eq "admin@example.com"'
+
+
+# --- Gateway contract conformance -------------------------------------------------------------
+#
+# Folded in from the spec-conformance reviews: each test cites the
+# production/endpoints file and line whose shape it pins.
+
+_contract_mock = respx.mock(assert_all_mocked=True, assert_all_called=False)
+
+
+@_contract_mock
+def test_the_platform_admin_scim_route_keeps_plain_json(contract_client: NetskopeClient) -> None:
+    """ms-platform.yaml's admin SCIM route is plain application/json."""
+    route = _contract_mock.get(
+        f"{CONTRACT_BASE}/api/v2/platform/administration/scim/Users"
+    ).respond(200, json={"Resources": [], "totalResults": 0, "startIndex": 1})
+    contract_client.rbac.admins.list_page(count=1)
+    assert route.calls.last.request.headers["Accept"] == "application/json"
+
+
+_ADMIN_RESOURCE = {
+    "id": "5e6aef97-64fc-4b49-913b-f3adf24d52e4",
+    "userName": "user1@netskope.com",
+    "active": True,
+    "externalId": None,
+    "metadata": {
+        "created": None,
+        "lastModified": "2024-11-25T08:45:36Z",
+        "location": (
+            "https://example.netskope.com/api/v2/administration/scim/Users/"
+            "5e6aef97-64fc-4b49-913b-f3adf24d52e4"
+        ),
+    },
+    "urn:ietf:params:scim:schemas:netskope:2.0:User": {
+        "lastLogin": "2024-11-22T05:10:58Z",
+        "provisionedBy": "LOCAL",
+        "recordType": "USER",
+        "role": {"value": 1, "display": "Tenant Admin"},
+        "isVerified": True,
+        "isLocked": False,
+        "samlAssertedRoleId": None,
+        "authType": "API_KEY",
+        "apiAccessToken": {
+            "expiresOn": "2024-11-25T09:16:32.625000Z",
+            "issuedOn": "2024-11-25T09:16:32.625000Z",
+            "value": None,
+        },
+    },
+    "schemas": [
+        "urn:ietf:params:scim:schemas:core:2.0:User",
+        "urn:ietf:params:scim:schemas:extension:netskope:2.0:User",
+    ],
+}
+
+_ROLES_BODY = {
+    "version": "v3",
+    "count": 7,
+    "roles": [
+        {
+            "roleId": 42,
+            "name": "SOC-Analyst",
+            "type": 0,
+            "obfuscated": False,
+            "scoped": False,
+            "description": "Read-only analyst role",
+            "lastEdited": "2025-01-15T10:00:00Z",
+            "createdBy": "admin@example.com",
+            "aliasName": "",
+            "userCount": 3,
+            "updatedBy": "admin@example.com",
+        }
+    ],
+}
+
+
+class TestRbacRolesTotal:
+    """SPEC-I10: GetRolesResponseDto.count is the total, not opaque metadata."""
+
+    @respx.mock
+    def test_roles_page_keeps_count_as_the_total(self, client: NetskopeClient) -> None:
+        """count is "Total number of roles fitting search criteria" (ms-rbac.yaml:1676-1678)."""
+        respx.get(_ROLES_URL).mock(return_value=httpx.Response(200, json=_ROLES_BODY))
+        page = client.rbac.roles.list_page(limit=1, offset=0)
+        assert page.total == 7
+        assert page.has_more is True
+
+    @respx.mock
+    async def test_async_roles_last_page_reports_no_more(
+        self, aclient: AsyncNetskopeClient
+    ) -> None:
+        body = {**_ROLES_BODY, "count": 1}
+        respx.get(_ROLES_URL).mock(return_value=httpx.Response(200, json=body))
+        page = await aclient.rbac.roles.list_page(limit=1, offset=0)
+        assert page.total == 1
+        assert page.has_more is False
+
+
+class TestRbacAdmins:
+    """SPEC-I14: admins are SCIMUserDTO records, not core SCIM users."""
+
+    @respx.mock
+    def test_admin_page_types_the_netskope_extension(self, client: NetskopeClient) -> None:
+        """SCIMUserDTO carries role, recordType, provisionedBy (ms-platform.yaml:533-565)."""
+        respx.get(_ADMINS_URL).mock(
+            return_value=httpx.Response(
+                200,
+                json={"totalResults": 1, "startIndex": 1, "Resources": [_ADMIN_RESOURCE]},
+            )
+        )
+        admin = client.rbac.admins.list_page(count=1).items[0]
+        assert isinstance(admin, AdminUser)
+        assert admin.record_type == "USER"
+        assert admin.provisioned_by == "LOCAL"
+        assert admin.role is not None
+        assert (admin.role.value, admin.role.display) == (1, "Tenant Admin")
+        assert admin.netskope_user is not None
+        assert admin.netskope_user.auth_type == "API_KEY"
+        assert admin.netskope_user.last_login is not None
+        assert admin.metadata is not None
+        assert admin.metadata.location.endswith("5e6aef97-64fc-4b49-913b-f3adf24d52e4")
+
+    @respx.mock
+    async def test_async_admin_iterator_yields_admin_users(
+        self, aclient: AsyncNetskopeClient
+    ) -> None:
+        respx.get(_ADMINS_URL).mock(
+            side_effect=[
+                httpx.Response(
+                    200,
+                    json={"totalResults": 1, "startIndex": 1, "Resources": [_ADMIN_RESOURCE]},
+                ),
+                httpx.Response(200, json={"totalResults": 1, "startIndex": 2, "Resources": []}),
+            ]
+        )
+        admins = [admin async for admin in aclient.rbac.admins.list(page_size=1)]
+        assert [type(admin) for admin in admins] == [AdminUser]
+        assert admins[0].user_name == "user1@netskope.com"
+
+    def test_an_admin_has_no_core_scim_display_fields(self) -> None:
+        """SCIMUserDTO declares no displayName, emails, name, or groups."""
+        admin = AdminUser.model_validate(_ADMIN_RESOURCE)
+        assert admin.display_name is None
+        assert admin.name is None
+        assert admin.emails == []
+        assert admin.groups == []
+
+
+class TestLegacyDecodeFailuresStayNetskopeErrors:
+    """An unreadable 200 body still raises a NetskopeError on the untyped path.
+
+    ``ApiResponse.parse`` restates a decoder's ``ValueError`` as
+    ``ResponseValidationError`` (response.py:107-113), which is what every typed
+    accessor relies on. ``roles.list()`` and ``roles.get()`` call the decoder
+    directly on a ``_get`` body, so without an equivalent boundary the caller's
+    documented ``except NetskopeError`` misses the failure entirely.
+    """
+
+    @respx.mock
+    @pytest.mark.parametrize(
+        "body",
+        [
+            pytest.param({"count": 0}, id="no-recognised-collection"),
+            pytest.param({"data": [], "result": []}, id="competing-collections"),
+        ],
+    )
+    def test_an_unreadable_roles_envelope_raises_a_netskope_error(
+        self, client: NetskopeClient, body: dict[str, object]
+    ) -> None:
+        respx.get(_ROLES_URL).mock(return_value=httpx.Response(200, json=body))
+        with pytest.raises(ResponseValidationError) as caught:
+            RbacResource(client._transport).roles.list()
+        assert isinstance(caught.value, NetskopeError)
+        assert caught.value.request_method == "GET"
+
+    @respx.mock
+    async def test_async_unreadable_roles_envelope_raises_a_netskope_error(
+        self, aclient: AsyncNetskopeClient
+    ) -> None:
+        respx.get(_ROLES_URL).mock(return_value=httpx.Response(200, json={"count": 0}))
+        with pytest.raises(ResponseValidationError):
+            await AsyncRbacResource(aclient._transport).roles.list()
+
+    @respx.mock
+    def test_an_unreadable_role_body_raises_a_netskope_error(self, client: NetskopeClient) -> None:
+        respx.get(f"{_ROLES_URL}/42").mock(return_value=httpx.Response(200, json={}))
+        with pytest.raises(ResponseValidationError) as caught:
+            RbacResource(client._transport).roles.get(42)
+        assert isinstance(caught.value, NetskopeError)
+
+    @respx.mock
+    async def test_async_unreadable_role_body_raises_a_netskope_error(
+        self, aclient: AsyncNetskopeClient
+    ) -> None:
+        respx.get(f"{_ROLES_URL}/42").mock(return_value=httpx.Response(200, json={}))
+        with pytest.raises(ResponseValidationError):
+            await AsyncRbacResource(aclient._transport).roles.get(42)

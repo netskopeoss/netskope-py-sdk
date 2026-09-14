@@ -1,0 +1,1 @@
+"""The atp resource namespace."""

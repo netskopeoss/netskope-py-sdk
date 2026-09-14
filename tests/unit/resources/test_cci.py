@@ -14,7 +14,7 @@ import respx
 
 from netskope import AsyncNetskopeClient, NetskopeClient
 from netskope.exceptions import ValidationError
-from netskope.resources.cci import AsyncCciResource, CciResource
+from netskope.resources.cci.resource import AsyncCciResource, CciResource
 from tests.unit.resources.conftest import sent_json
 
 _APP_URL = "https://t.goskope.com/api/v2/services/cci/app"
@@ -69,30 +69,78 @@ class TestCciLookupApp:
         assert dict(request.url.params) == {"apps": "Dropbox"}
 
     @respx.mock
-    def test_lookup_app_sends_optional_filters(self, client: NetskopeClient) -> None:
+    def test_lookup_app_rejects_a_second_selector(self, client: NetskopeClient) -> None:
+        """``GET /cci/app``: "All the query parameters are mutually exclusive
+        except limit & offset" (services/cci.yaml:2889)."""
+        route = respx.get(url__regex=r".*").mock(return_value=httpx.Response(200, json={}))
+        with pytest.raises(ValidationError, match="exactly one CCI selector"):
+            _cci(client).lookup_app("Box", category="Cloud Storage", ccl="excellent")
+        assert route.call_count == 0
+
+    @respx.mock
+    def test_lookup_app_sends_one_selector_with_paging(self, client: NetskopeClient) -> None:
+        """``limit`` and ``offset`` are the two parameters a selector may
+        accompany (services/cci.yaml:2889)."""
         route = respx.get(_APP_URL).mock(return_value=httpx.Response(200, json={"data": []}))
-        _cci(client).lookup_app(
-            "Box",
-            category="Cloud Storage",
-            ccl="excellent",
-            tag="Finance",
-            connector="api",
-            discovered=True,
-            limit=5,
-            offset=10,
-        )
+        _cci(client).lookup_app("Box;Dropbox", limit=5, offset=10)
 
         params = dict(route.calls.last.request.url.params)
-        assert params == {
-            "apps": "Box",
-            "category": "Cloud Storage",
-            "ccl": "excellent",
-            "tag": "Finance",
-            "connector": "api",
-            "discovered": "true",
-            "limit": "5",
-            "offset": "10",
-        }
+        assert params == {"apps": "Box;Dropbox", "limit": "5", "offset": "10"}
+
+    @respx.mock
+    @pytest.mark.parametrize(
+        ("kwargs", "expected"),
+        [
+            ({"category": "Cloud Storage"}, {"category": "Cloud Storage"}),
+            ({"ccl": "excellent"}, {"ccl": "excellent"}),
+            ({"tag": "Finance"}, {"tag": "Finance"}),
+            ({"connector": True}, {"connector": "true"}),
+            ({"discovered": True}, {"discovered": "true"}),
+        ],
+    )
+    def test_each_selector_is_usable_on_its_own(
+        self, client: NetskopeClient, kwargs: dict[str, object], expected: dict[str, str]
+    ) -> None:
+        """Every selector the operation declares (services/cci.yaml:2891-2977)
+        can be the single one, with *app_name* left out."""
+        route = respx.get(_APP_URL).mock(return_value=httpx.Response(200, json={"data": []}))
+        _cci(client).lookup_app(**kwargs)
+
+        assert dict(route.calls.last.request.url.params) == expected
+
+    @respx.mock
+    def test_lookup_app_without_a_selector_is_rejected(self, client: NetskopeClient) -> None:
+        """``limit``/``offset`` alone select nothing (services/cci.yaml:2889)."""
+        route = respx.get(url__regex=r".*").mock(return_value=httpx.Response(200, json={}))
+        with pytest.raises(ValidationError, match="exactly one CCI selector"):
+            _cci(client).lookup_app(limit=5)
+        assert route.call_count == 0
+
+    @respx.mock
+    def test_presence_flags_are_omitted_when_false(self, client: NetskopeClient) -> None:
+        """``discovered`` and ``connector`` enumerate only 1/true
+        (services/cci.yaml:2911-2942) — there is no sanctioned-only mode."""
+        route = respx.get(_APP_URL).mock(return_value=httpx.Response(200, json={"data": []}))
+        _cci(client).lookup_app("Box", discovered=False, connector=False)
+
+        assert dict(route.calls.last.request.url.params) == {"apps": "Box"}
+
+    @respx.mock
+    @pytest.mark.parametrize(
+        ("kwargs", "message"),
+        [
+            ({"discovered": "false"}, "discovered is a presence flag"),
+            ({"connector": "api"}, "connector is a presence flag"),
+            ({"ccl": "terrible"}, "ccl must be one of"),
+        ],
+    )
+    def test_rejected_query_values(
+        self, client: NetskopeClient, kwargs: dict[str, object], message: str
+    ) -> None:
+        route = respx.get(url__regex=r".*").mock(return_value=httpx.Response(200, json={}))
+        with pytest.raises(ValidationError, match=message):
+            _cci(client).lookup_app("Box", **kwargs)  # type: ignore[arg-type]
+        assert route.call_count == 0
 
     @respx.mock
     def test_lookup_app_omits_unset_filters(self, client: NetskopeClient) -> None:
@@ -294,12 +342,22 @@ class TestAsyncCciLookupApp:
         assert dict(route.calls.last.request.url.params) == {"apps": "Dropbox"}
 
     @respx.mock
-    async def test_lookup_app_sends_optional_filters(self, aclient: AsyncNetskopeClient) -> None:
+    async def test_lookup_app_sends_one_selector_with_paging(
+        self, aclient: AsyncNetskopeClient
+    ) -> None:
         route = respx.get(_APP_URL).mock(return_value=httpx.Response(200, json={"data": []}))
-        await _acci(aclient).lookup_app("Box", ccl="low", discovered=False, offset=3)
+        await _acci(aclient).lookup_app(ccl="low", offset=3)
 
         params = dict(route.calls.last.request.url.params)
-        assert params == {"apps": "Box", "ccl": "low", "discovered": "false", "offset": "3"}
+        assert params == {"ccl": "low", "offset": "3"}
+
+    @respx.mock
+    async def test_lookup_app_rejects_a_second_selector(self, aclient: AsyncNetskopeClient) -> None:
+        """services/cci.yaml:2889; the selectors are mutually exclusive."""
+        route = respx.get(url__regex=r".*").mock(return_value=httpx.Response(200, json={}))
+        with pytest.raises(ValidationError, match="exactly one CCI selector"):
+            await _acci(aclient).lookup_app("Box", ccl="low")
+        assert route.call_count == 0
 
 
 class TestAsyncCciTags:

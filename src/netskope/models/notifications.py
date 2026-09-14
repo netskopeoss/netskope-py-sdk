@@ -3,10 +3,59 @@
 from __future__ import annotations
 
 from enum import StrEnum
+from typing import Literal, Self
 
-from pydantic import Field
+from pydantic import Field, model_validator
 
+from netskope.models.administration import AdminRequest
 from netskope.models.common import NetskopeModel
+
+
+class NotificationTemplateWrite(AdminRequest):
+    """Complete template content required by both POST and PATCH."""
+
+    name: str = Field(min_length=1, max_length=256)
+    title: str = Field(max_length=60)
+    message: str = Field(max_length=256000)
+    action_type: Literal["block", "useralert"] = Field("block", alias="templateActionType")
+    ack_button_text: str | None = Field(None, alias="ackButtonText", max_length=14)
+    proceed_button_text: str | None = Field(None, alias="proceedButtonText", max_length=14)
+    stop_button_text: str | None = Field(None, alias="stopButtonText", max_length=14)
+    subtitle: str | None = Field(None, max_length=80)
+    footer_message: str | None = Field(None, alias="footerMessage", max_length=160)
+    logo_image_name: str | None = Field(None, alias="logoImageName")
+    logo_size: Literal["small", "medium", "large"] | None = Field(None, alias="logoSize")
+    redirect_url: str | None = Field(None, alias="redirectUrl")
+    # user-notifications-templates.yaml:62-64 declares stripeColor as a bare
+    # string ("A valid hexadecimal color code"), with no pattern.
+    stripe_color: str | None = Field(None, alias="stripeColor")
+
+    @model_validator(mode="after")
+    def _action_buttons(self) -> Self:
+        if self.action_type == "block":
+            if (
+                self.ack_button_text is None
+                or self.proceed_button_text is not None
+                or self.stop_button_text is not None
+            ):
+                # `action_type` defaults to "block", so a caller updating a
+                # useralert template who omits it lands here. Naming the field
+                # is the difference between a fixable error and a baffling one.
+                raise ValueError(
+                    "Block templates require ack_button_text and forbid proceed/stop "
+                    'buttons. action_type defaults to "block"; pass '
+                    'action_type="useralert" if that is the template you mean.'
+                )
+        elif (
+            self.ack_button_text is not None
+            or self.proceed_button_text is None
+            or self.stop_button_text is None
+        ):
+            raise ValueError(
+                "User-alert templates require proceed/stop buttons "
+                "and forbid an acknowledge button."
+            )
+        return self
 
 
 class TemplateActionType(StrEnum):
@@ -62,3 +111,11 @@ class NotificationTemplate(NetskopeModel):
     logo_size: str | None = Field(default=None, alias="logoSize")
     redirect_url: str | None = Field(default=None, alias="redirectUrl")
     stripe_color: str | None = Field(default=None, alias="stripeColor")
+
+
+class NotificationDeliverySettings(NetskopeModel):
+    """The configured delivery channels and notification timeout."""
+
+    cloud_apps_delivery_method: str = Field(alias="cloudAppsDeliveryMethod")
+    web_traffic_delivery_method: str = Field(alias="webTrafficDeliveryMethod")
+    notification_timeout: int | float = Field(alias="notificationTimeout")

@@ -18,7 +18,7 @@ import pytest
 from netskope import NetskopeClient
 from netskope.exceptions import APIError
 from netskope.models.notifications import NotificationTemplate
-from netskope.resources.notifications import NotificationsResource
+from netskope.resources.notifications.resource import NotificationsResource
 
 from .conftest import skip_if_unavailable, unique_name
 

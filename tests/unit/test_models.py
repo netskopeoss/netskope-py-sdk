@@ -2,13 +2,20 @@
 
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import UTC, datetime, timedelta, timezone
+from typing import Any
 
 import pytest
 
 from netskope.models.alerts import Alert
+from netskope.models.common import TimestampMixin
 from netskope.models.events import Event, EventType, NetworkEvent, PageEvent
-from netskope.models.incidents import Incident, UserConfidenceIndex
+from netskope.models.incidents import (
+    Anomaly,
+    Incident,
+    IncidentUpdateResult,
+    UserConfidenceIndex,
+)
 from netskope.models.infrastructure import IPSecTunnel, Pop
 from netskope.models.private_apps import PrivateApp
 from netskope.models.publishers import Publisher
@@ -184,6 +191,62 @@ class TestIncident:
         assert incident.severity == "critical"
 
 
+_TIMESTAMPED = [Alert, Event, Incident, Anomaly]
+
+
+class TestNumericWireShapes:
+    """Datasearch returns several of these fields as numbers on some tenants."""
+
+    @pytest.mark.parametrize("model", [Alert, Event, Incident])
+    def test_numeric_severity_level_decodes(self, model: type[Any]) -> None:
+        record = model.model_validate({"_id": "a1", "severity_level": 3})
+        assert record.severity == 3
+
+    @pytest.mark.parametrize("model", [Alert, Event, Incident])
+    def test_string_severity_level_still_decodes(self, model: type[Any]) -> None:
+        record = model.model_validate({"_id": "a1", "severity_level": "high"})
+        assert record.severity == "high"
+
+    def test_alert_accepts_numeric_ccl_and_site(self) -> None:
+        alert = Alert.model_validate({"_id": "a1", "ccl": 4, "site": 12})
+        assert alert.ccl == 4
+        assert alert.site == 12
+
+    def test_alert_accepts_one_other_category_as_a_bare_string(self) -> None:
+        alert = Alert.model_validate({"_id": "a1", "other_categories": "Cloud Storage"})
+        assert alert.other_categories == ["Cloud Storage"]
+
+    def test_alert_reads_an_empty_other_categories_string_as_absent(self) -> None:
+        assert Alert.model_validate({"_id": "a1", "other_categories": ""}).other_categories is None
+
+    def test_alert_keeps_a_list_of_other_categories(self) -> None:
+        alert = Alert.model_validate({"_id": "a1", "other_categories": ["a", "b"]})
+        assert alert.other_categories == ["a", "b"]
+
+    def test_incident_accepts_numeric_workflow_fields(self) -> None:
+        incident = Incident.model_validate(
+            {"_id": "i1", "status": 2, "assignee": 7, "dlp_profile": 1, "dlp_rule": 9}
+        )
+        assert (incident.status, incident.assignee) == (2, 7)
+        assert (incident.dlp_profile, incident.dlp_rule) == (1, 9)
+
+    def test_anomaly_accepts_numeric_severity(self) -> None:
+        assert Anomaly.model_validate({"_id": "an1", "severity": 5}).severity == 5
+
+    def test_a_whole_alert_row_with_numeric_fields_decodes(self) -> None:
+        alert = Alert.model_validate(
+            {
+                "_id": "a1",
+                "alert_name": "n1",
+                "action": "block",
+                "timestamp": 1700000000,
+                "severity_level": 3,
+            }
+        )
+        assert alert.id == "a1"
+        assert alert.severity == 3
+
+
 class TestTimestampMixin:
     def test_epoch_to_datetime(self) -> None:
         alert = Alert.model_validate({"timestamp": 1709913600})
@@ -192,6 +255,57 @@ class TestTimestampMixin:
     def test_none_stays_none(self) -> None:
         alert = Alert.model_validate({})
         assert alert.timestamp is None
+
+    @pytest.mark.parametrize("model", _TIMESTAMPED)
+    def test_epoch_is_utc_aware(self, model: type[TimestampMixin]) -> None:
+        record = model.model_validate({"timestamp": 1700000000})
+        assert record.timestamp == datetime(2023, 11, 14, 22, 13, 20, tzinfo=UTC)
+
+    @pytest.mark.parametrize("model", _TIMESTAMPED)
+    @pytest.mark.parametrize(
+        "value",
+        ["", "   ", "not-a-date", True, False, {"a": 1}, [1], 10**100, float("nan")],
+        ids=["empty", "blank", "garbage", "true", "false", "dict", "list", "huge", "nan"],
+    )
+    def test_unreadable_values_are_absent_and_keep_the_record(
+        self, model: type[TimestampMixin], value: Any
+    ) -> None:
+        record = model.model_validate({"_id": "x", "timestamp": value})
+        assert record.timestamp is None
+
+    @pytest.mark.parametrize("model", _TIMESTAMPED)
+    def test_offset_datetime_string_keeps_its_offset(self, model: type[TimestampMixin]) -> None:
+        record = model.model_validate({"timestamp": "2024-01-01T02:00:00+02:00"})
+        assert record.timestamp == datetime(2024, 1, 1, tzinfo=UTC)
+
+    @pytest.mark.parametrize("model", _TIMESTAMPED)
+    @pytest.mark.parametrize("value", ["2024-01-01T00:00:00", "2024-01-01 00:00:00"])
+    def test_datetime_string_without_an_offset_is_read_as_utc(
+        self, model: type[TimestampMixin], value: str
+    ) -> None:
+        record = model.model_validate({"timestamp": value})
+        assert record.timestamp == datetime(2024, 1, 1, tzinfo=UTC)
+        assert isinstance(record.timestamp, datetime)
+        assert record.timestamp.tzinfo is not None
+
+    @pytest.mark.parametrize("model", _TIMESTAMPED)
+    def test_naive_datetime_object_is_read_as_utc(self, model: type[TimestampMixin]) -> None:
+        record = model.model_validate({"timestamp": datetime(2024, 1, 1)})
+        assert record.timestamp == datetime(2024, 1, 1, tzinfo=UTC)
+
+    def test_aware_datetime_object_keeps_its_offset(self) -> None:
+        moment = datetime(2024, 1, 1, tzinfo=timezone(timedelta(hours=-5)))
+        assert Alert.model_validate({"timestamp": moment}).timestamp == moment
+
+    def test_numeric_string_epoch_still_parses(self) -> None:
+        assert Alert.model_validate({"timestamp": "1700000000"}).timestamp == datetime(
+            2023, 11, 14, 22, 13, 20, tzinfo=UTC
+        )
+
+    def test_epoch_and_string_rows_are_comparable(self) -> None:
+        epoch_row = Alert.model_validate({"_id": "a", "timestamp": 1704067200})
+        string_row = Alert.model_validate({"_id": "b", "timestamp": "2024-01-01 00:00:00"})
+        assert epoch_row.timestamp == string_row.timestamp
 
 
 class TestInfrastructure:
@@ -221,3 +335,49 @@ class TestUserConfidenceIndex:
         )
         assert uci.score == 75.5
         assert uci.severity == "medium"
+
+
+class TestIncidentUpdateResult:
+    """`ok` is the acceptance flag; a reported count can still contradict it."""
+
+    @pytest.mark.parametrize("count", [1, 3])
+    def test_a_positive_count_is_accepted(self, count: int) -> None:
+        result = IncidentUpdateResult.model_validate({"outcomes": [{"ok": 1, "result": count}]})
+        assert result.accepted
+        assert result.accepted_entries == count
+
+    @pytest.mark.parametrize("count", [-1, -42])
+    def test_a_negative_count_is_not_accepted(self, count: int) -> None:
+        result = IncidentUpdateResult.model_validate({"outcomes": [{"ok": 1, "result": count}]})
+        assert not result.accepted
+
+    def test_a_zero_count_is_not_accepted(self) -> None:
+        result = IncidentUpdateResult.model_validate({"outcomes": [{"ok": 1, "result": 0}]})
+        assert not result.accepted
+
+    def test_the_documented_success_body_is_accepted(self) -> None:
+        """incident_update.yaml:8-14 and :69-75 document {ok: 1, result: <message>}."""
+        result = IncidentUpdateResult.model_validate(
+            {"outcomes": [{"ok": 1, "result": "Update Successful"}]}
+        )
+        assert result.accepted
+        assert result.accepted_entries == 0
+
+    def test_an_ok_flag_without_a_result_is_accepted(self) -> None:
+        """incident_update.yaml:8-14 makes `result` optional; `ok` carries the outcome."""
+        result = IncidentUpdateResult.model_validate({"outcomes": [{"ok": 1}]})
+        assert result.accepted
+        assert result.accepted_entries == 0
+
+    def test_a_failed_ok_flag_is_not_accepted(self) -> None:
+        """incident_update.yaml:15-21 gives the failure item the same {ok, result} shape."""
+        result = IncidentUpdateResult.model_validate(
+            {"outcomes": [{"ok": 1, "result": 2}, {"ok": 0, "result": "Update Failed"}]}
+        )
+        assert not result.accepted
+
+    def test_one_negative_entry_withdraws_the_whole_claim(self) -> None:
+        result = IncidentUpdateResult.model_validate(
+            {"outcomes": [{"ok": 1, "result": 2}, {"ok": 1, "result": -1}]}
+        )
+        assert not result.accepted

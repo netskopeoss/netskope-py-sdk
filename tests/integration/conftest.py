@@ -8,8 +8,10 @@ Safety checklist — every integration test MUST follow these rules:
 3. Never mutate or delete objects lacking the ``sdk-inttest-`` prefix.
 4. Every create has a finally-guaranteed delete that tolerates 404.
 5. The leftover sweeper never raises — it must not fail the session.
-6. 402/403/404/501 or licensing errors cause a skip, not a failure (use
-   :func:`skip_if_unavailable`).
+6. 402/403/501 or licensing errors cause a skip, not a failure (use
+   :func:`skip_if_unavailable`).  A 404 fails instead, because a mistyped path
+   is indistinguishable from a missing feature; pass ``unrouted_ok=True`` only
+   where the route is documented as absent.
 7. No deploy/activation endpoints, and no tenant-wide settings mutations.
 8. Tests run sequentially with small page sizes.
 """
@@ -37,19 +39,42 @@ def unique_name(kind: str) -> str:
     return f"sdk-inttest-{kind}-{uuid4().hex[:8]}"
 
 
-def skip_if_unavailable(exc: Exception, what: str) -> None:
+def skip_if_unavailable(exc: Exception, what: str, *, unrouted_ok: bool = False) -> None:
     """Skip the current test when *exc* means the feature is unavailable.
 
-    402/403/404/501 responses and licensing errors indicate the tenant does
-    not support the API under test — that is a skip, not a failure.  Any
-    other exception is re-raised.
+    402, 403 and 501 responses and licensing errors say the tenant does not
+    support the API under test.  That is a skip, not a failure.
+
+    **A 404 fails unless the caller says otherwise.**  A path the SDK spells
+    wrongly answers 404 on every tenant, exactly as a route the tenant does not
+    have does, so skipping on 404 left this suite unable to tell a typo from an
+    entitlement gap — and silence is the wrong default for the one of those two
+    that is a bug.  That is how the pre-1.2.0 DSPM paths survived: the unit
+    tests mocked the SDK's own URL, so only a live run could have caught them,
+    and the live run skipped.
+
+    Pass ``unrouted_ok=True`` where a 404 is the documented answer, such as
+    ``GET /api/v2/steering/devices``, which no spec file declares.  Leave it off
+    everywhere else so a wrong path fails where someone will read it.
+
+    Any other exception is re-raised.
     """
     status = getattr(exc, "status_code", None) if isinstance(exc, APIError) else None
     message = str(exc).lower()
     # "invalid quota" is a 401 the gateway returns when a service is not
     # licensed/entitled for the tenant — a skip, not an auth failure.
     unavailable_message = "licens" in message or "quota" in message
-    if status in (402, 403, 404, 501) or unavailable_message:
+    if status == 404 and not unavailable_message:
+        if not unrouted_ok:
+            path = getattr(exc, "request_path", None) or "the requested path"
+            raise AssertionError(
+                f"{what}: the gateway answered 404 for {path}. Either the SDK asked for "
+                f"a path the API does not declare, or this tenant genuinely lacks the "
+                f"route. Check the path against the gateway contract; if it is right and "
+                f"the tenant simply lacks it, pass unrouted_ok=True at this call site."
+            ) from exc
+        pytest.skip(f"{what} is unrouted on this tenant: {exc}")
+    if status in (402, 403, 501) or unavailable_message:
         pytest.skip(f"{what} unavailable on this tenant: {exc}")
     raise exc
 

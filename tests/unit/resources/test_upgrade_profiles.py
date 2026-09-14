@@ -2,13 +2,20 @@
 
 from __future__ import annotations
 
+import inspect
+
 import httpx
 import pytest
 import respx
 
 from netskope import AsyncNetskopeClient, NetskopeClient
 from netskope.exceptions import ValidationError
-from netskope.models.infrastructure import PublisherUpgradeProfile
+from netskope.models.infrastructure import (
+    PUBLISHER_UPGRADE_TIMEZONES,
+    PublisherUpgradeProfile,
+    UpgradeProfileAssignment,
+)
+from netskope.models.publishers import PublisherActionResult
 from tests.unit.resources.conftest import sent_json
 
 _URL = "https://t.goskope.com/api/v2/infrastructure/publisherupgradeprofiles"
@@ -239,3 +246,141 @@ class TestAsyncUpgradeProfilesResource:
                 "id": ["1"],
             }
         }
+
+
+@pytest.mark.parametrize("asynchronous", [False, True])
+@respx.mock
+async def test_typed_assign_reads_the_declared_envelope(
+    client: NetskopeClient,
+    aclient: AsyncNetskopeClient,
+    asynchronous: bool,
+) -> None:
+    """``publisher_upgrade_profile_bulk_response`` is ``{data.publishers, status, total}``.
+
+    Spec: npa_upgrade_profiles.yaml:186-205, whose ``data.publishers`` items are
+    ``upgrade_publisher_response`` (:11-147).  Descending into ``data`` before
+    validating put the publisher records out of reach of the declared type.
+    """
+    body = {
+        "data": {"publishers": [{"id": 10, "name": "pub10"}, {"id": 20, "name": "pub20"}]},
+        "status": "success",
+        "total": 2,
+    }
+    route = respx.put(_BULK_URL).mock(return_value=httpx.Response(200, json=body))
+    profiles = (aclient if asynchronous else client).npa.upgrade_profiles.with_response
+    response = profiles.assign(5, [10])
+    if inspect.isawaitable(response):
+        response = await response
+    assignment = response.parse()
+
+    assert (assignment.status, assignment.total) == ("success", 2)
+    assert [pub.publisher_id for pub in assignment.publishers] == [10, 20]
+    assert [pub.publisher_name for pub in assignment.publishers] == ["pub10", "pub20"]
+    assert response.json() == body
+    assert route.call_count == 1
+
+
+@pytest.mark.parametrize("asynchronous", [False, True])
+@respx.mock
+async def test_typed_assign_accepts_a_status_only_envelope(
+    client: NetskopeClient,
+    aclient: AsyncNetskopeClient,
+    asynchronous: bool,
+) -> None:
+    """Every property of the envelope is optional, so a bare status still parses."""
+    route = respx.put(_BULK_URL).mock(return_value=httpx.Response(200, json={"status": "success"}))
+    profiles = (aclient if asynchronous else client).npa.upgrade_profiles.with_response
+    response = profiles.assign(5, [10])
+    if inspect.isawaitable(response):
+        response = await response
+    assignment = response.parse()
+
+    assert assignment.status == "success"
+    assert assignment.publishers == []
+    assert assignment.total is None
+    assert route.call_count == 1
+
+
+@pytest.mark.parametrize("typed", [False, True])
+@pytest.mark.parametrize("asynchronous", [False, True])
+@pytest.mark.parametrize(
+    "profile_id,publisher_ids",
+    [(5, []), (5, ["../bulk"]), ("../bulk", [10])],
+    ids=["no-publishers", "unsafe-publisher", "unsafe-profile"],
+)
+@respx.mock
+async def test_assign_rejects_empty_or_unsafe_identifiers(
+    client: NetskopeClient,
+    aclient: AsyncNetskopeClient,
+    asynchronous: bool,
+    typed: bool,
+    profile_id,
+    publisher_ids,
+) -> None:
+    sdk = aclient if asynchronous else client
+    profiles = sdk.npa.upgrade_profiles
+    resource = profiles.with_response if typed else profiles
+    with pytest.raises(ValidationError):
+        result = resource.assign(profile_id, publisher_ids)
+        if inspect.isawaitable(result):
+            await result
+    assert len(respx.calls) == 0
+
+
+# --- Gateway contract conformance -------------------------------------------------------------
+#
+# Folded in from the spec-conformance reviews: each test cites the
+# production/endpoints file and line whose shape it pins.
+
+
+def test_upgrade_profile_assignment_declares_no_invented_fields() -> None:
+    """``publisher_upgrade_profile_bulk_response`` has no ``message``/``updated``.
+
+    Spec: infrastructure/npa_upgrade_profiles.yaml:186-205 declares exactly
+    ``data.publishers``, ``status`` and ``total``.
+    """
+    assert set(UpgradeProfileAssignment.model_fields) == {"status", "total", "publishers"}
+    assert set(PublisherActionResult.model_fields) == {"status", "publishers"}
+
+
+def test_upgrade_profile_create_response_supplies_external_id() -> None:
+    """publisher_upgrade_profile_response.data carries the external id under ``id``.
+
+    Spec: npa_upgrade_profiles.yaml:674-678; the schema has no ``external_id``
+    at all, while the get-by-id response (:206-272) and list item (:279-350)
+    carry both.  ``create()`` used to hand back ``external_id=None``, which the
+    module example passes straight to ``assign()``.
+    """
+    created = PublisherUpgradeProfile.model_validate(
+        {
+            "id": 10,
+            "name": "My Upgrade Profile",
+            "docker_tag": "8690",
+            "frequency": "0 0 1 * TUE",
+            "timezone": "US/Eastern",
+            "release_type": "Latest",
+            "enabled": True,
+        }
+    )
+    assert created.external_id == 10
+
+    listed = PublisherUpgradeProfile.model_validate({"id": 3, "external_id": 10})
+    assert (listed.id, listed.external_id) == (3, 10)
+
+
+@respx.mock
+def test_upgrade_profile_create_rejects_an_unlisted_timezone(
+    example_client: NetskopeClient,
+) -> None:
+    """timezone is a closed 69-value enum (npa_upgrade_profiles.yaml:428-497, :573-650)."""
+    assert len(PUBLISHER_UPGRADE_TIMEZONES) == 69
+    assert "US/Eastern" in PUBLISHER_UPGRADE_TIMEZONES
+    with pytest.raises(ValidationError, match="Invalid timezone"):
+        example_client.npa.upgrade_profiles.create(
+            "My Upgrade Profile",
+            docker_tag="8690",
+            frequency="0 0 1 * TUE",
+            timezone="Mars/Olympus_Mons",
+            release_type="Latest",
+        )
+    assert len(respx.calls) == 0

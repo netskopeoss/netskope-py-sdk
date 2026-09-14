@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from typing import Any
+
 import httpx
 import pytest
 import respx
@@ -9,6 +11,8 @@ import respx
 from netskope import AsyncNetskopeClient, NetskopeClient
 from netskope.exceptions import NotFoundError, ValidationError
 from netskope.models.alerts import Alert
+from netskope.models.events import Event
+from netskope.models.incidents import Incident
 
 _ALERTS_URL = "https://t.goskope.com/api/v2/events/datasearch/alert"
 
@@ -73,8 +77,8 @@ class TestAlertsResource:
         assert len(respx.calls) == 0
 
     @respx.mock
-    def test_list_sends_groupbys_and_combined_sortby(self, client: NetskopeClient) -> None:
-        """The datasearch API expects ``groupbys`` and ``sortby="field DESC|ASC"``."""
+    def test_list_sends_groupbys_and_combined_orderbys(self, client: NetskopeClient) -> None:
+        """search_alert.yaml:351-368 names these groupbys and orderbys; no sortby exists."""
         route = respx.get(_ALERTS_URL).mock(
             return_value=httpx.Response(200, json={"result": [], "status": {"total": 0}})
         )
@@ -82,8 +86,9 @@ class TestAlertsResource:
         params = route.calls.last.request.url.params
         assert params["groupbys"] == "alert_type"
         assert "groupby" not in params
-        assert params["sortby"] == "timestamp DESC"
-        assert "sortorder" not in params
+        assert params["orderbys"] == "timestamp DESC"
+        assert "sortby" not in params and "sortorder" not in params
+        assert params["timeout"] == "180"
 
     @respx.mock
     def test_list_groupbys_joins_list_and_ascending_sort(self, client: NetskopeClient) -> None:
@@ -97,7 +102,8 @@ class TestAlertsResource:
         )
         params = route.calls.last.request.url.params
         assert params["groupbys"] == "alert_type,user"
-        assert params["sortby"] == "timestamp ASC"
+        assert params["orderbys"] == "timestamp ASC"
+        assert "sortby" not in params
 
 
 class TestAsyncAlertsResource:
@@ -110,9 +116,10 @@ class TestAsyncAlertsResource:
         assert len(respx.calls) == 0
 
     @respx.mock
-    async def test_list_sends_groupbys_and_combined_sortby(
+    async def test_list_sends_groupbys_and_combined_orderbys(
         self, aclient: AsyncNetskopeClient
     ) -> None:
+        """search_alert.yaml:363-368 defines orderbys for the async path too."""
         route = respx.get(_ALERTS_URL).mock(
             return_value=httpx.Response(200, json={"result": [], "status": {"total": 0}})
         )
@@ -120,4 +127,43 @@ class TestAsyncAlertsResource:
         _ = [alert async for alert in paginated]
         params = route.calls.last.request.url.params
         assert params["groupbys"] == "alert_type"
-        assert params["sortby"] == "timestamp DESC"
+        assert params["orderbys"] == "timestamp DESC"
+        assert "sortby" not in params
+
+
+# --- Gateway contract conformance -------------------------------------------------------------
+#
+# Folded in from the spec-conformance reviews: each test cites the
+# production/endpoints file and line whose shape it pins.
+
+_contract_mock = respx.mock(assert_all_mocked=True, assert_all_called=False)
+
+
+@pytest.mark.parametrize("model", [Alert, Event, Incident])
+def test_the_epdlp_spelling_still_wins(model: type) -> None:
+    """search_epdlp.yaml:88 is the one schema that spells it policy_name."""
+    assert model.model_validate({"policy_name": "epdlp rule"}).policy_name == "epdlp rule"
+
+
+@pytest.mark.parametrize("timeout", [0, -1, True, "180"])
+@_contract_mock
+def test_an_unusable_timeout_still_fails_before_http(
+    contract_client: NetskopeClient, timeout: object
+) -> None:
+    with pytest.raises(ValidationError):
+        contract_client.alerts.list_page(timeout=timeout)
+    assert not _contract_mock.calls
+
+
+@pytest.mark.parametrize("timeout", [0, -1, True, "180"])
+@respx.mock
+def test_an_unusable_timeout_fails_before_http(client: NetskopeClient, timeout: Any) -> None:
+    with pytest.raises(ValidationError):
+        client.alerts.list_page(timeout=timeout)
+    assert not respx.calls
+
+
+def test_a_bare_alert_row_still_decodes_object_categories() -> None:
+    """dataexport.yaml:255-257 leaves the item type open entirely."""
+    alert = Alert.model_validate({"_id": "a1", "other_categories": [{"id": 7}]})
+    assert alert.other_categories == [{"id": 7}]

@@ -20,7 +20,7 @@ import pytest
 
 from netskope import NetskopeClient
 from netskope.exceptions import APIError, NotFoundError
-from netskope.resources.atp import AtpResource
+from netskope.resources.atp.resource import AtpResource
 
 from .conftest import skip_if_unavailable
 

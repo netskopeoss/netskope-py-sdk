@@ -17,14 +17,17 @@ Pins the wire shapes from the ms-ips gateway OpenAPI spec:
 
 from __future__ import annotations
 
+import json
+from typing import Any, ClassVar
+
 import httpx
 import pytest
 import respx
 
 from netskope import AsyncNetskopeClient, NetskopeClient
 from netskope.exceptions import ValidationError
-from netskope.resources.ips import AsyncIpsResource, IpsResource
-from tests.unit.resources.conftest import sent_json
+from netskope.resources.ips.resource import AsyncIpsResource, IpsResource
+from tests.unit.resources.conftest import contract_router, sent_json
 
 _STATUS_URL = "https://t.goskope.com/api/v2/ips/status"
 _ALLOWLIST_URL = "https://t.goskope.com/api/v2/ips/allowlist"
@@ -643,3 +646,130 @@ class TestAsyncIpsThreatHunting:
         with pytest.raises(ValidationError):
             await _aips(aclient).update_threat_hunting_config()
         assert len(respx.calls) == 0
+
+
+# --- Gateway contract conformance -------------------------------------------------------------
+#
+# Folded in from the spec-conformance reviews: each test cites the
+# production/endpoints file and line whose shape it pins.
+
+
+class TestIpsLimitBounds:
+    _OK: ClassVar[dict[str, Any]] = {"status": "Success", "data": []}
+
+    @pytest.mark.parametrize("limit", [0, 101, 5000])
+    def test_out_of_range_limits_are_rejected(
+        self, contract_client: NetskopeClient, limit: int
+    ) -> None:
+        """``GET /signaturereferencelist`` (ips/ms-ips.yaml:583-592),
+        ``POST /getsignaturelist`` (:721-727) and ``GET /signatureoverrides``
+        (:1177-1186) declare ``limit`` as ``minimum: 1, maximum: 100``."""
+        with contract_router() as mock:
+            route = mock.route(url__regex=r".*").mock(return_value=httpx.Response(200, json={}))
+            for call in (
+                lambda: contract_client.ips.list_signatures(limit=limit),
+                lambda: contract_client.ips.with_response.list_signatures(limit=limit),
+                lambda: contract_client.ips.search_signatures(limit=limit),
+                lambda: contract_client.ips.list_signature_overrides(limit=limit),
+            ):
+                with pytest.raises(ValidationError, match="limit must be an integer between 1"):
+                    call()
+            assert route.call_count == 0
+
+    @pytest.mark.parametrize("limit", [1, 100])
+    def test_boundary_limits_are_sent(self, contract_client: NetskopeClient, limit: int) -> None:
+        with contract_router() as mock:
+            references = mock.get("/api/v2/ips/signaturereferencelist").mock(
+                return_value=httpx.Response(200, json={"status": "Success", "data": []})
+            )
+            search = mock.post("/api/v2/ips/getsignaturelist").mock(
+                return_value=httpx.Response(200, json=self._OK)
+            )
+            contract_client.ips.list_signatures(limit=limit)
+            contract_client.ips.with_response.list_signatures(limit=limit).parse()
+            contract_client.ips.search_signatures(limit=limit)
+        assert references.calls.last.request.url.params["limit"] == str(limit)
+        assert json.loads(search.calls.last.request.content)["limit"] == limit
+
+    async def test_async_paths_apply_the_same_bound(
+        self, contract_aclient: AsyncNetskopeClient
+    ) -> None:
+        with contract_router() as mock:
+            route = mock.route(url__regex=r".*").mock(return_value=httpx.Response(200, json={}))
+            with pytest.raises(ValidationError, match="limit must be an integer between 1"):
+                await contract_aclient.ips.list_signatures(limit=5000)
+            with pytest.raises(ValidationError, match="limit must be an integer between 1"):
+                await contract_aclient.ips.with_response.list_signatures(limit=0)
+            with pytest.raises(ValidationError, match="limit must be an integer between 1"):
+                await contract_aclient.ips.search_signatures(limit=101)
+            assert route.call_count == 0
+
+
+_BASE = "https://t.goskope.com"
+
+
+class TestIpsSorting:
+    @respx.mock
+    def test_signature_overrides_send_sortby_and_sortorder(self, client: NetskopeClient) -> None:
+        """``GET /signatureoverrides`` declares both (ips/ms-ips.yaml:1186-1206)."""
+        route = respx.get(f"{_BASE}/api/v2/ips/signatureoverrides").mock(
+            return_value=httpx.Response(200, json={"status": "Success", "data": {}})
+        )
+
+        IpsResource(client._transport).list_signature_overrides(
+            limit=25, offset=3, sort_by="name", sort_order="desc"
+        )
+
+        assert dict(route.calls.last.request.url.params) == {
+            "limit": "25",
+            "offset": "3",
+            "sortby": "name",
+            "sortorder": "desc",
+        }
+
+    @respx.mock
+    def test_signature_search_body_carries_the_sort_fields(self, client: NetskopeClient) -> None:
+        """The ``POST /getsignaturelist`` body accepts the same two (ms-ips.yaml:725-741)."""
+        route = respx.post(f"{_BASE}/api/v2/ips/getsignaturelist").mock(
+            return_value=httpx.Response(200, json={"status": "Success", "data": {}})
+        )
+
+        IpsResource(client._transport).search_signatures(
+            limit=32, sort_by="sig_id", sort_order="asc", traffic_type=["web"]
+        )
+
+        assert sent_json(route) == {
+            "limit": 32,
+            "sortby": "sig_id",
+            "sortorder": "asc",
+            "filter": {"traffic_type": ["web"]},
+        }
+
+    @respx.mock
+    @pytest.mark.parametrize(
+        ("kwargs", "message"),
+        [
+            ({"sort_by": "severity"}, "sort_by must be one of"),
+            ({"sort_order": "down"}, "sort_order must be one of"),
+        ],
+    )
+    def test_sort_values_outside_the_enum_never_reach_the_wire(
+        self, client: NetskopeClient, kwargs: dict[str, str], message: str
+    ) -> None:
+        route = respx.route(url__regex=r".*").mock(return_value=httpx.Response(200, json={}))
+        ips = IpsResource(client._transport)
+        with pytest.raises(ValidationError, match=message):
+            ips.list_signature_overrides(**kwargs)
+        with pytest.raises(ValidationError, match=message):
+            ips.search_signatures(**kwargs)
+        assert route.call_count == 0
+
+    @respx.mock
+    async def test_signature_overrides_sorting_async(self, aclient: AsyncNetskopeClient) -> None:
+        route = respx.get(f"{_BASE}/api/v2/ips/signatureoverrides").mock(
+            return_value=httpx.Response(200, json={"status": "Success", "data": {}})
+        )
+
+        await AsyncIpsResource(aclient._transport).list_signature_overrides(sort_by="sig_id")
+
+        assert dict(route.calls.last.request.url.params) == {"sortby": "sig_id"}
