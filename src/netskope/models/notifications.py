@@ -38,8 +38,13 @@ class NotificationTemplateWrite(AdminRequest):
                 or self.proceed_button_text is not None
                 or self.stop_button_text is not None
             ):
+                # `action_type` defaults to "block", so a caller updating a
+                # useralert template who omits it lands here. Naming the field
+                # is the difference between a fixable error and a baffling one.
                 raise ValueError(
-                    "Block templates require ack_button_text and forbid proceed/stop buttons."
+                    "Block templates require ack_button_text and forbid proceed/stop "
+                    'buttons. action_type defaults to "block"; pass '
+                    'action_type="useralert" if that is the template you mean.'
                 )
         elif (
             self.ack_button_text is not None

@@ -24,6 +24,7 @@ import builtins
 import functools
 from typing import Any
 
+from netskope.core.decoding import decoded
 from netskope.core.ids import extract_item
 from netskope.core.pagination import (
     AsyncScimPaginatedResponse,
@@ -113,7 +114,14 @@ class RbacRolesResource(SyncResource):
         limit: int | None = None,
         offset: int | None = None,
     ) -> Page[RbacRoleSummary]:
-        """Fetch one role page. Its envelope count is metadata, not a total.
+        """Fetch one role page.
+
+        ``GetRolesResponseDto`` documents its ``count`` as the number of roles
+        matching the search criteria, so it fills :attr:`Page.total` and
+        :attr:`Page.has_more` derives from it. Unlike the other decoders it is
+        deliberately not used to reject records, because no live tenant has
+        confirmed whether the service counts the filtered collection or only the
+        page it returned.
 
         Filters and pagination parameters match :meth:`list`. This method
         never fetches an additional page automatically.
@@ -159,7 +167,8 @@ class RbacRolesResource(SyncResource):
         """
         params = _build_roles_params(role_type, scope, search, limit, offset)
         body = self._get(_ROLES_PATH, **params)
-        return _parse_roles_page(body, RbacRole, offset or 0, limit).items
+        with decoded("GET", _ROLES_PATH):
+            return _parse_roles_page(body, RbacRole, offset or 0, limit).items
 
     def get(self, role_id: int | float) -> RbacRole:
         """Get an RBAC role by ID.
@@ -168,8 +177,10 @@ class RbacRolesResource(SyncResource):
             role_id: The numeric role identifier.
         """
         rid = _role_path_id(role_id)
-        body = self._get(f"{_ROLES_PATH}/{rid}")
-        return _parse_role(body, RbacRole)
+        path = f"{_ROLES_PATH}/{rid}"
+        body = self._get(path)
+        with decoded("GET", path):
+            return _parse_role(body, RbacRole)
 
     def create(
         self,
@@ -376,13 +387,16 @@ class AsyncRbacRolesResource(AsyncResource):
         """List RBAC roles.  See :meth:`RbacRolesResource.list`."""
         params = _build_roles_params(role_type, scope, search, limit, offset)
         body = await self._get(_ROLES_PATH, **params)
-        return _parse_roles_page(body, RbacRole, offset or 0, limit).items
+        with decoded("GET", _ROLES_PATH):
+            return _parse_roles_page(body, RbacRole, offset or 0, limit).items
 
     async def get(self, role_id: int | float) -> RbacRole:
         """Get an RBAC role by ID."""
         rid = _role_path_id(role_id)
-        body = await self._get(f"{_ROLES_PATH}/{rid}")
-        return _parse_role(body, RbacRole)
+        path = f"{_ROLES_PATH}/{rid}"
+        body = await self._get(path)
+        with decoded("GET", path):
+            return _parse_role(body, RbacRole)
 
     async def create(
         self,

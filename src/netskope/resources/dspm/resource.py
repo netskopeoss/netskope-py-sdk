@@ -189,9 +189,10 @@ class DspmResource(SyncResource):
                 that does not accept it.
         """
         path = _analytics_path(metric_type)
-        params = _build_list_params(filter_expr, sort_by, sort_order, limit, offset)
-        if params and metric_type != "privilege_risks":
+        supplied = (filter_expr, sort_by, sort_order, limit, offset)
+        if any(value is not None for value in supplied) and metric_type != "privilege_risks":
             raise ValidationError(f"The DSPM {metric_type} report takes no query parameters.")
+        params = _build_list_params(filter_expr, sort_by, sort_order, limit, offset)
         return self._get(path, **params)
 
     def connect_datastore(self, request: dict[str, Any]) -> dict[str, Any]:
@@ -307,9 +308,10 @@ class AsyncDspmResource(AsyncResource):
         See :meth:`DspmResource.analytics`.
         """
         path = _analytics_path(metric_type)
-        params = _build_list_params(filter_expr, sort_by, sort_order, limit, offset)
-        if params and metric_type != "privilege_risks":
+        supplied = (filter_expr, sort_by, sort_order, limit, offset)
+        if any(value is not None for value in supplied) and metric_type != "privilege_risks":
             raise ValidationError(f"The DSPM {metric_type} report takes no query parameters.")
+        params = _build_list_params(filter_expr, sort_by, sort_order, limit, offset)
         return await self._get(path, **params)
 
     async def connect_datastore(self, request: dict[str, Any]) -> dict[str, Any]:

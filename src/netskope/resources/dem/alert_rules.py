@@ -16,6 +16,7 @@ from netskope.resources.dem.paths import (
     _alert_rule_create_body,
     _alert_rule_params,
     _slice_rules,
+    validate_window,
 )
 
 
@@ -55,6 +56,7 @@ class DemAlertRulesResource(SyncResource):
             limit: Rules to keep, applied by the SDK after decoding.
             offset: Rules to skip, applied by the SDK after decoding.
         """
+        validate_window(limit, offset)
         params = _alert_rule_params(category, type, enabled, severity)
         body = self._get(_ALERT_RULES_PATH, **params)
         return cast(dict[str, Any], _slice_rules(body, limit, offset))
@@ -161,6 +163,7 @@ class AsyncDemAlertRulesResource(AsyncResource):
         offset: int | None = None,
     ) -> dict[str, Any]:
         """See :meth:`DemAlertRulesResource.list`."""
+        validate_window(limit, offset)
         params = _alert_rule_params(category, type, enabled, severity)
         body = await self._get(_ALERT_RULES_PATH, **params)
         return cast(dict[str, Any], _slice_rules(body, limit, offset))

@@ -27,6 +27,16 @@ def _parse_item(body: Any) -> UrlList:
     return UrlList.model_validate(_require_record(body))
 
 
+def _deployed(row: Any) -> UrlList:
+    """Validate one deployed record, flattening its nested ``data`` first.
+
+    A URL-list record carries ``urls``/``type`` under ``data``; without the
+    flattening every sibling decoder applies, the declared fields come back
+    empty and the payload is stranded in ``model_extra``.
+    """
+    return UrlList.model_validate(_flatten_url_list(row) if isinstance(row, dict) else row)
+
+
 def _parse_deployment(body: Any) -> PolicyDeployment:
     """Decode the deploy acknowledgment from either shape the API answers with.
 
@@ -36,8 +46,17 @@ def _parse_deployment(body: Any) -> PolicyDeployment:
     its ``status``/``message``.
     """
     if isinstance(body, list):
-        return PolicyDeployment(urllists=[UrlList.model_validate(row) for row in body])
-    return PolicyDeployment.model_validate(body)
+        return PolicyDeployment(urllists=[_deployed(row) for row in body])
+    deployment = PolicyDeployment.model_validate(body)
+    if not deployment.urllists:
+        # A `{data: [...], status}` envelope keeps its status on the model but
+        # leaves the records unread, because `urllists` is the only collection
+        # key the model declares. Read them the way every other decoder here
+        # does rather than stranding them in `model_extra`.
+        rows = extract_response_list(body, "urllists")
+        if rows:
+            deployment = deployment.model_copy(update={"urllists": [_deployed(r) for r in rows]})
+    return deployment
 
 
 def _parse_page(body: Any, limit: int | None, offset: int | None) -> Page[UrlList]:

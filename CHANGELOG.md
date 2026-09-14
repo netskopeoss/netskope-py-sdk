@@ -238,6 +238,30 @@ expansion from 8 to 24 resource namespaces.
 
 ### Fixed
 
+- `rbac.roles.list()`, `rbac.roles.get()` and `steering.get_tunnel()` raise
+  `ResponseValidationError` rather than a bare `ValueError` when a 200 body carries
+  no recognisable record. Those six call sites decoded outside the `ApiResponse`
+  boundary that performs the conversion, so `except NetskopeError` missed them.
+- `dem.alert_rules.list()` and `notifications.list_templates()` refuse a negative
+  `limit` or `offset` instead of slicing from the wrong end of the collection. Both
+  windows are applied to records the client already holds, where `rows[-3:]` is the
+  last three rows and not "page -3".
+- `dspm.analytics()` raises `ValidationError` for an unrecognised `sort_order`
+  instead of a bare `ValueError`, and reports the "takes no query parameters" error
+  for a report that accepts none rather than failing on the parameter first.
+- `ClientStatusEvent` keeps `host_info` and `last_seen_device_event` as fields. A
+  resolving `AliasPath` marks its container consumed, so flattening `hostname`,
+  `os` and `status` was discarding those objects and every sibling key with them.
+- The typed `url_lists.deploy()` result carries each deployed record's `urls` and
+  `type`, which were left nested under `data` and stranded in `model_extra`. A
+  `{data: [...], status}` response populates `urllists` as well.
+- The typed RBI template page accepts `limit=0`, which `list_templates` documents
+  as "unlimited"; it was being read as a page-size cap that rejected any non-empty
+  response.
+- The notifications template write reports that the API takes the complete
+  template on create *and* update, and names `action_type` when its default of
+  `block` is what made the button fields invalid.
+
 - RBAC role paths accept fractional numeric identifiers without truncation; legacy role creation fetches the exact returned role ID instead of converting it to an integer first.
 - Declared numeric response fields retain fractions, including incident identifiers, insertion times, event counts, RBAC identifiers, and notification timeouts. Policy aliases populate their public fields; client-status `ts` remains a raw integer because its unit is unspecified.
 - Sparse SPM history, ATP acknowledgments, NSIQ receipts, ADEM graphs, RBI watermarks, and DNS references no longer fail on fields the response schema makes optional. Legacy paginators retain top-level totals, and path identifiers reject trailing newlines.

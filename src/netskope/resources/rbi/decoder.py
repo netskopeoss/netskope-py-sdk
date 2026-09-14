@@ -45,13 +45,16 @@ def _template(response: httpx.Response, template_id: int | str) -> RbiTemplate:
 
 
 def _page(response: httpx.Response, limit: int | None, offset: int | None) -> Page[RbiTemplate]:
+    # `list_templates` documents `limit=0` as "unlimited" and sends it as such,
+    # so 0 must not reach `build_page`, which reads a limit as a page-size cap
+    # and would reject every non-empty response the caller just asked for.
     return parse_object_page(
         response.json(),
         RbiTemplate,
         records_key="items",
         total_key="total_count",
         offset=offset or 0,
-        limit=limit,
+        limit=limit or None,
     )
 
 

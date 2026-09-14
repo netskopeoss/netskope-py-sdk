@@ -135,6 +135,14 @@ class ClientStatusEvent(Event):
     last_event_timestamp: int | float | None = None
     """The declared ``last_event_timestamp`` verbatim; its unit is unstated."""
 
+    # Declared alongside the flattened leaves below, because an `AliasPath` that
+    # resolves marks its *container* key as consumed: without these two fields
+    # `host_info` and `last_seen_device_event` would reach neither an attribute
+    # nor `model_extra`, taking every sibling key the SDK does not model with
+    # them. `extra="allow"` cannot preserve a key pydantic considers used.
+    host_info: dict[str, Any] | None = None
+    last_seen_device_event: dict[str, Any] | None = None
+
     # Client identity and version fields arrive as numbers on some tenants.
     device_id: str | int | None = None
     hostname: str | int | None = Field(

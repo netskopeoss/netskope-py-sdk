@@ -19,7 +19,7 @@ import pytest
 import respx
 
 from netskope import AsyncNetskopeClient, NetskopeClient
-from netskope.exceptions import ResponseValidationError, ValidationError
+from netskope.exceptions import NetskopeError, ResponseValidationError, ValidationError
 from netskope.models.dspm import DspmFileSensitiveType, DspmResourceType, SortOrder
 from netskope.resources.dspm.resource import AsyncDspmResource, DspmResource
 from tests.unit.resources.conftest import contract_router, sent_json
@@ -326,3 +326,41 @@ class TestDspmLegacyRoutes:
             with pytest.raises(ValidationError, match="No verified public DSPM read contract"):
                 contract_client.dspm.list_resources("columns")
             assert route.call_count == 0
+
+
+class TestAnalyticsParameterValidation:
+    """analytics() refuses a bad parameter as a NetskopeError, before any request.
+
+    ``analytics`` builds its query with ``_build_list_params``, whose
+    ``SortOrder(...)`` lookup raises a bare ``ValueError`` — not a
+    ``NetskopeError``, so the documented ``except NetskopeError`` misses it. The
+    sibling ``list_resources`` validates the same argument through ``_prepare``
+    and raises ``ValidationError``; both surfaces have to agree. The guard on
+    reports that take no parameters must also run before the query is built, or
+    a bad value on such a report reports the wrong problem.
+    """
+
+    @respx.mock
+    def test_an_unknown_sort_order_raises_a_netskope_error(self, client: NetskopeClient) -> None:
+        with pytest.raises(ValidationError) as caught:
+            client.dspm.analytics("privilege_risks", sort_by="name", sort_order="ASC")
+        assert isinstance(caught.value, NetskopeError)
+        assert "sort_order" in str(caught.value)
+        assert len(respx.calls) == 0
+
+    @respx.mock
+    async def test_async_unknown_sort_order_raises_a_netskope_error(
+        self, aclient: AsyncNetskopeClient
+    ) -> None:
+        with pytest.raises(ValidationError):
+            await aclient.dspm.analytics("privilege_risks", sort_order="ASC")
+        assert len(respx.calls) == 0
+
+    @respx.mock
+    def test_a_no_parameter_report_reports_the_parameter_not_the_enum(
+        self, client: NetskopeClient
+    ) -> None:
+        with pytest.raises(ValidationError) as caught:
+            client.dspm.analytics("sensitivity_score_distribution", sort_order="ASC")
+        assert "takes no query parameters" in str(caught.value)
+        assert len(respx.calls) == 0

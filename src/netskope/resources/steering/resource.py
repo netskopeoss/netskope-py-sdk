@@ -25,6 +25,7 @@ from typing import Any
 
 from pydantic import ValidationError as PydanticValidationError
 
+from netskope.core.decoding import decoded
 from netskope.core.ids import extract_item, extract_list, validate_id
 from netskope.core.pagination import AsyncPaginatedResponse, SyncPaginatedResponse
 from netskope.core.resource import AsyncResource, SyncResource
@@ -321,8 +322,10 @@ class SteeringResource(SyncResource):
         (steering/ipsec.yaml:305-317), unlike the create and update responses,
         which key the record under ``data``. ``parse_item`` accepts both.
         """
-        body = self._get(f"{_TUNNELS_PATH}/{validate_id(tunnel_id, 'tunnel_id')}")
-        return parse_item(body, IPSecTunnel)
+        path = f"{_TUNNELS_PATH}/{validate_id(tunnel_id, 'tunnel_id')}"
+        body = self._get(path)
+        with decoded("GET", path):
+            return parse_item(body, IPSecTunnel)
 
     def create_tunnel(
         self,
@@ -506,8 +509,10 @@ class AsyncSteeringResource(AsyncResource):
 
         See :meth:`SteeringResource.get_tunnel` for the envelope difference.
         """
-        body = await self._get(f"{_TUNNELS_PATH}/{validate_id(tunnel_id, 'tunnel_id')}")
-        return parse_item(body, IPSecTunnel)
+        path = f"{_TUNNELS_PATH}/{validate_id(tunnel_id, 'tunnel_id')}"
+        body = await self._get(path)
+        with decoded("GET", path):
+            return parse_item(body, IPSecTunnel)
 
     async def create_tunnel(
         self,

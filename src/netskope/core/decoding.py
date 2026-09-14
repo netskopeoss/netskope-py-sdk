@@ -2,15 +2,37 @@
 
 from __future__ import annotations
 
+from collections.abc import Iterator
+from contextlib import contextmanager
 from typing import Any, TypeVar
 
 import httpx
 from pydantic import BaseModel, TypeAdapter
 
 from netskope.core.pagination import Page, build_page, coerce_total
+from netskope.exceptions import ResponseValidationError
 
 T = TypeVar("T")
 M = TypeVar("M", bound=BaseModel)
+
+
+@contextmanager
+def decoded(request_method: str, request_path: str) -> Iterator[None]:
+    """Restate a decoder's ``ValueError`` as a ``ResponseValidationError``.
+
+    Every typed accessor gets this conversion from :meth:`ApiResponse.parse`.
+    The legacy methods that call a decoder directly on a ``_get`` body have no
+    such boundary, so without this a caller's documented ``except
+    NetskopeError`` misses the failure and sees a bare ``ValueError`` instead.
+    """
+    try:
+        yield
+    except ValueError as exc:
+        raise ResponseValidationError(
+            f"The API response could not be decoded: {exc}",
+            request_method=request_method,
+            request_path=request_path,
+        ) from exc
 
 
 def decode_body(

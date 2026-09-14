@@ -10,7 +10,7 @@ import respx
 from pydantic import ValidationError as PydanticValidationError
 
 from netskope import AsyncNetskopeClient, NetskopeClient
-from netskope.exceptions import ValidationError
+from netskope.exceptions import NetskopeError, ResponseValidationError, ValidationError
 from netskope.models.devices import Device
 from netskope.models.infrastructure import IPSecTunnel, Pop
 from netskope.models.steering import IPSecTunnelCreate, SteeringConfigStatus
@@ -743,3 +743,37 @@ def test_pop_model_reads_the_pop_result_item() -> None:
     assert (pop.name, pop.region, pop.gateway) == ("stl1", "US", "163.116.247.38")
     assert "country" not in Pop.model_fields
     assert "ip_addresses" not in Pop.model_fields
+
+
+class TestGetTunnelDecodeFailures:
+    """An unreadable single-tunnel envelope still raises a NetskopeError.
+
+    ``get_tunnel`` calls ``parse_item`` directly on a ``_get`` body rather than
+    through ``ApiResponse.parse``, which is the only place a decoder's
+    ``ValueError`` becomes a ``ResponseValidationError`` (response.py:107-113).
+    """
+
+    @respx.mock
+    @pytest.mark.parametrize(
+        "body",
+        [
+            pytest.param({"result": []}, id="no-record"),
+            pytest.param({"result": [{"id": 1}, {"id": 2}]}, id="two-records"),
+        ],
+    )
+    def test_an_unreadable_tunnel_envelope_raises_a_netskope_error(
+        self, client: NetskopeClient, body: dict[str, object]
+    ) -> None:
+        respx.get(f"{_TUNNELS_URL}/42").mock(return_value=httpx.Response(200, json=body))
+        with pytest.raises(ResponseValidationError) as caught:
+            client.steering.get_tunnel(42)
+        assert isinstance(caught.value, NetskopeError)
+        assert caught.value.request_method == "GET"
+
+    @respx.mock
+    async def test_async_unreadable_tunnel_envelope_raises_a_netskope_error(
+        self, aclient: AsyncNetskopeClient
+    ) -> None:
+        respx.get(f"{_TUNNELS_URL}/42").mock(return_value=httpx.Response(200, json={"result": []}))
+        with pytest.raises(ResponseValidationError):
+            await aclient.steering.get_tunnel(42)

@@ -901,3 +901,44 @@ class TestDemQueryInputs:
         )
 
         assert dict(route.calls.last.request.url.params) == {"sortby": "user_score"}
+
+
+class TestAlertRuleWindowIsValidated:
+    """A local window is refused, not applied from the wrong end.
+
+    ``findAlertRules`` returns every match, so ``limit``/``offset`` slice the
+    decoded ``rules`` collection instead of travelling as query parameters. A
+    slice cannot fail the way a rejected query value does: ``rules[-3:]`` is the
+    last three rules, not "page -3". The typed accessor already bounds the
+    window through ``_paging``; these pin that the untyped one agrees, and that
+    both refuse before the request rather than after.
+    """
+
+    @respx.mock
+    @pytest.mark.parametrize(
+        "window", [{"offset": -3}, {"limit": -2}], ids=["negative-offset", "negative-limit"]
+    )
+    def test_a_negative_window_is_refused_before_the_request(
+        self, client: NetskopeClient, window: dict[str, int]
+    ) -> None:
+        with pytest.raises(ValidationError):
+            client.dem.alert_rules.list(**window)
+        assert len(respx.calls) == 0
+
+    @respx.mock
+    async def test_async_negative_window_is_refused_before_the_request(
+        self, aclient: AsyncNetskopeClient
+    ) -> None:
+        with pytest.raises(ValidationError):
+            await aclient.dem.alert_rules.list(offset=-3)
+        assert len(respx.calls) == 0
+
+    @respx.mock
+    def test_the_untyped_and_typed_surfaces_refuse_with_the_same_message(
+        self, client: NetskopeClient
+    ) -> None:
+        with pytest.raises(ValidationError) as untyped:
+            client.dem.alert_rules.list(offset=-3)
+        with pytest.raises(ValidationError) as typed:
+            client.dem.alert_rules.with_response.list(offset=-3)
+        assert str(untyped.value) == str(typed.value)

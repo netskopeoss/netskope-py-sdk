@@ -34,6 +34,7 @@ from netskope.resources.notifications.decoder import (
     AsyncNotificationsResponses,
     NotificationsResponses,
 )
+from netskope.resources.shared.admin import page_params
 
 _TEMPLATES_PATH = "/api/v2/notifications/user/templates"
 _DELIVERY_SETTINGS_PATH = "/api/v2/notifications/user/deliverysettings"
@@ -112,7 +113,15 @@ def _build_template_payload(
             f"{error['msg'].removeprefix('Value error, ')}"
             for error in exc.errors()
         )
-        raise ValidationError(f"Invalid notification template: {detail}") from None
+        missing = any(error["type"] == "missing" for error in exc.errors())
+        advice = (
+            " The API takes the complete template on create and on update, so a partial"
+            " update is a read-modify-write: read the template, change the field, and"
+            " resend the whole body."
+            if missing
+            else ""
+        )
+        raise ValidationError(f"Invalid notification template: {detail}.{advice}") from None
     return validated.model_dump(mode="json", by_alias=True, exclude_unset=True)
 
 
@@ -146,6 +155,10 @@ class NotificationsResource(SyncResource):
         Returns:
             A list of :class:`~netskope.models.notifications.NotificationTemplate`.
         """
+        # Called for its validation alone: the window is applied to records the
+        # client already holds, and `templates[-2:]` is the last two templates,
+        # not "page -2", so a bad value has to be refused before it is used.
+        page_params(limit, offset)
         body = self._get(_TEMPLATES_PATH)
         templates = [NotificationTemplate.model_validate(item) for item in extract_list(body)]
         return _slice_templates(templates, limit, offset)
@@ -243,9 +256,12 @@ class NotificationsResource(SyncResource):
     ) -> NotificationTemplate:
         """Update a notification template (PATCH).
 
-        Only the provided fields are sent.  Note the API's update schema
-        marks ``name``, ``title``, and ``message`` as required, so partial
-        updates may be rejected server-side — pass all three to be safe.
+        The API takes the complete template on update, not a patch of changed
+        fields: ``name``, ``title`` and ``message`` are required, and
+        ``action_type`` decides which button fields are required and which are
+        forbidden. A partial update is therefore a read-modify-write — read the
+        template with :meth:`get_template`, change the field, and pass the whole
+        body back, ``action_type`` included.
 
         Args:
             template_id: The template identifier.
@@ -323,6 +339,7 @@ class AsyncNotificationsResource(AsyncResource):
 
         See :meth:`NotificationsResource.list_templates`.
         """
+        page_params(limit, offset)
         body = await self._get(_TEMPLATES_PATH)
         templates = [NotificationTemplate.model_validate(item) for item in extract_list(body)]
         return _slice_templates(templates, limit, offset)

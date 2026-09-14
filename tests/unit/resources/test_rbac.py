@@ -11,7 +11,7 @@ import pytest
 import respx
 
 from netskope import AsyncNetskopeClient, NetskopeClient
-from netskope.exceptions import ValidationError
+from netskope.exceptions import NetskopeError, ResponseValidationError, ValidationError
 from netskope.models.administration import AdminUser
 from netskope.models.rbac import RbacRole
 from netskope.models.scim import ScimUser
@@ -461,3 +461,54 @@ class TestRbacAdmins:
         assert admin.name is None
         assert admin.emails == []
         assert admin.groups == []
+
+
+class TestLegacyDecodeFailuresStayNetskopeErrors:
+    """An unreadable 200 body still raises a NetskopeError on the untyped path.
+
+    ``ApiResponse.parse`` restates a decoder's ``ValueError`` as
+    ``ResponseValidationError`` (response.py:107-113), which is what every typed
+    accessor relies on. ``roles.list()`` and ``roles.get()`` call the decoder
+    directly on a ``_get`` body, so without an equivalent boundary the caller's
+    documented ``except NetskopeError`` misses the failure entirely.
+    """
+
+    @respx.mock
+    @pytest.mark.parametrize(
+        "body",
+        [
+            pytest.param({"count": 0}, id="no-recognised-collection"),
+            pytest.param({"data": [], "result": []}, id="competing-collections"),
+        ],
+    )
+    def test_an_unreadable_roles_envelope_raises_a_netskope_error(
+        self, client: NetskopeClient, body: dict[str, object]
+    ) -> None:
+        respx.get(_ROLES_URL).mock(return_value=httpx.Response(200, json=body))
+        with pytest.raises(ResponseValidationError) as caught:
+            RbacResource(client._transport).roles.list()
+        assert isinstance(caught.value, NetskopeError)
+        assert caught.value.request_method == "GET"
+
+    @respx.mock
+    async def test_async_unreadable_roles_envelope_raises_a_netskope_error(
+        self, aclient: AsyncNetskopeClient
+    ) -> None:
+        respx.get(_ROLES_URL).mock(return_value=httpx.Response(200, json={"count": 0}))
+        with pytest.raises(ResponseValidationError):
+            await AsyncRbacResource(aclient._transport).roles.list()
+
+    @respx.mock
+    def test_an_unreadable_role_body_raises_a_netskope_error(self, client: NetskopeClient) -> None:
+        respx.get(f"{_ROLES_URL}/42").mock(return_value=httpx.Response(200, json={}))
+        with pytest.raises(ResponseValidationError) as caught:
+            RbacResource(client._transport).roles.get(42)
+        assert isinstance(caught.value, NetskopeError)
+
+    @respx.mock
+    async def test_async_unreadable_role_body_raises_a_netskope_error(
+        self, aclient: AsyncNetskopeClient
+    ) -> None:
+        respx.get(f"{_ROLES_URL}/42").mock(return_value=httpx.Response(200, json={}))
+        with pytest.raises(ResponseValidationError):
+            await AsyncRbacResource(aclient._transport).roles.get(42)

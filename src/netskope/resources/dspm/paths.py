@@ -42,7 +42,13 @@ def _build_list_params(
     if sort_by is not None:
         params["sortby"] = sort_by
     if sort_order is not None:
-        params["sortorder"] = SortOrder(sort_order).value
+        try:
+            params["sortorder"] = SortOrder(sort_order).value
+        except ValueError as exc:
+            valid = ", ".join(order.value for order in SortOrder)
+            raise ValidationError(
+                f"Invalid DSPM sort_order {sort_order!r}. Must be one of: {valid}"
+            ) from exc
     if offset is not None:
         params["offset"] = offset
     if limit is not None:

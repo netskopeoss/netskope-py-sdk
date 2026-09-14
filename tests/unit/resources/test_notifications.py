@@ -447,3 +447,91 @@ class TestNotificationTemplateRules:
         """The typed surface already required the trio and the button rules."""
         with pytest.raises(Exception, match="title"):
             NotificationTemplateWrite(name="n", title="T" * 80, message="m", ackButtonText="OK")
+
+
+class TestTemplateUpdateIsAWholeDocument:
+    """The PATCH body is the complete template, and the errors have to say so.
+
+    ``NotificationTemplateWrite`` is documented as "Complete template content
+    required by both POST and PATCH", so a partial update is a read-modify-write
+    the caller performs. These pin that contract and pin the two error messages
+    a caller actually hits, because the previous wording sent them the wrong way:
+    ``action_type`` defaults to ``block``, so omitting it on a useralert update
+    produced a block-button complaint that never named the real cause.
+    """
+
+    @respx.mock
+    def test_a_partial_update_is_refused_before_any_request(self, client: NetskopeClient) -> None:
+        with pytest.raises(ValidationError) as caught:
+            NotificationsResource(client._transport).update_template("7", subtitle="new")
+        assert "name" in str(caught.value)
+        assert "complete" in str(caught.value).lower()
+        assert len(respx.calls) == 0
+
+    @respx.mock
+    def test_useralert_buttons_without_an_action_type_name_the_action_type(
+        self, client: NetskopeClient
+    ) -> None:
+        with pytest.raises(ValidationError) as caught:
+            NotificationsResource(client._transport).update_template(
+                "7",
+                name="n",
+                title="t",
+                message="m",
+                proceed_button_text="Go",
+                stop_button_text="Stop",
+            )
+        assert "action_type" in str(caught.value)
+        assert len(respx.calls) == 0
+
+    @respx.mock
+    def test_a_complete_useralert_body_reaches_the_wire(self, client: NetskopeClient) -> None:
+        route = respx.patch(f"{_TEMPLATES_URL}/7").mock(
+            return_value=httpx.Response(200, json={"id": 7, "name": "n"})
+        )
+        NotificationsResource(client._transport).update_template(
+            "7",
+            name="n",
+            title="t",
+            message="m",
+            action_type="useralert",
+            proceed_button_text="Go",
+            stop_button_text="Stop",
+        )
+        assert json.loads(route.calls.last.request.content)["templateActionType"] == "useralert"
+
+    @respx.mock
+    async def test_async_partial_update_is_refused_before_any_request(
+        self, aclient: AsyncNetskopeClient
+    ) -> None:
+        with pytest.raises(ValidationError):
+            await AsyncNotificationsResource(aclient._transport).update_template("7", subtitle="s")
+        assert len(respx.calls) == 0
+
+
+class TestTemplateWindowIsValidated:
+    """A local window is refused, not applied from the wrong end.
+
+    ``GET /user/templates`` is unpaginated, so ``limit``/``offset`` slice the
+    decoded list. ``templates[-2:]`` is the last two templates, not "page -2",
+    so an out-of-range value has to be refused rather than applied.
+    """
+
+    @respx.mock
+    @pytest.mark.parametrize(
+        "window", [{"offset": -2}, {"limit": -2}], ids=["negative-offset", "negative-limit"]
+    )
+    def test_a_negative_window_is_refused_before_the_request(
+        self, client: NetskopeClient, window: dict[str, int]
+    ) -> None:
+        with pytest.raises(ValidationError):
+            NotificationsResource(client._transport).list_templates(**window)
+        assert len(respx.calls) == 0
+
+    @respx.mock
+    async def test_async_negative_window_is_refused_before_the_request(
+        self, aclient: AsyncNetskopeClient
+    ) -> None:
+        with pytest.raises(ValidationError):
+            await AsyncNotificationsResource(aclient._transport).list_templates(offset=-2)
+        assert len(respx.calls) == 0

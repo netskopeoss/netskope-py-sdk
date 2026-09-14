@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import Any
+from typing import Any, ClassVar
 
 import httpx
 import pytest
@@ -905,3 +905,43 @@ def test_a_page_of_spec_shaped_alert_rows_decodes(client: NetskopeClient) -> Non
     assert alert.severity == 3 and alert.site == 7
     assert alert.other_categories == [{"name": "Cloud Storage"}]
     assert alert.model_extra is not None and "usergroup" in alert.model_extra
+
+
+class TestClientStatusKeepsItsNestedObjects:
+    """Flattening a leaf must not discard the object it came from.
+
+    ``NetskopeModel`` sets ``extra="allow"`` so an unmodelled key stays reachable
+    (models/common.py). But when an ``AliasPath`` resolves, pydantic marks the
+    *container* key as consumed, so ``host_info`` and ``last_seen_device_event``
+    would vanish entirely along with every sibling key the SDK does not model.
+    """
+
+    _ROW: ClassVar[dict[str, Any]] = {
+        "host_info": {
+            "hostname": "laptop-1",
+            "os": "macOS 15",
+            "cpu": "m3",
+            "device_model": "MacBookPro18,3",
+        },
+        "last_seen_device_event": {"status": "ok", "code": 7},
+    }
+
+    def test_the_flattened_leaves_are_still_reachable(self) -> None:
+        event = ClientStatusEvent.model_validate(self._ROW)
+        assert event.hostname == "laptop-1"
+        assert event.os == "macOS 15"
+        assert event.status == "ok"
+
+    def test_the_container_and_its_unmodelled_siblings_survive(self) -> None:
+        event = ClientStatusEvent.model_validate(self._ROW)
+        assert event.host_info == self._ROW["host_info"]
+        assert event.last_seen_device_event == self._ROW["last_seen_device_event"]
+        assert event.host_info is not None
+        assert event.host_info["cpu"] == "m3"
+        assert event.last_seen_device_event is not None
+        assert event.last_seen_device_event["code"] == 7
+
+    def test_flat_rows_still_decode_and_carry_no_container(self) -> None:
+        event = ClientStatusEvent.model_validate({"hostname": "h", "os": "linux", "status": "up"})
+        assert (event.hostname, event.os, event.status) == ("h", "linux", "up")
+        assert event.host_info is None

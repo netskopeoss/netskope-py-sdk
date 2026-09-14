@@ -172,3 +172,42 @@ def test_identity_and_input_validation():
         with pytest.raises(ValidationError):
             client.rbi.with_response.list_templates(limit=-1)
     assert route.call_count == 1
+
+
+_TEMPLATES = "https://test.goskope.com/api/v2/rbi/templates"
+
+
+@respx.mock
+def test_a_zero_limit_asks_for_every_template():
+    """``limit=0`` is the documented way to ask for all of them.
+
+    ``RbiResource.list_templates`` documents ``limit`` as "Maximum number of
+    results (``0`` means unlimited)" and forwards 0 to the server unharmed. The
+    typed accessor sends the same ``?limit=0`` but then hands the 0 to
+    ``build_page`` as a page-size cap, which rejects any non-empty response.
+    Both surfaces have to read the argument the same way.
+    """
+    route = respx.get(_TEMPLATES).respond(200, json={"items": [TEMPLATE], "total_count": 1})
+    with NetskopeClient(tenant="test.goskope.com", api_token="token") as client:
+        page = client.rbi.with_response.list_templates(limit=0).parse()
+    assert route.calls.last.request.url.params["limit"] == "0"
+    assert len(page.items) == 1
+    assert page.limit is None
+
+
+@respx.mock
+async def test_async_zero_limit_asks_for_every_template():
+    respx.get(_TEMPLATES).respond(200, json={"items": [TEMPLATE], "total_count": 1})
+    async with AsyncNetskopeClient(tenant="test.goskope.com", api_token="token") as client:
+        page = (await client.rbi.with_response.list_templates(limit=0)).parse()
+    assert len(page.items) == 1
+
+
+@respx.mock
+def test_a_real_limit_still_caps_the_page():
+    """Only 0 is special: a stated cap the response exceeds is still an error."""
+    respx.get(_TEMPLATES).respond(200, json={"items": [TEMPLATE, TEMPLATE], "total_count": 2})
+    with NetskopeClient(tenant="test.goskope.com", api_token="token") as client:
+        response = client.rbi.with_response.list_templates(limit=1)
+        with pytest.raises(PaginationError):
+            response.parse()

@@ -467,6 +467,20 @@ def _alert_rule_params(
     return params
 
 
+def validate_window(limit: int | None, offset: int | None) -> None:
+    """Reject a local paging window before the request that would feed it.
+
+    A slice cannot fail the way a rejected query parameter does: ``rules[-3:]``
+    is the last three rules, not "page -3". The bounds match the ones the typed
+    accessor applies through ``_paging``, so both surfaces refuse the same value
+    with the same message.
+    """
+    if limit is not None:
+        _bounded("limit", limit, 0, None)
+    if offset is not None:
+        _bounded("offset", offset, 0, None)
+
+
 def _slice_rules(body: Any, limit: int | None, offset: int | None) -> Any:
     """Apply an SDK-side slice to an unpaginated ``{remainingQuota, rules}`` body.
 

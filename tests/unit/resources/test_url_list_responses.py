@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import inspect
-from typing import Any
+from typing import Any, ClassVar
 
 import httpx
 import pytest
@@ -386,3 +386,46 @@ def test_url_list_deploy_posts_to_urllist_deploy(example_client: NetskopeClient)
     assert route.calls.last.request.url.path == "/api/v2/policy/urllist/deploy"
     # The deploy response is an array of Urllist (policy/urllist.yaml:209-217).
     assert [item.id for item in deployed.urllists] == [42]
+
+
+class TestDeployKeepsTheRecordContents:
+    """A deployed record carries its urls and type like any other URL list.
+
+    A URL-list record nests ``urls``/``type`` under ``data``
+    (policy/urllist.yaml), which every other decoder in this area flattens
+    before validating. Without the same flattening here the typed ``deploy()``
+    result hands back records whose declared fields are empty and whose payload
+    is stranded in ``model_extra``.
+    """
+
+    _RECORD: ClassVar[dict[str, Any]] = {
+        "id": 3,
+        "name": "blocklist",
+        "data": {"urls": ["a.com", "b.com"], "type": "exact"},
+    }
+
+    @respx.mock
+    def test_an_array_response_keeps_urls_and_type(self, client: NetskopeClient) -> None:
+        respx.post(f"{URL}/deploy").mock(return_value=httpx.Response(200, json=[self._RECORD]))
+        result = client.url_lists.with_response.deploy().parse()
+        assert len(result.urllists) == 1
+        assert result.urllists[0].urls == ["a.com", "b.com"]
+        assert result.urllists[0].type == "exact"
+
+    @respx.mock
+    def test_a_data_envelope_response_keeps_its_records(self, client: NetskopeClient) -> None:
+        respx.post(f"{URL}/deploy").mock(
+            return_value=httpx.Response(200, json={"data": [self._RECORD], "status": "success"})
+        )
+        result = client.url_lists.with_response.deploy().parse()
+        assert result.status == "success"
+        assert len(result.urllists) == 1
+        assert result.urllists[0].urls == ["a.com", "b.com"]
+
+    @respx.mock
+    async def test_async_array_response_keeps_urls_and_type(
+        self, aclient: AsyncNetskopeClient
+    ) -> None:
+        respx.post(f"{URL}/deploy").mock(return_value=httpx.Response(200, json=[self._RECORD]))
+        result = (await aclient.url_lists.with_response.deploy()).parse()
+        assert result.urllists[0].urls == ["a.com", "b.com"]
