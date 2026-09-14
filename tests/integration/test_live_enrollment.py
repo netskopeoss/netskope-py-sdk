@@ -17,7 +17,7 @@ import pytest
 from netskope import NetskopeClient
 from netskope.exceptions import APIError, NotFoundError
 from netskope.models.enrollment import EnrollmentTokenSet
-from netskope.resources.enrollment import EnrollmentResource
+from netskope.resources.enrollment.resource import EnrollmentResource
 
 from .conftest import skip_if_unavailable
 

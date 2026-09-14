@@ -22,7 +22,7 @@ from netskope import NetskopeClient
 from netskope.exceptions import APIError
 from netskope.models.rbac import RbacRole
 from netskope.models.scim import ScimUser
-from netskope.resources.rbac import RbacResource
+from netskope.resources.rbac.resource import RbacResource
 
 from .conftest import skip_if_unavailable, unique_name
 

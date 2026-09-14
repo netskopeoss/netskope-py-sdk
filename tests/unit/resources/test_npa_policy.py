@@ -13,7 +13,7 @@ import respx
 from netskope import AsyncNetskopeClient, NetskopeClient
 from netskope.exceptions import ValidationError
 from netskope.models.npa_policy import NpaPolicyGroup, NpaPolicyRule
-from netskope.resources.npa import AsyncNpaResource, NpaResource
+from netskope.resources.npa.resource import AsyncNpaResource, NpaResource
 from tests.unit.resources.conftest import sent_json
 
 _BASE = "https://t.goskope.com"

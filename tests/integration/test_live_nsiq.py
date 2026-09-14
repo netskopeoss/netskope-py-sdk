@@ -19,7 +19,7 @@ import pytest
 
 from netskope import NetskopeClient
 from netskope.exceptions import APIError
-from netskope.resources.nsiq import NsiqResource
+from netskope.resources.nsiq.resource import NsiqResource
 
 from .conftest import skip_if_unavailable
 

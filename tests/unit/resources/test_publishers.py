@@ -9,20 +9,20 @@ import pytest
 import respx
 
 from netskope import AsyncNetskopeClient, NetskopeClient
+from netskope.core.pagination import Page
 from netskope.exceptions import (
     NetskopeError,
-    PaginationError,
     ResponseValidationError,
     ValidationError,
 )
 from netskope.models.publishers import (
     Publisher,
     PublisherAlertsConfiguration,
+    PublisherAlertsConfigurationStatus,
     PublisherCreate,
     PublisherRelease,
     PublisherUpdate,
 )
-from netskope.pagination import Page
 from tests.unit.resources.conftest import drain, sent_json
 
 _URL = "https://t.goskope.com/api/v2/infrastructure/publishers"
@@ -86,17 +86,29 @@ class TestPublishersResource:
         assert pubs[0].publisher_name == "Pub1"
 
     @respx.mock
-    def test_list_sends_filter_and_fields(self, client: NetskopeClient) -> None:
+    def test_list_sends_only_the_declared_fields_parameter(self, client: NetskopeClient) -> None:
+        """``getNPAPublishers`` declares only ``fields`` (npa_publishers.yaml:1024-1032)."""
         route = respx.get(_URL).mock(return_value=httpx.Response(200, json=_LIST_BODY))
-        list(
-            client.publishers.list(
-                filter_expr="status eq 'connected'",
-                fields=["publisher_id", "publisher_name"],
-            )
-        )
-        params = route.calls.last.request.url.params
-        assert params["filter"] == "status eq 'connected'"
-        assert params["fields"] == "publisher_id,publisher_name"
+        list(client.publishers.list(fields=["publisher_id", "publisher_name"]))
+        assert route.call_count == 1
+        assert dict(route.calls.last.request.url.params) == {
+            "fields": "publisher_id,publisher_name"
+        }
+
+    @respx.mock
+    def test_list_rejects_the_undeclared_filter_parameter(self, client: NetskopeClient) -> None:
+        with pytest.raises(ValidationError, match="filter_expr is not supported"):
+            list(client.publishers.list(filter_expr="status eq 'connected'"))
+        assert len(respx.calls) == 0
+
+    @respx.mock
+    def test_list_fetches_the_collection_once(self, client: NetskopeClient) -> None:
+        """With no ``offset``/``limit`` declared there is no second page to ask for."""
+        body = {"publishers": [{"publisher_id": n} for n in (1, 2, 3)], "total": 3}
+        route = respx.get(_URL).mock(return_value=httpx.Response(200, json=body))
+        assert [pub.publisher_id for pub in client.publishers.list(page_size=1)] == [1, 2, 3]
+        assert route.call_count == 1
+        assert not route.calls.last.request.url.params
 
     @respx.mock
     def test_list_page_preserves_omitted_pagination(self, client: NetskopeClient) -> None:
@@ -118,30 +130,25 @@ class TestPublishersResource:
         record = {"publisher_id": 7, "status": None, "future": {"name": "blue"}}
         metadata = {
             "data": {"query_id": "q1"},
-            "status": {"total": "5", "count": 1},
+            "status": {"total": "1", "count": 1},
             "warnings": ["partial inventory"],
         }
         body = {**metadata, "data": {"publishers": [record], "query_id": "q1"}}
         route = respx.get(_URL).mock(return_value=httpx.Response(200, json=body))
 
         page = client.publishers.list_page(
-            filter_expr="status eq 'connected'",
             fields=["publisher_id", "status", "future"],
-            offset=2,
+            offset=0,
             limit=1,
         )
 
         assert route.call_count == 1
-        assert dict(route.calls.last.request.url.params) == {
-            "filter": "status eq 'connected'",
-            "fields": "publisher_id,status,future",
-            "offset": "2",
-            "limit": "1",
-        }
-        assert page.offset == 2
+        # Only ``fields`` is declared, so offset/limit never reach the wire.
+        assert dict(route.calls.last.request.url.params) == {"fields": "publisher_id,status,future"}
+        assert page.offset == 0
         assert page.limit == 1
-        assert page.total == 5
-        assert page.has_more is True
+        assert page.total == 1
+        assert page.has_more is False
         assert page.metadata == metadata
         assert page.items[0].model_dump(mode="json", by_alias=True, exclude_unset=True) == record
 
@@ -165,14 +172,15 @@ class TestPublishersResource:
     def test_list_page_uses_only_valid_totals(
         self, client: NetskopeClient, metadata: dict, total: int | None
     ) -> None:
-        body = {"data": {"publishers": []}, **metadata}
+        records = [{"publisher_id": n} for n in range(total or 0)]
+        body = {"data": {"publishers": records}, **metadata}
         route = respx.get(_URL).mock(return_value=httpx.Response(200, json=body))
 
         page = client.publishers.list_page(limit=100)
 
         assert route.call_count == 1
         assert page.total == total
-        assert page.has_more == (None if total is None else total > 0)
+        assert page.has_more is False
         assert page.metadata == metadata
 
     @pytest.mark.parametrize(
@@ -193,7 +201,7 @@ class TestPublishersResource:
         page = client.publishers.list_page()
         assert page.items[0].publisher_id == 7
         assert page.metadata == {}
-        assert page.has_more is None
+        assert page.has_more is False
 
     @pytest.mark.parametrize(
         "body",
@@ -319,15 +327,24 @@ class TestPublishersResource:
         assert sent_json(route) == {"name": "Renamed"}
 
     @respx.mock
-    def test_update_preserves_omission_and_explicit_null(self, client: NetskopeClient) -> None:
+    def test_update_merges_extras_with_the_required_name(self, client: NetskopeClient) -> None:
+        """``publisher_patch_request`` declares ``required: [name]`` (:338-341)."""
         route = respx.patch(f"{_URL}/42").mock(
             return_value=httpx.Response(200, json={"data": {"publisher_id": 42}})
         )
-        client.publishers.update(42, extra_fields={"future": False})
-        assert sent_json(route) == {"future": False}
+        client.publishers.update(42, name="Renamed", extra_fields={"future": False})
+        assert sent_json(route) == {"name": "Renamed", "future": False}
 
-        client.publishers.update(42, name="Original", extra_fields={"name": None})
-        assert sent_json(route) == {"name": None}
+        client.publishers.update(42, extra_fields={"name": "From extras"})
+        assert sent_json(route) == {"name": "From extras"}
+
+    @respx.mock
+    def test_update_without_a_name_sends_no_http(self, client: NetskopeClient) -> None:
+        with pytest.raises(ValidationError, match="requires name"):
+            client.publishers.update(42, extra_fields={"future": False})
+        with pytest.raises(ValidationError, match="requires name"):
+            client.publishers.update(42, name="Original", extra_fields={"name": None})
+        assert len(respx.calls) == 0
 
     @respx.mock
     def test_update_invalid_override_sends_no_http(self, client: NetskopeClient) -> None:
@@ -336,13 +353,14 @@ class TestPublishersResource:
         assert len(respx.calls) == 0
 
     @respx.mock
-    def test_list_page_rejects_more_rows_than_the_stated_total(
+    def test_list_page_drops_a_total_that_contradicts_the_rows(
         self, client: NetskopeClient
     ) -> None:
         body = {"publishers": [{"publisher_id": n} for n in (1, 2, 3)], "total": 1}
         route = respx.get(_URL).mock(return_value=httpx.Response(200, json=body))
-        with pytest.raises(PaginationError, match="stated total"):
-            client.publishers.list_page()
+        page = client.publishers.list_page()
+        assert [publisher.publisher_id for publisher in page.items] == [1, 2, 3]
+        assert page.total is None
         assert route.call_count == 1
 
     @respx.mock
@@ -360,7 +378,7 @@ class TestPublishersResource:
 
     @respx.mock
     def test_update_without_fields_sends_no_http(self, client: NetskopeClient) -> None:
-        with pytest.raises(ValidationError, match="at least one"):
+        with pytest.raises(ValidationError, match="requires name"):
             client.publishers.update(42)
         assert len(respx.calls) == 0
 
@@ -463,15 +481,36 @@ class TestPublishersResource:
         route = respx.put(_ALERTS_CONFIG_URL).mock(
             return_value=httpx.Response(200, json=_ALERTS_CONFIG_BODY)
         )
-        config = client.publishers.update_alerts_configuration(
+        status = client.publishers.update_alerts_configuration(
             admin_users=["admin@example.com"],
             event_types=["UPGRADE_FAILED", "CONNECTION_FAILED"],
+            selected_users=["a@example.com", "b@example.com"],
         )
-        assert config.admin_users == ["admin@example.com"]
+        # ``publishers_alert_put_response`` declares only ``status`` (:630-638).
+        assert isinstance(status, PublisherAlertsConfigurationStatus)
         assert sent_json(route) == {
             "adminUsers": ["admin@example.com"],
             "eventTypes": ["UPGRADE_FAILED", "CONNECTION_FAILED"],
+            "selectedUsers": "a@example.com,b@example.com",
         }
+
+    @pytest.mark.parametrize(
+        "kwargs",
+        [
+            {},
+            {"admin_users": ["a@example.com"]},
+            {"admin_users": ["a@example.com"], "event_types": ["UPGRADE_FAILED"]},
+            {"event_types": ["UPGRADE_FAILED"], "selected_users": "a@example.com"},
+        ],
+    )
+    @respx.mock
+    def test_update_alerts_configuration_requires_all_three_keys(
+        self, client: NetskopeClient, kwargs: dict
+    ) -> None:
+        """All three are ``required`` on the PUT (npa_publishers.yaml:591-594)."""
+        with pytest.raises(ValidationError, match="requires"):
+            client.publishers.update_alerts_configuration(**kwargs)
+        assert len(respx.calls) == 0
 
     @respx.mock
     def test_update_alerts_configuration_invalid_event_type_no_http(
@@ -494,17 +533,32 @@ class TestAsyncPublishersResource:
         assert pubs[0].publisher_name == "Pub1"
 
     @respx.mock
-    async def test_list_sends_filter_and_fields(self, aclient: AsyncNetskopeClient) -> None:
+    async def test_list_sends_only_the_declared_fields_parameter(
+        self, aclient: AsyncNetskopeClient
+    ) -> None:
         route = respx.get(_URL).mock(return_value=httpx.Response(200, json=_LIST_BODY))
-        await drain(
-            aclient.publishers.list(
-                filter_expr="status eq 'connected'",
-                fields=["publisher_id", "publisher_name"],
-            )
-        )
-        params = route.calls.last.request.url.params
-        assert params["filter"] == "status eq 'connected'"
-        assert params["fields"] == "publisher_id,publisher_name"
+        await drain(aclient.publishers.list(fields=["publisher_id", "publisher_name"]))
+        assert route.call_count == 1
+        assert dict(route.calls.last.request.url.params) == {
+            "fields": "publisher_id,publisher_name"
+        }
+
+    @respx.mock
+    async def test_list_rejects_the_undeclared_filter_parameter(
+        self, aclient: AsyncNetskopeClient
+    ) -> None:
+        with pytest.raises(ValidationError, match="filter_expr is not supported"):
+            await drain(aclient.publishers.list(filter_expr="status eq 'connected'"))
+        assert len(respx.calls) == 0
+
+    @respx.mock
+    async def test_list_fetches_the_collection_once(self, aclient: AsyncNetskopeClient) -> None:
+        body = {"publishers": [{"publisher_id": n} for n in (1, 2, 3)], "total": 3}
+        route = respx.get(_URL).mock(return_value=httpx.Response(200, json=body))
+        pubs = await drain(aclient.publishers.list(page_size=1))
+        assert [pub.publisher_id for pub in pubs] == [1, 2, 3]
+        assert route.call_count == 1
+        assert not route.calls.last.request.url.params
 
     @respx.mock
     async def test_list_page_preserves_omitted_pagination(
@@ -525,20 +579,22 @@ class TestAsyncPublishersResource:
     async def test_list_page_preserves_parameters(self, aclient: AsyncNetskopeClient) -> None:
         route = respx.get(_URL).mock(return_value=httpx.Response(200, json=_LIST_BODY))
         page = await aclient.publishers.list_page(
-            filter_expr="status eq 'connected'",
             fields=["publisher_id", "status"],
             offset=0,
             limit=1,
         )
         assert route.call_count == 1
-        assert dict(route.calls.last.request.url.params) == {
-            "filter": "status eq 'connected'",
-            "fields": "publisher_id,status",
-            "offset": "0",
-            "limit": "1",
-        }
+        assert dict(route.calls.last.request.url.params) == {"fields": "publisher_id,status"}
         assert page.limit == 1
         assert page.items[0].publisher_id == 1
+
+    @respx.mock
+    async def test_list_page_rejects_the_undeclared_filter_parameter(
+        self, aclient: AsyncNetskopeClient
+    ) -> None:
+        with pytest.raises(ValidationError, match="filter_expr is not supported"):
+            await aclient.publishers.list_page(filter_expr="status eq 'connected'")
+        assert len(respx.calls) == 0
 
     @respx.mock
     async def test_lazy_list_uses_same_page_metadata(self, aclient: AsyncNetskopeClient) -> None:
@@ -666,7 +722,7 @@ class TestAsyncPublishersResource:
 
     @respx.mock
     async def test_update_without_fields_sends_no_http(self, aclient: AsyncNetskopeClient) -> None:
-        with pytest.raises(ValidationError, match="at least one"):
+        with pytest.raises(ValidationError, match="requires name"):
             await aclient.publishers.update(42)
         assert len(respx.calls) == 0
 
@@ -680,13 +736,14 @@ class TestAsyncPublishersResource:
         assert len(respx.calls) == 0
 
     @respx.mock
-    async def test_list_page_rejects_more_rows_than_the_stated_total(
+    async def test_list_page_drops_a_total_that_contradicts_the_rows(
         self, aclient: AsyncNetskopeClient
     ) -> None:
         body = {"publishers": [{"publisher_id": n} for n in (1, 2, 3)], "total": 1}
         route = respx.get(_URL).mock(return_value=httpx.Response(200, json=body))
-        with pytest.raises(PaginationError, match="stated total"):
-            await aclient.publishers.list_page()
+        page = await aclient.publishers.list_page()
+        assert [publisher.publisher_id for publisher in page.items] == [1, 2, 3]
+        assert page.total is None
         assert route.call_count == 1
 
     @respx.mock
@@ -705,14 +762,27 @@ class TestAsyncPublishersResource:
         route = respx.put(_ALERTS_CONFIG_URL).mock(
             return_value=httpx.Response(200, json=_ALERTS_CONFIG_BODY)
         )
-        await aclient.publishers.update_alerts_configuration(
+        status = await aclient.publishers.update_alerts_configuration(
             admin_users=["admin@example.com"],
             event_types=["UPGRADE_FAILED"],
+            selected_users="a@example.com",
         )
+        assert isinstance(status, PublisherAlertsConfigurationStatus)
         assert sent_json(route) == {
             "adminUsers": ["admin@example.com"],
             "eventTypes": ["UPGRADE_FAILED"],
+            "selectedUsers": "a@example.com",
         }
+
+    @respx.mock
+    async def test_update_alerts_configuration_requires_all_three_keys(
+        self, aclient: AsyncNetskopeClient
+    ) -> None:
+        with pytest.raises(ValidationError, match="requires"):
+            await aclient.publishers.update_alerts_configuration(
+                admin_users=["a@example.com"], event_types=["UPGRADE_FAILED"]
+            )
+        assert len(respx.calls) == 0
 
     @respx.mock
     async def test_update_alerts_configuration_invalid_event_type_no_http(
@@ -731,6 +801,11 @@ class TestPublisherRequests:
         with pytest.raises(PydanticValidationError):
             model.model_validate({"name": "Publisher", "misspelled_setting": True})
 
-    def test_update_tracks_omitted_fields(self) -> None:
-        assert PublisherUpdate().model_dump(exclude_unset=True) == {}
-        assert PublisherUpdate(name=None).model_dump(exclude_unset=True) == {"name": None}
+    def test_update_requires_a_name(self) -> None:
+        """``publisher_patch_request.required`` is ``[name]`` (npa_publishers.yaml:338-341)."""
+        from pydantic import ValidationError as PydanticValidationError
+
+        assert PublisherUpdate(name="Pub").model_dump(exclude_unset=True) == {"name": "Pub"}
+        for invalid in ({}, {"name": None}):
+            with pytest.raises(PydanticValidationError):
+                PublisherUpdate.model_validate(invalid)

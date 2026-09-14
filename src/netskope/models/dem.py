@@ -13,7 +13,7 @@ from __future__ import annotations
 
 from datetime import datetime
 from enum import StrEnum
-from typing import Any, Literal, Self
+from typing import Any, Literal, Self, get_args
 
 from pydantic import BaseModel, ConfigDict, Field, RootModel, field_validator, model_validator
 
@@ -87,6 +87,54 @@ DATA_QUERY_SOURCES: frozenset[str] = frozenset(
 TRACEROUTE_DATA_SOURCES: frozenset[str] = frozenset(
     {QueryDataSource.TRACEROUTE_POP, QueryDataSource.TRACEROUTE_BYPASSED}
 )
+
+# ``AlertCategory`` (dem_alert.yaml:79-86), ``AlertType`` (:304-314) and
+# ``AlertSeverity`` (:288-296).  ``GET /alert/rules`` (:1292-1316),
+# ``POST /alert/rules`` (``PostAlertRuleRequest``, :441-462) and
+# ``POST /alerts/getalerts`` (``AlertQuery``, :138-173) all refer to these
+# three enumerations, so one tuple each serves every DEM alert surface.
+AlertCategoryValue = Literal["Network", "Platform", "Private Apps", "User Experience", "Site"]
+AlertTypeValue = Literal[
+    "Tunnel Status",
+    "Tunnel Flapping",
+    "Service Status",
+    "Publisher Resource Consumption",
+    "Experience Score",
+    "Site POP Connectivity",
+    "Site Application Performance",
+    "Site Application Availability",
+]
+AlertSeverityValue = Literal["info", "low", "medium", "high", "critical"]
+ALERT_CATEGORIES: tuple[str, ...] = get_args(AlertCategoryValue)
+ALERT_TYPES: tuple[str, ...] = get_args(AlertTypeValue)
+ALERT_SEVERITIES: tuple[str, ...] = get_args(AlertSeverityValue)
+
+# ``GetEntitiesQueryInput.deviceOs`` (dem-workbench-query.yaml:309-321) and
+# ``.monitoring`` (:334-341).
+EntityDeviceOsValue = Literal[
+    "Windows",
+    "Windows Server",
+    "MacOS",
+    "Android",
+    "IOS",
+    "ChromeOS",
+    "Linux",
+    "Unknown OS",
+]
+EntityMonitoringValue = Literal["all", "synthetic", "proactive"]
+ENTITY_DEVICE_OS: tuple[str, ...] = get_args(EntityDeviceOsValue)
+ENTITY_MONITORING: tuple[str, ...] = get_args(EntityMonitoringValue)
+
+# ``os`` and ``deviceClassification`` on the app-probe bodies
+# (``AppProbeUpdateCreateCommon``, demconfig.yaml:2690-2704).
+ProbeOsValue = Literal["windows", "mac"]
+ProbeDeviceClassificationValue = Literal["managed", "unmanaged", "not configured"]
+PROBE_OPERATING_SYSTEMS: tuple[str, ...] = get_args(ProbeOsValue)
+PROBE_DEVICE_CLASSIFICATIONS: tuple[str, ...] = get_args(ProbeDeviceClassificationValue)
+
+# ``sortorder`` on ``/query/getentities`` (dem-workbench-query.yaml:1237-1246).
+SortOrderValue = Literal["asc", "desc"]
+SORT_ORDERS: tuple[str, ...] = get_args(SortOrderValue)
 
 
 class DemAlert(NetskopeModel):
@@ -234,7 +282,38 @@ class DemApp(NetskopeModel):
     type: str | None = Field(default=None, alias="appType")
 
 
+class DemAlertMetricValue(NetskopeModel):
+    """One ``MetricValue`` sample (dem_alert.yaml:382-391)."""
+
+    timestamp: int | None = None
+    value: int | None = None
+
+
+class DemAlertEntity(NetskopeModel):
+    """One entity impacted by an alert.
+
+    ``GET /alerts/{id}/entities`` returns ``AlertEntityDetail``
+    (dem_alert.yaml:87-105), whose ``entities[]`` items are ``ImpactEntity``
+    (:342-381).  That schema declares no ``required`` list, and it shares no
+    property with the ``/query/getentities`` rows :class:`DemEntity` models.
+    """
+
+    name: str | None = None
+    impact_type: str | None = Field(default=None, alias="impactType")
+    metric_type: str | None = Field(default=None, alias="metricType")
+    metric_values: list[DemAlertMetricValue] = Field(default_factory=list, alias="metricValues")
+    pop: str | None = None
+    publisher: str | None = None
+    resource: str | None = None
+    service: str | None = None
+    site: str | None = None
+    source_ip: str | None = Field(default=None, alias="sourceIP")
+    status: str | None = None
+
+
 class DemEntity(NetskopeModel):
+    """One ``/query/getentities`` row (``User``, dem-workbench-query.yaml)."""
+
     user: str | None = None
     user_id: str | None = None
     exp_score: float | None = None
@@ -350,7 +429,15 @@ class AdemRootCause(NetskopeModel):
 
 
 class AdemGraphNode(NetskopeModel):
-    id: str | int
+    """A node of either network graph.
+
+    ``NetworkNode`` (adem_backend_api.yaml:1277-1314) declares no ``required``
+    list; the ``TracerNode`` variants (:1640-1755) each require ``id`` and
+    ``hopType``.  Nothing is required here so a node from either operation
+    decodes.
+    """
+
+    id: str | int | None = None
     name: str | None = None
     type: str | None = None
     hop_type: str | None = Field(default=None, alias="hopType")
@@ -361,8 +448,15 @@ class AdemGraphNode(NetskopeModel):
 
 
 class AdemGraphEdge(NetskopeModel):
-    source: str | int
-    destination: str | int
+    """An edge of either network graph.
+
+    ``TracerEdge`` (adem_backend_api.yaml:1756-1766) requires ``source`` and
+    ``destination``; ``NetworkEdge`` (:1315-1331), which
+    ``getnetworkpaths`` returns, requires neither, so both are optional here.
+    """
+
+    source: str | int | None = None
+    destination: str | int | None = None
     average_latency: float | None = Field(default=None, alias="avgLatency")
     median_latency: float | None = Field(default=None, alias="medianLatency")
     sessions: int | None = Field(default=None, alias="noOfSessions")
@@ -370,8 +464,16 @@ class AdemGraphEdge(NetskopeModel):
 
 
 class AdemNetworkGraph(NetskopeModel):
-    nodes: list[AdemGraphNode]
-    edges: list[AdemGraphEdge]
+    """A network-path or traceroute graph.
+
+    ``NetworkPathsResponse`` (adem_backend_api.yaml:1332-1345) requires
+    ``nodes`` and ``edges``; ``TracerData`` (:1767-1782), returned by
+    ``gettraceroute``, requires neither, so a sparse graph from either
+    operation decodes into empty collections.
+    """
+
+    nodes: list[AdemGraphNode] = Field(default_factory=list)
+    edges: list[AdemGraphEdge] = Field(default_factory=list)
     complete: bool | None = Field(default=None, alias="isComplete")
     device_to_pop_latency_ms: float | None = Field(default=None, alias="deviceToPopLatencyms")
 
@@ -406,8 +508,8 @@ class DemProbeCreate(BaseModel):
     name: str = Field(min_length=1)
     frequency: int
     entity: dict[str, list[str]]
-    os: list[Literal["windows", "mac"]] = Field(min_length=1)
-    device_classification: list[Literal["managed", "unmanaged", "not configured"]] = Field(
+    os: list[ProbeOsValue] = Field(min_length=1)
+    device_classification: list[ProbeDeviceClassificationValue] = Field(
         min_length=1, alias="deviceClassification"
     )
     status: int
@@ -436,10 +538,10 @@ class DemAlertRuleCreate(BaseModel):
 
     name: str = Field(min_length=1)
     criteria: dict[str, Any]
-    severity: Literal["info", "low", "medium", "high", "critical"] = "medium"
+    severity: AlertSeverityValue = "medium"
     enabled: bool = True
-    category: str | None = None
-    type: str | None = None
+    category: AlertCategoryValue | None = None
+    type: AlertTypeValue | None = None
     criteria_type: str | None = Field(default=None, alias="criteriaType")
     email_receiver: str | None = Field(default=None, alias="emailReceiver")
 
@@ -456,8 +558,12 @@ class DemQueryRequest(BaseModel):
     where: Any | None = None
     group_by: list[str] | None = Field(default=None, alias="groupby")
     order_by: list[Any] | None = Field(default=None, alias="orderby")
-    limit: int | None = Field(default=None, ge=0)
-    offset: int | None = Field(default=None, ge=0)
+    # ``QueryInput.limit``/``.offset`` (dem-workbench-query.yaml:447-461) bound
+    # the pair with ``minimum: 0`` and an **exclusive** maximum of 10000 and
+    # 100000; ``DataSetQueryInput`` (:73-87) and ``StateQueryInput`` (:534-548)
+    # repeat both bounds, so one rule covers getdata, getdataset and getstates.
+    limit: int | None = Field(default=None, ge=0, lt=10000)
+    offset: int | None = Field(default=None, ge=0, lt=100000)
 
     @field_validator("begin", "end")
     @classmethod
@@ -477,13 +583,21 @@ class DemQueryRequest(BaseModel):
 
     @model_validator(mode="after")
     def _ordered_window(self) -> Self:
+        """Reject only a same-mode window whose end precedes its begin.
+
+        ``QueryInput`` types ``begin`` and ``end`` as independent
+        ``anyOf[AbsoluteDate, RelativeDate, null]`` values
+        (dem-workbench-query.yaml:422-433) with no ordering rule, so an equal
+        pair is legal and a mixed absolute/relative pair is left to the
+        gateway; the two modes are not comparable here.
+        """
         if self.begin is None or self.end is None:
             return self
         begin_key, end_key = next(iter(self.begin)), next(iter(self.end))
         if begin_key != end_key:
-            raise ValueError("begin and end must both be absolute or both be relative.")
-        if _parse_rfc3339(self.end[end_key]) <= _parse_rfc3339(self.begin[begin_key]):
-            raise ValueError("end must be greater than begin.")
+            return self
+        if _parse_rfc3339(self.end[end_key]) < _parse_rfc3339(self.begin[begin_key]):
+            raise ValueError("end must not precede begin.")
         return self
 
 

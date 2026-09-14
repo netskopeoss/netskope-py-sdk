@@ -14,18 +14,18 @@ import pytest
 import respx
 from pydantic import SecretStr
 
-from netskope import _pagination
-from netskope._config import NetskopeConfig
-from netskope._transport import AsyncTransport, SyncTransport
-from netskope.exceptions import NetskopeError, PaginationError, ResponseValidationError
-from netskope.models.alerts import Alert
-from netskope.pagination import (
+from netskope.core import pagination as _pagination
+from netskope.core.config import NetskopeConfig
+from netskope.core.pagination import (
     AsyncPaginatedResponse,
     AsyncScimPaginatedResponse,
     Page,
     SyncPaginatedResponse,
     SyncScimPaginatedResponse,
 )
+from netskope.core.transport import AsyncTransport, SyncTransport
+from netskope.exceptions import NetskopeError, PaginationError, ResponseValidationError
+from netskope.models.alerts import Alert
 
 URL = "https://test.goskope.com/api/v2/test"
 SCIM_URL = "https://test.goskope.com/api/v2/scim/Users"

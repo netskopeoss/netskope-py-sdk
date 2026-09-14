@@ -57,13 +57,17 @@ class RecategorizationRequest(AdminRequest):
 
 
 class RecategorizationUrl(NetskopeModel):
-    id: str
+    """``RecatUrlId`` (nsiq/url_recategorization.yaml:93-107); nothing is required."""
+
+    id: str | None = None
     url: str | None = None
     status: str | None = None
 
 
 class RecategorizationReceipt(NetskopeModel):
-    task_id: str
+    """``SubmissionDetail`` (nsiq/url_recategorization.yaml:150-158); nothing is required."""
+
+    task_id: str | None = None
     urls: list[RecategorizationUrl] = Field(default_factory=list)
 
 

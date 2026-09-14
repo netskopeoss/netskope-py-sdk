@@ -163,7 +163,22 @@ CASES = [
         {"limit": 2, "sort_by": "user", "sort_order": "desc"},
         "GET",
         "/api/v2/dem/alerts/a/entities",
-        {"entities": [{"user": "u"}]},
+        {
+            "entities": [
+                {
+                    "name": "SJC1",
+                    "impactType": "pop",
+                    "metricType": "popLatency_p95",
+                    "metricValues": [{"timestamp": 1700000000, "value": 42}],
+                    "pop": "SJC1",
+                    "sourceIP": "203.0.113.9",
+                    "status": "triggered",
+                }
+            ],
+            "limit": 5,
+            "offset": 0,
+            "totalCount": 1,
+        },
         None,
     ),
     (
@@ -394,16 +409,53 @@ async def test_invalid_inputs_fail_before_http(
 
 
 @respx.mock
-def test_native_query_caps_are_preserved(client):
+def test_declared_query_bounds_are_sent_verbatim(client):
+    """``QueryInput``/``DataSetQueryInput`` accept ``limit`` up to 9999 and
+    ``offset`` up to 99999 (dem-workbench-query.yaml:447-461, :73-87), and
+    ``/query/getentities`` accepts ``limit`` up to 100 (:1212-1220).  The
+    largest accepted value goes on the wire unchanged."""
     metrics = respx.post(f"{BASE}/api/v2/dem/query/getdata").respond(200, json={"data": []})
     dataset = respx.post(f"{BASE}/api/v2/dem/query/getdataset").respond(200, json={"data": []})
     entities = respx.post(f"{BASE}/api/v2/dem/query/getentities").respond(200, json={"users": []})
-    client.dem.query.with_response.get_data("ux_score", ["u"], **QUERY, limit=100000).parse()
-    client.dem.query.get_dataset("http_all", ["u"], **QUERY, limit=100000)
-    client.dem.query.with_response.get_entities(**WINDOW, limit=100000).parse()
-    assert json.loads(metrics.calls.last.request.content)["limit"] == 50000
+    client.dem.query.with_response.get_data(
+        "ux_score", ["u"], **QUERY, limit=9999, offset=99999
+    ).parse()
+    client.dem.query.get_dataset("http_all", ["u"], **QUERY, limit=9999)
+    client.dem.query.with_response.get_entities(**WINDOW, limit=100).parse()
+    assert json.loads(metrics.calls.last.request.content)["limit"] == 9999
+    assert json.loads(metrics.calls.last.request.content)["offset"] == 99999
     assert json.loads(dataset.calls.last.request.content)["limit"] == 9999
     assert entities.calls.last.request.url.params["limit"] == "100"
+
+
+@pytest.mark.parametrize(
+    "method,args,kwargs",
+    [
+        ("get_data", ("ux_score", ["u"]), {**QUERY, "limit": 10000}),
+        ("get_data", ("ux_score", ["u"]), {**QUERY, "offset": 100000}),
+        ("get_dataset", ("http_all", ["u"]), {**QUERY, "limit": 10000}),
+        ("get_dataset", ("http_all", ["u"]), {**QUERY, "offset": 100000}),
+        ("get_states", ("client_status", ["u"]), {"limit": 10000}),
+        ("get_states", ("client_status", ["u"]), {"offset": 100000}),
+        ("get_entities", (), {**WINDOW, "limit": 101}),
+        ("get_entities", (), {**WINDOW, "offset": 100000}),
+    ],
+)
+@pytest.mark.parametrize("asynchronous", [False, True])
+@respx.mock
+async def test_out_of_range_query_bounds_are_rejected(
+    client, aclient, asynchronous, method, args, kwargs
+):
+    """Both maxima are exclusive in ``QueryInput``, ``DataSetQueryInput`` and
+    ``StateQueryInput`` (dem-workbench-query.yaml:447-461, :73-87, :534-548),
+    and ``/query/getentities`` caps ``limit`` at 100 (:1212-1220); the SDK
+    reports the value instead of clamping it."""
+    query = (aclient if asynchronous else client).dem.query
+    with pytest.raises(ValidationError):
+        result = getattr(query.with_response, method)(*args, **kwargs)
+        if asynchronous:
+            await result
+    assert not respx.calls
 
 
 @pytest.mark.parametrize(

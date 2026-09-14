@@ -7,9 +7,9 @@ import pytest
 import respx
 
 from netskope import AsyncNetskopeClient, NetskopeClient
-from netskope.exceptions import PaginationError, ResponseValidationError, ValidationError
+from netskope.core.pagination import Page
+from netskope.exceptions import ResponseValidationError, ValidationError
 from netskope.models import Publisher
-from netskope.pagination import Page
 from netskope.response import ApiResponse
 
 URL = "https://t.goskope.com/api/v2/infrastructure/publishers"
@@ -42,24 +42,29 @@ async def test_response_page_preserves_envelope_and_page_metadata(
     client: NetskopeClient, aclient: AsyncNetskopeClient, asynchronous: bool
 ) -> None:
     body = {
-        "data": {"publishers": [{"publisher_id": 42, "future": {"region": "east"}}]},
+        "data": {
+            "publishers": [{"publisher_id": n, "future": {"region": "east"}} for n in range(200)]
+        },
         "total": 200,
         "status": "success",
     }
     route = respx.get(URL).mock(return_value=httpx.Response(200, json=body))
     result = (
-        await aclient.publishers.with_response.list_page(offset=10, limit=20)
+        await aclient.publishers.with_response.list_page(limit=20)
         if asynchronous
-        else client.publishers.with_response.list_page(offset=10, limit=20)
+        else client.publishers.with_response.list_page(limit=20)
     )
     page = result.parse()
     assert isinstance(page, Page)
     assert isinstance(page.items[0], Publisher)
+    assert len(page.items) == 20
     assert page.total == 200
     assert page.has_more is True
     assert page.metadata == {"total": 200, "status": "success"}
     assert result.json() == body
-    assert dict(route.calls.last.request.url.params) == {"offset": "10", "limit": "20"}
+    # ``getNPAPublishers`` declares only ``fields`` (npa_publishers.yaml:1024-1032),
+    # so the window is applied locally and nothing is sent.
+    assert not route.calls.last.request.url.params
     assert route.call_count == 1
 
 
@@ -107,22 +112,28 @@ async def test_response_update_uses_patch_and_preserves_original(
 
 @pytest.mark.parametrize("asynchronous", [False, True])
 @respx.mock
-async def test_response_page_rejects_more_publishers_than_requested(
+async def test_response_page_windows_a_whole_collection_locally(
     client: NetskopeClient, aclient: AsyncNetskopeClient, asynchronous: bool
 ) -> None:
-    body = {"data": {"publishers": [{"publisher_id": 1}, {"publisher_id": 2}]}, "total": 200}
-    route = respx.get(URL).mock(
-        return_value=httpx.Response(200, json=body, headers={"x-request-id": "over-limit"})
-    )
+    """A body larger than the requested window is windowed, not refused.
+
+    ``getNPAPublishers`` declares no ``limit`` (npa_publishers.yaml:1024-1032),
+    so a collection longer than the caller's window is the operation's normal
+    answer rather than a page that overran its request.
+    """
+    records = [{"publisher_id": n} for n in (1, 2, 3, 4)]
+    body = {"data": {"publishers": records}, "total": 4}
+    route = respx.get(URL).mock(return_value=httpx.Response(200, json=body))
     result = (
-        await aclient.publishers.with_response.list_page(offset=10, limit=1)
+        await aclient.publishers.with_response.list_page(offset=1, limit=2)
         if asynchronous
-        else client.publishers.with_response.list_page(offset=10, limit=1)
+        else client.publishers.with_response.list_page(offset=1, limit=2)
     )
-    with pytest.raises(PaginationError, match="exceeded the requested page size") as caught:
-        result.parse()
-    assert (caught.value.offset, caught.value.request_id) == (10, "over-limit")
+    page = result.parse()
+    assert [item.publisher_id for item in page.items] == [2, 3]
+    assert (page.offset, page.limit, page.total, page.has_more) == (1, 2, 4, True)
     assert result.json() == body
+    assert not route.calls.last.request.url.params
     assert route.call_count == 1
 
 

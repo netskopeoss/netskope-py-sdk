@@ -17,7 +17,10 @@ import respx
 from netskope import AsyncNetskopeClient, NetskopeClient
 from netskope.exceptions import ValidationError
 from netskope.models.notifications import NotificationTemplate, TemplateActionType
-from netskope.resources.notifications import AsyncNotificationsResource, NotificationsResource
+from netskope.resources.notifications.resource import (
+    AsyncNotificationsResource,
+    NotificationsResource,
+)
 from tests.unit.resources.conftest import sent_json
 
 _TEMPLATES_URL = "https://t.goskope.com/api/v2/notifications/user/templates"
@@ -171,19 +174,24 @@ class TestNotificationsResource:
             )
 
     @respx.mock
-    def test_update_template_patch_verb_partial_payload(self, client: NetskopeClient) -> None:
-        """Update uses PATCH (per gateway spec; the CLI's PUT is a known quirk)."""
+    def test_update_template_patch_verb_complete_payload(self, client: NetskopeClient) -> None:
+        """PATCH uses NotificationsCreateRequest (user-notifications-templates.yaml:376)."""
         route = respx.patch(f"{_TEMPLATES_URL}/42").mock(
             return_value=httpx.Response(200, json={**_TEMPLATE, "name": "Renamed"})
         )
         template = NotificationsResource(client._transport).update_template(
-            42, name="Renamed", title="Access Denied", message="This site is blocked."
+            42,
+            name="Renamed",
+            title="Access Denied",
+            message="This site is blocked.",
+            ack_button_text="OK",
         )
 
         assert sent_json(route) == {
             "name": "Renamed",
             "title": "Access Denied",
             "message": "This site is blocked.",
+            "ackButtonText": "OK",
         }
         assert template.name == "Renamed"
 
@@ -286,9 +294,20 @@ class TestAsyncNotificationsResource:
             return_value=httpx.Response(200, json={**_TEMPLATE, "subtitle": "New"})
         )
         template = await AsyncNotificationsResource(aclient._transport).update_template(
-            42, subtitle="New"
+            42,
+            name="Block",
+            title="Denied",
+            message="Blocked",
+            ack_button_text="OK",
+            subtitle="New",
         )
-        assert sent_json(route) == {"subtitle": "New"}
+        assert sent_json(route) == {
+            "name": "Block",
+            "title": "Denied",
+            "message": "Blocked",
+            "ackButtonText": "OK",
+            "subtitle": "New",
+        }
         assert template.subtitle == "New"
 
     @respx.mock

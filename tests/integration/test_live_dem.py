@@ -15,7 +15,7 @@ import pytest
 
 from netskope import NetskopeClient
 from netskope.exceptions import APIError
-from netskope.resources.dem import DemResource
+from netskope.resources.dem.namespace import DemResource
 from tests.integration.conftest import skip_if_unavailable, unique_name
 
 pytestmark = pytest.mark.integration

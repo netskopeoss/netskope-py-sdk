@@ -77,14 +77,16 @@ class TestPrivateAppResponsesSync:
 
     @respx.mock
     def test_remove_publishers_deletes_the_association(self, client: NetskopeClient) -> None:
-        route = respx.delete(_PUBLISHERS_URL).mock(return_value=httpx.Response(200, json=_ACK))
+        """The 200 is ``{data: [private_apps_response_item], status}`` (:167-178)."""
+        body = {"data": [_APP, {**_APP, "app_id": 43, "app_name": "other"}], "status": "success"}
+        route = respx.delete(_PUBLISHERS_URL).mock(return_value=httpx.Response(200, json=body))
         result = client.private_apps.with_response.remove_publishers([42], [7, 8]).parse()
         assert sent_json(route) == {
             "private_app_ids": ["42"],
             "publisher_ids": ["7", "8"],
         }
         assert result is not None
-        assert result.message == "2 private apps deleted"
+        assert [app.app_name for app in result] == ["internal-dashboard", "other"]
 
     @respx.mock
     def test_remove_publishers_decodes_an_empty_body_as_none(self, client: NetskopeClient) -> None:
@@ -157,10 +159,13 @@ class TestPrivateAppResponsesAsync:
 
     @respx.mock
     async def test_remove_publishers(self, aclient: AsyncNetskopeClient) -> None:
-        route = respx.delete(_PUBLISHERS_URL).mock(return_value=httpx.Response(200, json=_ACK))
+        body = {"data": [_APP], "status": "success"}
+        route = respx.delete(_PUBLISHERS_URL).mock(return_value=httpx.Response(200, json=body))
         response = await aclient.private_apps.with_response.remove_publishers([42], [7, 8])
         assert sent_json(route) == {"private_app_ids": ["42"], "publisher_ids": ["7", "8"]}
-        assert response.parse().status == "success"
+        parsed = response.parse()
+        assert parsed is not None
+        assert [app.app_id for app in parsed] == [_APP["app_id"]]
 
     @respx.mock
     async def test_remove_publishers_decodes_an_empty_body_as_none(

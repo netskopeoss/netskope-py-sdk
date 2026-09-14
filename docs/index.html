@@ -508,6 +508,7 @@ asyncio.<span class="fn">run</span>(main())</code></div>
     <span class="bi">print</span>(page.total, page.has_more)   <span class="cm"># server total; None when unknowable</span>
     original = response.<span class="fn">json</span>()          <span class="cm"># the API's exact envelope</span>
     <span class="bi">print</span>(response.status_code, response.request_path, response.request_id)</code></div>
+    <p class="text-slate-600 text-sm mb-4">Publisher and URL-list collections are fetched once; page offsets and limits apply locally. Publisher server-side filters are rejected. Local continuation reflects records remaining in the fetched collection, and contradictory totals raise <code>PaginationError</code>.</p>
     <p class="text-slate-600 text-sm mb-8">Plain <code>publishers.list_page()</code> returns the <code>Page</code> directly when the original envelope is not needed. <code>ApiResponse</code> caches <code>parse()</code> and exposes <code>json()</code>, <code>content</code>, <code>status_code</code>, <code>headers</code>, <code>request_method</code>, <code>request_path</code>, and <code>request_id</code> &mdash; the original body stays readable even after a schema validation failure. The same accessor exists for RBAC roles and admins, alerts, SCIM, device tags, URL lists, and the rest of the typed surface, sync and async.</p>
 
     <h3 class="font-semibold text-lg mb-3">Bounded Datasearch Scans</h3>
@@ -1104,19 +1105,11 @@ client.dem.probes.<span class="fn">delete</span>(probe_id)
 <span class="cm"># Network probes (read/update/delete) — client.dem.network_probes</span>
 client.dem.network_probes.<span class="fn">list</span>()
 
-<span class="cm"># Alert rules — client.dem.alert_rules. metric/threshold build the nested</span>
-<span class="cm"># criteria the API expects; there is no probe_id — scope a rule with</span>
-<span class="cm"># criteria.condition.filter. list() sends category/type/enabled/severity;</span>
+<span class="cm"># Alert-rule creation criteria need service-specific validation: the</span>
+<span class="cm"># contract's threshold alternatives overlap. Existing creation helpers</span>
+<span class="cm"># remain available for compatibility. list() sends category/type/enabled/severity;</span>
 <span class="cm"># limit and offset slice the decoded result in the SDK.</span>
-rules = client.dem.alert_rules.<span class="fn">list</span>(category=<span class="s">"User Experience"</span>, enabled=<span class="nb">True</span>)
-rule = client.dem.alert_rules.<span class="fn">create</span>(
-    <span class="s">"low-experience-score"</span>,
-    metric=<span class="s">"userDemScore"</span>,
-    threshold=<span class="nb">2000</span>,
-    severity=<span class="s">"high"</span>,
-    category=<span class="s">"User Experience"</span>,
-    type=<span class="s">"Experience Score"</span>,
-)</code></div>
+rules = client.dem.alert_rules.<span class="fn">list</span>(category=<span class="s">"User Experience"</span>, enabled=<span class="nb">True</span>)</code></div>
 
     <h3 class="font-semibold text-xl mb-3">Alerts &amp; Ad-hoc Query</h3>
     <div class="code-block p-5 mb-8">
@@ -1340,11 +1333,12 @@ client.devices.tags.<span class="fn">delete</span>(tag.id)</code></div>
 <span class="kw">for</span> profile <span class="kw">in</span> client.dns.<span class="fn">list</span>():
     <span class="bi">print</span>(f<span class="s">"[{profile.id}] {profile.name} — log_traffic={profile.log_traffic}"</span>)
 
-<span class="cm"># Writes default to interactive=True, so the change waits in a Pending-*</span>
-<span class="cm"># state; pass interactive=False to deploy on write instead.</span>
+<span class="cm"># Creates and updates default to interactive=True, staging the change.</span>
+<span class="cm"># Pass interactive=False to deploy on create or update instead.</span>
 profile = client.dns.<span class="fn">create</span>(<span class="s">"corp-dns"</span>)
 client.dns.<span class="fn">update</span>(profile.id, description=<span class="s">"Corporate resolver"</span>, log_traffic=<span class="s">"All DNS"</span>)
-client.dns.<span class="fn">delete</span>(profile.id)
+<span class="cm"># Deletion defaults to immediate deployment; True stages it instead.</span>
+client.dns.<span class="fn">delete</span>(profile.id, interactive=<span class="nb">True</span>)
 
 <span class="cm"># Deploy the staged changes. Deploying by id requires a change_note;</span>
 <span class="cm"># deploy(all=True) does not.</span>
@@ -1440,7 +1434,9 @@ ts = client.enrollment.<span class="fn">create_token_set</span>()</code></div>
 
 tpl = client.notifications.<span class="fn">create_template</span>(
     <span class="s">"block-page"</span>, title=<span class="s">"Access Blocked"</span>, message=<span class="s">"This site is not permitted."</span>,
+    ack_button_text=<span class="s">"OK"</span>,
 )</code></div>
+    <p class="text-slate-600 text-sm mt-4">Both template creation and update require <code>name</code>, <code>title</code>, and <code>message</code>. The SDK checks template types, button rules, and field lengths before HTTP.</p>
 </section>
 
 <div class="section-divider max-w-4xl mx-auto"></div>

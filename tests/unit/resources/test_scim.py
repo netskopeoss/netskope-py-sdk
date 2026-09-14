@@ -1,6 +1,6 @@
 """Tests for client.scim (users and groups) with mocked HTTP.
 
-Covers the legacy dict-returning path in ``netskope.resources.scim`` — the
+Covers the legacy dict-returning path in ``netskope.resources.scim.resource`` — the
 outbound method, path, query and body of every public method, the ``Resources``
 envelope decoding, the id validation it applies, and both SCIM paginators.
 """
@@ -14,13 +14,13 @@ import respx
 from netskope import AsyncNetskopeClient, NetskopeClient
 from netskope.exceptions import ValidationError
 from netskope.models.scim import ScimGroup, ScimUser
-from netskope.resources._scim_response import (
+from netskope.resources.scim.decoder import (
     AsyncScimGroupsResponses,
     AsyncScimUsersResponses,
     ScimGroupsResponses,
     ScimUsersResponses,
 )
-from netskope.resources.scim import (
+from netskope.resources.scim.resource import (
     AsyncScimGroupsResource,
     AsyncScimUsersResource,
     ScimGroupsResource,

@@ -10,7 +10,7 @@ without it will return 402/403/404/501 or a licensing error — those are
 skips, not failures (see :func:`skip_if_unavailable`).
 
 ``client.spm`` is not wired into the client, so these tests instantiate the
-:class:`~netskope.resources.spm.SpmResource` directly against the client's
+:class:`~netskope.resources.spm.resource.SpmResource` directly against the client's
 transport.
 """
 
@@ -20,7 +20,7 @@ import pytest
 
 from netskope import NetskopeClient
 from netskope.exceptions import APIError
-from netskope.resources.spm import SpmResource
+from netskope.resources.spm.resource import SpmResource
 
 from .conftest import skip_if_unavailable
 

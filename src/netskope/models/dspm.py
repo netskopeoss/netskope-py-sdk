@@ -137,7 +137,9 @@ class DspmClassificationColumn(DspmRecord):
 
 
 class DspmFileSensitiveType(NetskopeModel):
-    data_tags: list[int] | None = Field(None, alias="dataTags")
+    # dspm_external.yaml:7162 declares `dataTags` as an array with untyped
+    # items; every sibling tag list in the same file is items: {type: string}.
+    data_tags: list[str | int] | None = Field(None, alias="dataTags")
     data_type: DspmRecord | None = Field(None, alias="dataType")
     occurrence_count: int | None = Field(None, alias="occurenceCount")
     sensitivity_level: DspmRecord | None = Field(None, alias="sensitivityLevel")
@@ -186,7 +188,7 @@ class DspmSensitiveDataType(DspmRecord):
     sensitivity_level_id: int | None = None
     is_masked: bool | None = None
     is_enabled: bool | None = None
-    data_tag_ids: list[int] | None = None
+    data_tag_ids: list[str | int] | None = None
     match_conditions: DspmMatchConditions | None = None
 
 

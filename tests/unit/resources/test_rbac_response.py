@@ -9,7 +9,7 @@ import respx
 from pydantic import ValidationError as ModelValidationError
 
 from netskope import AsyncNetskopeClient, NetskopeClient
-from netskope._pagination import AsyncScimPaginatedResponse, SyncScimPaginatedResponse
+from netskope.core.pagination import AsyncScimPaginatedResponse, Page, SyncScimPaginatedResponse
 from netskope.exceptions import (
     NetskopeError,
     PaginationError,
@@ -25,7 +25,6 @@ from netskope.models.rbac import (
     RbacRoleScope,
     RbacRoleSummary,
 )
-from netskope.pagination import Page
 from netskope.response import ApiResponse
 
 ROLES_URL = "https://t.goskope.com/api/v2/rbac/roles"
@@ -386,16 +385,22 @@ async def test_detail_identity_is_checked_without_changing_legacy_get(
 
 
 @pytest.mark.parametrize("asynchronous", [False, True])
-@respx.mock
-async def test_legacy_role_list_retains_its_original_pagination_behavior(
-    client: NetskopeClient, aclient: AsyncNetskopeClient, asynchronous: bool
-) -> None:
-    route = respx.get(ROLES_URL).respond(200, json={"roles": []})
-    if asynchronous:
-        assert await aclient.rbac.roles.list(limit=0, offset=-1) == []
-    else:
-        assert client.rbac.roles.list(limit=0, offset=-1) == []
-    assert dict(route.calls.last.request.url.params) == {"limit": "0", "offset": "-1"}
+async def test_legacy_role_list_enforces_the_declared_limit(asynchronous: bool) -> None:
+    """SPEC2-ID-6: rbac/ms-rbac.yaml:993-999 bounds the limit to 1 through 1000."""
+    with respx.mock(assert_all_mocked=True) as mock:
+        options = {
+            "tenant": "example.goskope.coken",
+            "allow_custom_tenant": True,
+            "api_token": "synthetic-token",
+        }
+        with pytest.raises(ValidationError):
+            if asynchronous:
+                async with AsyncNetskopeClient(**options) as sdk:
+                    await sdk.rbac.roles.list(limit=0)
+            else:
+                with NetskopeClient(**options) as sdk:
+                    sdk.rbac.roles.list(limit=0)
+        assert not mock.calls
 
 
 @pytest.mark.parametrize("asynchronous", [False, True])

@@ -55,6 +55,18 @@ class RbiToggle(NetskopeModel):
     enabled: bool
 
 
+class RbiWatermark(NetskopeModel):
+    """``template_data.watermark`` (rbi/templates.yaml:1654-1661).
+
+    Unlike the other toggles, ``watermark`` sits outside ``TemplateData``'s
+    required list (:1662-1678) and its own ``enabled`` is not required either:
+    the contract notes at :1655 that tenants migrated before the field was
+    introduced do not carry it.
+    """
+
+    enabled: bool | None = None
+
+
 class RbiColoredFrame(RbiToggle):
     color: str
 
@@ -92,7 +104,7 @@ class RbiTemplateSettings(NetskopeModel):
     readonly: RbiToggle | None = None
     private_navigation: RbiToggle | None = None
     third_party_inspection: RbiThirdPartyInspection | None = None
-    watermark: RbiToggle | None = None
+    watermark: RbiWatermark | None = None
 
 
 class RbiTemplate(NetskopeModel):

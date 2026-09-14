@@ -113,4 +113,4 @@ class NotificationDeliverySettings(NetskopeModel):
 
     cloud_apps_delivery_method: str = Field(alias="cloudAppsDeliveryMethod")
     web_traffic_delivery_method: str = Field(alias="webTrafficDeliveryMethod")
-    notification_timeout: int = Field(alias="notificationTimeout")
+    notification_timeout: int | float = Field(alias="notificationTimeout")

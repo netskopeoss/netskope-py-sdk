@@ -21,7 +21,7 @@ import respx
 from netskope import AsyncNetskopeClient, NetskopeClient
 from netskope.exceptions import ResponseValidationError, ValidationError
 from netskope.models.dspm import DspmResourceType, SortOrder
-from netskope.resources.dspm import AsyncDspmResource, DspmResource
+from netskope.resources.dspm.resource import AsyncDspmResource, DspmResource
 from tests.unit.resources.conftest import sent_json
 
 _BASE_URL = "https://t.goskope.com/api/v2/dspm"

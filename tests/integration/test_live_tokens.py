@@ -22,7 +22,7 @@ import pytest
 from netskope import NetskopeClient
 from netskope.exceptions import APIError, NotFoundError
 from netskope.models.tokens import ApiToken
-from netskope.resources.tokens import TokensResource
+from netskope.resources.tokens.resource import TokensResource
 
 from .conftest import skip_if_unavailable, unique_name
 

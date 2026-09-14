@@ -21,7 +21,7 @@ import respx
 
 from netskope import AsyncNetskopeClient, NetskopeClient
 from netskope.exceptions import RateLimitError
-from netskope.resources.nsiq import AsyncNsiqResource, NsiqResource
+from netskope.resources.nsiq.resource import AsyncNsiqResource, NsiqResource
 from tests.unit.resources.conftest import sent_json
 
 _BASE = "https://t.goskope.com/api/v2/nsiq"
@@ -333,9 +333,9 @@ class TestFalsePositives:
 @pytest.mark.parametrize("verb", ["url", "malware", "ips"])
 def test_fp_paths_exist(verb: str) -> None:
     """Guard against typos in the false-positive path constants."""
-    from netskope.resources import nsiq
+    from netskope.resources.nsiq import resource
 
-    path = getattr(nsiq, f"_FP_{verb.upper()}_PATH")
+    path = getattr(resource, f"_FP_{verb.upper()}_PATH")
     assert path == f"/api/v2/nsiq/falsepositives/{verb}"
 
 

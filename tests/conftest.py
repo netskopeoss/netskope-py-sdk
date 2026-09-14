@@ -8,7 +8,7 @@ import pytest
 import respx
 from pydantic import SecretStr
 
-from netskope._config import NetskopeConfig
+from netskope.core.config import NetskopeConfig
 
 
 @pytest.fixture

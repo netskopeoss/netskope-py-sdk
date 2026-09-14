@@ -4,8 +4,8 @@ from __future__ import annotations
 
 import pytest
 
+from netskope.core.response_list import extract_response_list, parse_response_list
 from netskope.models.devices import Device
-from netskope.resources._response_list import extract_response_list, parse_response_list
 
 AMBIGUOUS = "competing collections"
 

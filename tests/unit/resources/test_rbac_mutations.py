@@ -240,7 +240,7 @@ async def test_writes_are_not_retried_even_when_transport_would_retry_reads(
     failure: str,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    monkeypatch.setattr("netskope._retry._sleep_duration", lambda *args: 0)
+    monkeypatch.setattr("netskope.core.retry._sleep_duration", lambda *args: 0)
     method = {"create": "POST", "update": "PATCH", "delete": "DELETE"}[operation]
     route = respx.request(method, URL if operation == "create" else f"{URL}/42")
     if failure == "server":

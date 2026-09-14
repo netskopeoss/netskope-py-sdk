@@ -1,0 +1,1 @@
+"""The publishers resource namespace."""

@@ -1,0 +1,1 @@
+"""The enrollment resource namespace."""

@@ -14,7 +14,7 @@ from netskope import AsyncNetskopeClient, NetskopeClient
 from netskope.exceptions import ValidationError
 from netskope.models.rbac import RbacRole
 from netskope.models.scim import ScimUser
-from netskope.resources.rbac import AsyncRbacResource, RbacResource
+from netskope.resources.rbac.resource import AsyncRbacResource, RbacResource
 from tests.unit.resources.conftest import sent_json
 
 _ROLES_URL = "https://t.goskope.com/api/v2/rbac/roles"

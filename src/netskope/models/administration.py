@@ -42,9 +42,13 @@ _NETSKOPE_USER_URN = "urn:ietf:params:scim:schemas:netskope:2.0:User"
 
 
 class AdminRole(NetskopeModel):
-    """The role an admin holds (``RoleDTO``, ms-platform.yaml:336-345)."""
+    """The role an admin holds (``RoleDTO``, ms-platform.yaml:336-345).
 
-    value: int | None = None
+    ``value`` is declared `type: number` (:338-339), which admits a fraction,
+    so it is not narrowed to int.
+    """
+
+    value: int | float | None = None
     display: str | None = None
 
 

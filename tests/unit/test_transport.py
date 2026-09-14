@@ -11,9 +11,10 @@ import pytest
 import respx
 from pydantic import SecretStr
 
-from netskope._config import NetskopeConfig
-from netskope._retry import async_send_with_retries, send_with_retries
-from netskope._transport import AsyncTransport, SyncTransport, _resolve_verify
+from netskope.core.config import NetskopeConfig
+from netskope.core.resource import AsyncResource, SyncResource
+from netskope.core.retry import async_send_with_retries, send_with_retries
+from netskope.core.transport import AsyncTransport, SyncTransport, _resolve_verify
 from netskope.exceptions import (
     APIError,
     AuthenticationError,
@@ -23,7 +24,6 @@ from netskope.exceptions import (
     TimeoutError,
     ValidationError,
 )
-from netskope.resources._base import AsyncResource, SyncResource
 
 
 @pytest.fixture
@@ -629,7 +629,7 @@ class TestVerify:
             captured.update(kwargs)
             return real_cls(**kwargs)
 
-        monkeypatch.setattr(f"netskope._transport.httpx.{attr}", fake_client)
+        monkeypatch.setattr(f"netskope.core.transport.httpx.{attr}", fake_client)
         return captured
 
     def test_sync_client_receives_verify_false(self, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -674,13 +674,19 @@ class TestScimMediaType:
 
     @respx.mock
     def test_scim_requests_carry_the_scim_media_type(self, config: NetskopeConfig) -> None:
+        """Accept lists both documented media types; Content-Type stays SCIM.
+
+        SCIM success bodies are application/scim+json;charset=utf-8
+        (scim-apis.yaml:1029, :1260, :1711) while every documented SCIM error
+        body is plain application/json and only that (:1195, :1218, :1228).
+        """
         route = respx.patch("https://test.goskope.com/api/v2/scim/Users/u1").mock(
             return_value=httpx.Response(204)
         )
         transport = SyncTransport(config)
         transport.request("PATCH", "/api/v2/scim/Users/u1", json={"Operations": []})
         headers = route.calls.last.request.headers
-        assert headers["Accept"] == "application/scim+json;charset=utf-8"
+        assert headers["Accept"] == "application/scim+json;charset=utf-8, application/json"
         assert headers["Content-Type"] == "application/scim+json;charset=utf-8"
 
     @respx.mock

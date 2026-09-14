@@ -10,6 +10,7 @@ from pydantic import AliasChoices, Field, field_validator, model_validator
 
 from netskope.models._npa_requests import NpaRequest
 from netskope.models.common import NetskopeModel
+from netskope.models.publishers import Publisher, lift_publisher_records
 
 
 class ReleaseType(StrEnum):
@@ -120,7 +121,7 @@ class PublisherUpgradeProfile(NetskopeModel):
     while the get-by-id response (``:206-272``) and list item (``:279-350``)
     carry both.  ``external_id`` reads whichever the response provides, so a
     freshly created profile can be passed straight to
-    :meth:`~netskope.resources.upgrade_profiles.UpgradeProfilesResource.assign`.
+    :meth:`~netskope.resources.upgrade_profiles.resource.UpgradeProfilesResource.assign`.
     """
 
     id: int | None = None
@@ -276,6 +277,22 @@ class UpgradeProfileUpdate(UpgradeProfileCreate):
 
 
 class UpgradeProfileAssignment(NetskopeModel):
+    """The result of assigning publishers to an upgrade profile in bulk.
+
+     ``publisher_upgrade_profile_bulk_response``
+     (``npa_upgrade_profiles.yaml:186-205``) declares exactly ``data.publishers``
+    ; an array of ``upgrade_publisher_response`` (``:11-147``), the record shape
+     :class:`~netskope.models.publishers.Publisher` reads; plus ``status`` and
+     ``total``.  The publisher records are lifted out of ``data`` so the
+     envelope's own fields stay reachable beside them; the operation declares no
+     ``message`` or ``updated``, so neither is a field here.
+    """
+
     status: str | None = None
-    message: str | None = None
-    updated: bool | None = None
+    total: int | None = None
+    publishers: list[Publisher] = Field(default_factory=list)
+
+    @model_validator(mode="before")
+    @classmethod
+    def _lift_publishers(cls, data: Any) -> Any:
+        return lift_publisher_records(data)

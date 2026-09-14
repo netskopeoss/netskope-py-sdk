@@ -135,12 +135,18 @@ async def test_a_different_list_never_reaches_the_put(client, aclient, asynchron
 @respx.mock
 async def test_async_typed_reads_and_writes_use_one_request_each(aclient):
     listing = respx.get(URL).respond(
-        200, json={"data": {"urllists": [FLAT_RECORD]}, "status": {"total": 3}}
+        200,
+        json={
+            "data": {"urllists": [{**FLAT_RECORD, "id": n} for n in (42, 43, 44)]},
+            "status": {"total": 3},
+        },
     )
     page = (await aclient.url_lists.with_response.list_page(limit=1, offset=0)).parse()
     assert [item.urls for item in page.items] == [["bad.com"]]
     assert page.total == 3 and page.has_more is True
-    assert dict(listing.calls[0].request.url.params) == {"limit": "1", "offset": "0"}
+    # ``GET /urllist`` declares only ``pending`` and ``field``
+    # (policy/urllist.yaml:132-156), so the window is applied locally.
+    assert not listing.calls[0].request.url.params
 
     respx.get(f"{URL}/42").respond(200, json=RECORD)
     assert (await aclient.url_lists.with_response.get(42)).parse().type == "regex"

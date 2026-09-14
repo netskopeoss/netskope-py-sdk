@@ -7,7 +7,7 @@ import respx
 
 from netskope import AsyncNetskopeClient, NetskopeClient
 from netskope.models.users import UmGroup, UmUser
-from netskope.resources.users import AsyncUsersResource, UsersResource
+from netskope.resources.users.resource import AsyncUsersResource, UsersResource
 from tests.unit.resources.conftest import sent_json
 
 _BASE = "https://t.goskope.com"

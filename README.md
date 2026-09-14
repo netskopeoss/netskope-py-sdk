@@ -90,6 +90,12 @@ Both `parse()` and `json()` inspect the same completed request. Ordinary
 remain available through Pydantic models; original JSON access is for callers
 that need the API's exact envelope and scalar representations.
 
+Publisher and URL-list collection endpoints return one complete collection.
+Their page methods apply `offset` and `limit` locally, and their iterators fetch
+once. `publishers.list(filter_expr=...)` raises `ValidationError`; filter the
+returned records in Python. A local page retains the server's total and reports
+whether more records remain in the fetched collection.
+
 The same pattern now covers RBAC role summaries/details, SCIM admins, alerts,
 and device-tag reads. Alerts have a distinct `aggregate_page()` result type,
 and bounded scans expose why they stopped:
@@ -353,6 +359,10 @@ for rel in client.publishers.list_releases():
 config = client.publishers.get_alerts_configuration()
 ```
 
+Publisher updates require `name`. Updating alert configuration requires all
+three fields: `admin_users`, `event_types`, and `selected_users`. Its result is
+an acknowledgment; call `get_alerts_configuration()` to read the configuration.
+
 ### Private Apps (ZTNA)
 
 ```python
@@ -484,7 +494,7 @@ for profile in client.dns.list():
     print(profile.name)
 profile = client.dns.get(profile_id="uuid-here")
 
-# Writes default to interactive=True, so the change waits in a Pending-*
+# Creates and updates default to interactive=True, so the change waits in a Pending-*
 # state. Pass interactive=False to deploy on write instead.
 profile = client.dns.create("corp-dns")
 client.dns.update(profile.id, description="Corporate resolver")
@@ -499,6 +509,10 @@ client.dns.inheritance_groups.deploy(all=True)
 categories = client.dns.list_domain_categories()
 record_types = client.dns.list_record_types()
 ```
+
+DNS deletes default to `interactive=False`; pass `interactive=True` to stage
+a deletion. Typed deploy responses parse into a `Page` of profiles or inheritance
+groups, preserving the returned records and total.
 
 ### CCI (Cloud Confidence Index)
 
@@ -614,6 +628,9 @@ template = client.notifications.create_template(
 )
 ```
 
+Both template creation and update require `name`, `title`, and `message`.
+Template type, button rules, and field lengths are validated before the request.
+
 ### IPS (Intrusion Prevention)
 
 ```python
@@ -644,17 +661,10 @@ client.dem.probes.create(
     app_name="Slack",
 )
 
-# Alert rules. metric/threshold build the nested criteria the API expects;
-# there is no probe_id — scope a rule with criteria.condition.filter.
+# Alert-rule reads. Creation criteria need service-specific validation because
+# the contract's threshold alternatives overlap. The SDK retains criteria= and
+# metric/threshold for compatibility, but cannot certify those threshold shapes.
 rules = client.dem.alert_rules.list(category="User Experience", enabled=True)
-client.dem.alert_rules.create(
-    "low-experience-score",
-    metric="userDemScore",
-    threshold=2000,
-    severity="high",
-    category="User Experience",
-    type="Experience Score",
-)
 
 # DEM alerts
 alerts = client.dem.alerts.search(severity=["high"], limit=50)

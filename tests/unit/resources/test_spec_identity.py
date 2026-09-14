@@ -15,7 +15,7 @@ from netskope import AsyncNetskopeClient, NetskopeClient
 from netskope.models.administration import AdminUser
 from netskope.models.devices import SupportedOperatingSystems
 from netskope.models.scim import ScimGroup, ScimGroupPatch, ScimUser, ScimUserPatch
-from netskope.resources._scim_response import MAX_SCIM_PAGE_SIZE
+from netskope.resources.scim.decoder import MAX_SCIM_PAGE_SIZE
 from tests.unit.resources.conftest import sent_json
 
 _USERS_URL = "https://t.goskope.com/api/v2/scim/Users"

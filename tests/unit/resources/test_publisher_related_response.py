@@ -204,10 +204,15 @@ async def test_missing_token_is_reported_without_response_values(
 
 @pytest.mark.parametrize("asynchronous", [False, True])
 @respx.mock
-async def test_bulk_upgrade_accessor_types_acknowledgment_and_preserves_payload(
+async def test_bulk_upgrade_accessor_types_the_declared_publishers_and_status(
     client: NetskopeClient, aclient: AsyncNetskopeClient, asynchronous: bool
 ) -> None:
-    body = {"status": "success", "message": "Upgrade requested", "total": 2, "future": {"job": 7}}
+    """``publishers_bulk_response`` declares ``data.publishers`` and ``status`` (:639-702)."""
+    body = {
+        "data": {"publishers": [{"id": 7, "name": "pub7"}, {"id": 8, "name": "pub8"}]},
+        "status": "success",
+        "future": {"job": 7},
+    }
     route = respx.put(f"{_BASE}/publishers/bulk").mock(return_value=httpx.Response(200, json=body))
     response = (
         await aclient.publishers.with_response.bulk_upgrade([7, 8])
@@ -217,8 +222,9 @@ async def test_bulk_upgrade_accessor_types_acknowledgment_and_preserves_payload(
     result = response.parse()
     assert isinstance(result, PublisherActionResult)
     assert result.status == "success"
-    assert result.message == "Upgrade requested"
-    assert result.model_extra == {"total": 2, "future": {"job": 7}}
+    assert [pub.publisher_id for pub in result.publishers] == [7, 8]
+    assert [pub.publisher_name for pub in result.publishers] == ["pub7", "pub8"]
+    assert (result.model_extra or {})["future"] == {"job": 7}
     assert response.json() == body
     # publishers_bulk_request ids are strings (npa_publishers.yaml:294-299).
     assert sent_json(route) == {

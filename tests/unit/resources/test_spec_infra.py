@@ -155,11 +155,31 @@ def test_publisher_alerts_put_bounds_event_types(
 
 def test_publisher_alerts_request_model_bounds_event_types() -> None:
     """The typed path enforces the same 1..5 bound (npa_publishers.yaml:624-625)."""
-    PublisherAlertsConfigurationPatch(event_types=["UPGRADE_FAILED"])
+
+    def build(event_types: list[str]) -> PublisherAlertsConfigurationPatch:
+        return PublisherAlertsConfigurationPatch(
+            admin_users=["admin1@abc.com"],
+            event_types=event_types,
+            selected_users="abc@xyz.com",
+        )
+
+    build(["UPGRADE_FAILED"])
     with pytest.raises(PydanticValidationError, match="at most 5"):
-        PublisherAlertsConfigurationPatch(event_types=["UPGRADE_FAILED"] * 6)
+        build(["UPGRADE_FAILED"] * 6)
     with pytest.raises(PydanticValidationError, match="at least 1"):
-        PublisherAlertsConfigurationPatch(event_types=[])
+        build([])
+
+
+def test_publisher_alerts_request_model_requires_every_declared_key() -> None:
+    """``publishers_alert_put_request.required`` is all three (npa_publishers.yaml:591-594)."""
+    for partial in (
+        {},
+        {"adminUsers": ["admin1@abc.com"]},
+        {"adminUsers": ["admin1@abc.com"], "eventTypes": ["UPGRADE_FAILED"]},
+        {"eventTypes": ["UPGRADE_FAILED"], "selectedUsers": "abc@xyz.com"},
+    ):
+        with pytest.raises(PydanticValidationError, match=r"[Ff]ield required"):
+            PublisherAlertsConfigurationPatch.model_validate(partial)
 
 
 def test_publisher_alerts_response_reads_selected_users() -> None:

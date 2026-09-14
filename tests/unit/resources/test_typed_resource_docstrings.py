@@ -10,37 +10,53 @@ import pkgutil
 import pytest
 
 import netskope
-from netskope.resources._dspm_response import AsyncDspmResponses, DspmResponses
-from netskope.resources._rbi_response import AsyncRbiResponses, RbiResponses
-from netskope.resources._spm_response import AsyncSpmResponses, SpmResponses
-from netskope.resources.aicc import (
+from netskope.resources.aicc.agents import (
     AiccAgentResource,
-    AiccAnalytics,
-    AiccApplicationResource,
-    AiccDataProtection,
-    AiccExtensionResource,
-    AiccIdentityResource,
-    AiccMcpServerResource,
-    AiccModelResource,
-    AiccResource,
     AsyncAiccAgentResource,
-    AsyncAiccAnalytics,
-    AsyncAiccApplicationResource,
-    AsyncAiccDataProtection,
-    AsyncAiccExtensionResource,
-    AsyncAiccIdentityResource,
-    AsyncAiccMcpServerResource,
+)
+from netskope.resources.aicc.ai_models import (
+    AiccModelResource,
     AsyncAiccModelResource,
+)
+from netskope.resources.aicc.analytics import (
+    AiccAnalytics,
+    AsyncAiccAnalytics,
+)
+from netskope.resources.aicc.applications import (
+    AiccApplicationResource,
+    AsyncAiccApplicationResource,
+)
+from netskope.resources.aicc.data_protection import (
+    AiccDataProtection,
+    AsyncAiccDataProtection,
+)
+from netskope.resources.aicc.extensions import (
+    AiccExtensionResource,
+    AsyncAiccExtensionResource,
+)
+from netskope.resources.aicc.identities import (
+    AiccIdentityResource,
+    AsyncAiccIdentityResource,
+)
+from netskope.resources.aicc.mcp_servers import (
+    AiccMcpServerResource,
+    AsyncAiccMcpServerResource,
+)
+from netskope.resources.aicc.namespace import (
+    AiccResource,
     AsyncAiccResource,
 )
-from netskope.resources.private_apps import (
+from netskope.resources.dspm.decoder import AsyncDspmResponses, DspmResponses
+from netskope.resources.private_apps.resource import (
     AsyncPrivateAppsResource,
     AsyncPrivateAppTagsResource,
     PrivateAppsResource,
     PrivateAppTagsResource,
 )
-from netskope.resources.steering import AsyncSteeringResource, SteeringResource
-from netskope.resources.url_lists import AsyncUrlListsResource, UrlListsResource
+from netskope.resources.rbi.decoder import AsyncRbiResponses, RbiResponses
+from netskope.resources.spm.decoder import AsyncSpmResponses, SpmResponses
+from netskope.resources.steering.resource import AsyncSteeringResource, SteeringResource
+from netskope.resources.url_lists.resource import AsyncUrlListsResource, UrlListsResource
 
 # Each class and a word its documentation must contain, so a docstring cannot
 # drift into describing something else.
@@ -106,7 +122,7 @@ def test_the_response_accessor_documents_itself(resource):
 # accessor cannot ship undocumented.  "Public" means: a module whose dotted path
 # has no underscore-prefixed component, and a class, function, method or
 # property whose own name does not start with an underscore.  Private modules
-# (``netskope.resources._scim_response`` and friends) are implementation detail
+# (``netskope.resources.scim.decoder`` and friends) are implementation detail
 # and are deliberately out of scope.
 
 # Members that still lack a docstring, grouped by the file that owns them.
@@ -135,58 +151,57 @@ UNDOCUMENTED_ALLOWLIST = frozenset(
         "netskope.models.npa_policy.NpaPolicyRulePatch.serialize_group_id",
         "netskope.models.npa_policy.NpaUserConfidence.valid_threshold",
         # src/netskope/models/publishers.py
-        "netskope.models.publishers.PublisherAlertsConfigurationPatch.require_changes",
         # src/netskope/models/steering.py
         "netskope.models.steering.IPSecTunnelPatch.integer_bandwidth",
         "netskope.models.steering.IPSecTunnelPatch.require_changes",
         # src/netskope/resources/npa.py — the typed NPA response accessors.
-        "netskope.resources.npa.AsyncNpaResponses.search_private_apps",
-        "netskope.resources.npa.AsyncNpaResponses.search_publishers",
-        "netskope.resources.npa.AsyncNpaResponses.validate_name",
-        "netskope.resources.npa.NpaResponses.search_private_apps",
-        "netskope.resources.npa.NpaResponses.search_publishers",
-        "netskope.resources.npa.NpaResponses.validate_name",
+        "netskope.resources.npa.resource.AsyncNpaResponses.search_private_apps",
+        "netskope.resources.npa.resource.AsyncNpaResponses.search_publishers",
+        "netskope.resources.npa.resource.AsyncNpaResponses.validate_name",
+        "netskope.resources.npa.resource.NpaResponses.search_private_apps",
+        "netskope.resources.npa.resource.NpaResponses.search_publishers",
+        "netskope.resources.npa.resource.NpaResponses.validate_name",
         # ``with_response`` accessors, one per resource class.
-        "netskope.resources.atp.AsyncAtpResource.with_response",
-        "netskope.resources.atp.AtpResource.with_response",
-        "netskope.resources.cci.AsyncCciResource.with_response",
-        "netskope.resources.cci.AsyncCciTagsResource.with_response",
-        "netskope.resources.cci.CciResource.with_response",
-        "netskope.resources.cci.CciTagsResource.with_response",
-        "netskope.resources.devices.AsyncDevicesResource.with_response",
-        "netskope.resources.devices.DevicesResource.with_response",
-        "netskope.resources.dns.AsyncDnsInheritanceGroupsResource.with_response",
-        "netskope.resources.dns.AsyncDnsResource.with_response",
-        "netskope.resources.dns.DnsInheritanceGroupsResource.with_response",
-        "netskope.resources.dns.DnsResource.with_response",
-        "netskope.resources.dspm.AsyncDspmResource.with_response",
-        "netskope.resources.dspm.DspmResource.with_response",
-        "netskope.resources.enrollment.AsyncEnrollmentResource.with_response",
-        "netskope.resources.enrollment.EnrollmentResource.with_response",
-        "netskope.resources.incidents.AsyncIncidentsResource.with_response",
-        "netskope.resources.incidents.IncidentsResource.with_response",
-        "netskope.resources.ips.AsyncIpsResource.with_response",
-        "netskope.resources.ips.IpsResource.with_response",
-        "netskope.resources.notifications.AsyncNotificationsResource.with_response",
-        "netskope.resources.notifications.NotificationsResource.with_response",
-        "netskope.resources.npa.AsyncNpaResource.with_response",
-        "netskope.resources.npa.NpaResource.with_response",
-        "netskope.resources.npa_policy.AsyncNpaPolicyGroupsResource.with_response",
-        "netskope.resources.npa_policy.AsyncNpaPolicyRulesResource.with_response",
-        "netskope.resources.npa_policy.NpaPolicyGroupsResource.with_response",
-        "netskope.resources.npa_policy.NpaPolicyRulesResource.with_response",
-        "netskope.resources.nsiq.AsyncNsiqResource.with_response",
-        "netskope.resources.nsiq.NsiqResource.with_response",
-        "netskope.resources.rbi.AsyncRbiResource.with_response",
-        "netskope.resources.rbi.RbiResource.with_response",
-        "netskope.resources.spm.AsyncSpmResource.with_response",
-        "netskope.resources.spm.SpmResource.with_response",
-        "netskope.resources.tokens.AsyncTokensResource.with_response",
-        "netskope.resources.tokens.TokensResource.with_response",
-        "netskope.resources.users.AsyncUserGroupsResource.with_response",
-        "netskope.resources.users.AsyncUsersResource.with_response",
-        "netskope.resources.users.UserGroupsResource.with_response",
-        "netskope.resources.users.UsersResource.with_response",
+        "netskope.resources.atp.resource.AsyncAtpResource.with_response",
+        "netskope.resources.atp.resource.AtpResource.with_response",
+        "netskope.resources.cci.resource.AsyncCciResource.with_response",
+        "netskope.resources.cci.resource.AsyncCciTagsResource.with_response",
+        "netskope.resources.cci.resource.CciResource.with_response",
+        "netskope.resources.cci.resource.CciTagsResource.with_response",
+        "netskope.resources.devices.resource.AsyncDevicesResource.with_response",
+        "netskope.resources.devices.resource.DevicesResource.with_response",
+        "netskope.resources.dns.resource.AsyncDnsInheritanceGroupsResource.with_response",
+        "netskope.resources.dns.resource.AsyncDnsResource.with_response",
+        "netskope.resources.dns.resource.DnsInheritanceGroupsResource.with_response",
+        "netskope.resources.dns.resource.DnsResource.with_response",
+        "netskope.resources.dspm.resource.AsyncDspmResource.with_response",
+        "netskope.resources.dspm.resource.DspmResource.with_response",
+        "netskope.resources.enrollment.resource.AsyncEnrollmentResource.with_response",
+        "netskope.resources.enrollment.resource.EnrollmentResource.with_response",
+        "netskope.resources.incidents.resource.AsyncIncidentsResource.with_response",
+        "netskope.resources.incidents.resource.IncidentsResource.with_response",
+        "netskope.resources.ips.resource.AsyncIpsResource.with_response",
+        "netskope.resources.ips.resource.IpsResource.with_response",
+        "netskope.resources.notifications.resource.AsyncNotificationsResource.with_response",
+        "netskope.resources.notifications.resource.NotificationsResource.with_response",
+        "netskope.resources.npa.resource.AsyncNpaResource.with_response",
+        "netskope.resources.npa.resource.NpaResource.with_response",
+        "netskope.resources.npa_policy.resource.AsyncNpaPolicyGroupsResource.with_response",
+        "netskope.resources.npa_policy.resource.AsyncNpaPolicyRulesResource.with_response",
+        "netskope.resources.npa_policy.resource.NpaPolicyGroupsResource.with_response",
+        "netskope.resources.npa_policy.resource.NpaPolicyRulesResource.with_response",
+        "netskope.resources.nsiq.resource.AsyncNsiqResource.with_response",
+        "netskope.resources.nsiq.resource.NsiqResource.with_response",
+        "netskope.resources.rbi.resource.AsyncRbiResource.with_response",
+        "netskope.resources.rbi.resource.RbiResource.with_response",
+        "netskope.resources.spm.resource.AsyncSpmResource.with_response",
+        "netskope.resources.spm.resource.SpmResource.with_response",
+        "netskope.resources.tokens.resource.AsyncTokensResource.with_response",
+        "netskope.resources.tokens.resource.TokensResource.with_response",
+        "netskope.resources.users.resource.AsyncUserGroupsResource.with_response",
+        "netskope.resources.users.resource.AsyncUsersResource.with_response",
+        "netskope.resources.users.resource.UserGroupsResource.with_response",
+        "netskope.resources.users.resource.UsersResource.with_response",
     }
 )
 
@@ -202,13 +217,30 @@ def _underlying(member):
     return member
 
 
+# Implementation modules inside an otherwise public package. Before the layered
+# layout these were `_atp_response.py`, `_pagination.py` and friends, and the
+# leading underscore kept them out of this walk. They are no less internal for
+# living at `resources/atp/decoder.py` now, so name them instead.
+_INTERNAL_LEAVES = frozenset({"decoder", "paths", "tags_decoder"})
+_INTERNAL_PACKAGES = ("netskope.core", "netskope.resources.shared")
+
+
+def _is_public(name: str) -> bool:
+    parts = name.split(".")
+    if any(part.startswith("_") for part in parts[1:]):
+        return False
+    if parts[-1] in _INTERNAL_LEAVES:
+        return False
+    return not name.startswith(_INTERNAL_PACKAGES)
+
+
 def _public_modules():
-    """Import and yield every module whose dotted path has no private component."""
+    """Import and yield every module that forms part of the SDK's public surface."""
     names = ["netskope"] + [
         module.name for module in pkgutil.walk_packages(netskope.__path__, "netskope.")
     ]
     for name in names:
-        if any(part.startswith("_") for part in name.split(".")[1:]):
+        if not _is_public(name):
             continue
         yield name, importlib.import_module(name)
 

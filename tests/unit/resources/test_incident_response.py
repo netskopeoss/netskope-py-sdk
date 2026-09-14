@@ -238,7 +238,6 @@ async def test_notes_forensics_and_empty_delete_parity(client, aclient, asynchro
         {},
         {"result": []},
         {"result": "garbage"},
-        {"result": [{"result": 1}]},
         {"result": [{"ok": True, "result": 1}]},
         {"result": [{"ok": 1, "result": 1.5}]},
     ],

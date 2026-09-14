@@ -228,6 +228,22 @@ def _extract_message(body: dict[str, Any]) -> str:
         if isinstance(data, dict):
             raw = data.get("error")
     if raw is None:
+        # Field names used by services the SDK ships against but which the
+        # ladder above never reached: atp/atpsvc.yaml:3-9 (`error_message`),
+        # ubadatasvc/ubadatasvc.yaml:78-87 (`errorMsg`).
+        for key in ("error_message", "errorMsg", "msg", "reason", "description"):
+            candidate = body.get(key)
+            if isinstance(candidate, str) and candidate:
+                raw = candidate
+                break
+    if raw is None:
+        # spm/result.yaml:56-71 nests the diagnosis one level down.
+        nested = body.get("body")
+        if isinstance(nested, dict):
+            raw = nested.get("errors")
+    if raw is None:
+        raw = body.get("errors")
+    if raw is None:
         result = body.get("result")
         if isinstance(result, str):
             raw = result
@@ -298,8 +314,15 @@ def raise_for_status(response: httpx.Response) -> None:
         # (same at search_incident.yaml:423-429, search_clientstatus.yaml:204-210).
         status_failed = _reports_failed(status_envelope.get("execution"))
         failed_execution = status_failed or _reports_failed(body.get("execution"))
+        # `not found` is a documented 200-level status, not only an error one:
+        # npa_publishers.yaml:871-876 (status_enum, used by the publishers
+        # list/get/create/update operations and /publishers/releases:1312),
+        # npa_apps_private.yaml:25-26, npa_private_tag.yaml:412,
+        # npa_generic.yaml:152-156.
+        status_not_found = isinstance(status, str) and status.strip().casefold() == "not found"
         if (
             status == "error"
+            or status_not_found
             or body.get("ok") == 0
             or body.get("success") is False
             or failed_execution
@@ -310,6 +333,10 @@ def raise_for_status(response: httpx.Response) -> None:
                 # about which query failed, and these bodies often carry no
                 # message at all.
                 message = _failed_execution_message(reported, request_method, request_path)
+            elif status_not_found and not reported:
+                # These bodies carry the verdict in `status` and nothing else,
+                # so "Unknown error" would be actively misleading.
+                message = "The requested resource was not found."
             else:
                 message = reported or "Unknown error"
             raw_status = (
@@ -323,7 +350,8 @@ def raise_for_status(response: httpx.Response) -> None:
             request_id = response.headers.get("x-request-id")
             lowered = reported.lower()
             if (
-                "not found" in lowered
+                status_not_found
+                or "not found" in lowered
                 or "doesn't exist" in lowered
                 or "does not exist" in lowered
                 or ("no " in lowered and " found" in lowered)
@@ -361,6 +389,13 @@ def raise_for_status(response: httpx.Response) -> None:
 
     if exc_cls is RateLimitError:
         parsed_retry_after = parse_retry_after(response.headers.get("retry-after"))
+        if parsed_retry_after is None and isinstance(body, dict):
+            # The TPaaS URL-scan quota is a per-day window reported in the body
+            # rather than as a header (atp/urlscan.yaml:22-32 declares
+            # ErrorResponse = {message, status, retry_after} for its 429).
+            raw_retry_after = body.get("retry_after")
+            if raw_retry_after is not None:
+                parsed_retry_after = parse_retry_after(str(raw_retry_after))
         retry_after = None if parsed_retry_after is None else min(parsed_retry_after, 300.0)
         raise RateLimitError(
             str(message),

@@ -25,9 +25,12 @@ from netskope.models.dem import DATA_QUERY_SOURCES, DemAlertRule, DemProbe, Quer
 from netskope.models.notifications import NotificationTemplateWrite
 from netskope.models.nsiq import FalsePositiveReceipt, UrlLookupReport
 from netskope.models.rbi import RbiApplications
-from netskope.resources._aicc_contract import QUERY_RULES
-from netskope.resources.dem import AsyncDemResource, DemResource
-from netskope.resources.ips import AsyncIpsResource, IpsResource
+from netskope.resources.dem.namespace import (
+    AsyncDemResource,
+    DemResource,
+)
+from netskope.resources.ips.resource import AsyncIpsResource, IpsResource
+from netskope.resources.shared.aicc_contract import QUERY_RULES
 from tests.unit.resources.conftest import sent_json
 
 _BASE = "https://t.goskope.com"

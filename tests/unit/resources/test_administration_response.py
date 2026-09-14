@@ -358,17 +358,19 @@ CASES = [
         200,
     ),
     (
+        # ``interactive`` is declared on the DELETE too (profiles/dns.yaml:1811-1820).
         "dns.with_response.delete",
         (PROFILE["id"],),
         {},
         "DELETE",
         f"/api/v2/profiles/dns/{PROFILE['id']}",
         None,
-        {},
+        {"interactive": "false"},
         {"status": "success"},
         200,
     ),
     (
+        # The 200 is ``DNSProfileList`` (profiles/dns.yaml:1891-1896 -> :217-226).
         "dns.with_response.deploy",
         (DnsDeployment(ids=[PROFILE["id"]], change_note="Approved"),),
         {},
@@ -376,7 +378,7 @@ CASES = [
         "/api/v2/profiles/dns/deploy",
         {"ids": [PROFILE["id"]], "change_note": "Approved"},
         {},
-        {"status": "success"},
+        {"profiles": [PROFILE], "total": 1},
         200,
     ),
     (
@@ -424,17 +426,19 @@ CASES = [
         200,
     ),
     (
+        # ``interactive`` is declared on the DELETE too (profiles/dns.yaml:2302-2311).
         "dns.inheritance_groups.with_response.delete",
         ("g1",),
         {},
         "DELETE",
         "/api/v2/profiles/dns/inheritancegroups/g1",
         None,
-        {},
+        {"interactive": "false"},
         None,
         204,
     ),
     (
+        # The 200 is ``InheritanceGroupList`` (profiles/dns.yaml:2384-2389 -> :1135-1144).
         "dns.inheritance_groups.with_response.deploy",
         (DnsInheritanceGroupDeployment(ids=["g1"]),),
         {},
@@ -442,7 +446,7 @@ CASES = [
         "/api/v2/profiles/dns/inheritancegroups/deploy",
         {"ids": ["g1"]},
         {},
-        {"status": "success"},
+        {"inheritancegroups": [{"id": "g1", "name": "Group"}], "total": 1},
         200,
     ),
     *[

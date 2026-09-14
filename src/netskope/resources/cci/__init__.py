@@ -1,0 +1,1 @@
+"""The cci resource namespace."""

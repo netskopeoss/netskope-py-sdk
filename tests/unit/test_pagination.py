@@ -9,20 +9,27 @@ import pytest
 import respx
 from pydantic import SecretStr
 
-from netskope._config import NetskopeConfig
-from netskope._pagination import build_page, coerce_total, select_total
-from netskope._transport import AsyncTransport, SyncTransport
+from netskope.core.config import NetskopeConfig
+from netskope.core.pagination import (
+    AsyncPaginatedResponse,
+    Page,
+    SyncPaginatedResponse,
+    build_page,
+    coerce_total,
+    local_page,
+    select_total,
+)
+from netskope.core.transport import AsyncTransport, SyncTransport
 from netskope.exceptions import PaginationError, ResponseValidationError
 from netskope.models.alerts import Alert
-from netskope.pagination import AsyncPaginatedResponse, Page, SyncPaginatedResponse
-from netskope.resources._admin_response import page as admin_page
+from netskope.resources.shared.admin import page as admin_page
 
-URL = "https://test.goskope.com/api/v2/test"
+URL = "https://example.goskope.coken/api/v2/test"
 
 
 def _config() -> NetskopeConfig:
     return NetskopeConfig(
-        tenant="test.goskope.com",
+        tenant="example.goskope.coken",
         api_token=SecretStr("test-token"),
         timeout=5.0,
         max_retries=0,
@@ -85,6 +92,27 @@ async def take_pages(paginator, count: int | None = None) -> list[Page]:
     return pages
 
 
+@pytest.fixture
+def unpaginated(transport: SyncTransport):
+    """Build either paginator in the deliberately unpaginated mode."""
+
+    def build(kind: str, page_size: int) -> SyncPaginatedResponse | AsyncPaginatedResponse:
+        kwargs = {
+            "method": "GET",
+            "path": "/api/v2/test",
+            "params": {},
+            "model": Alert,
+            "page_size": page_size,
+            "extract": _extract,
+            "paginated": False,
+        }
+        if kind == "async":
+            return AsyncPaginatedResponse(transport=AsyncTransport(_config()), **kwargs)
+        return SyncPaginatedResponse(transport=transport, **kwargs)
+
+    return build
+
+
 def _extract(body: dict) -> list[dict]:
     return body.get("result", [])
 
@@ -94,7 +122,7 @@ class TestSyncPaginatedResponse:
 
     @respx.mock
     def test_iterates_all_items(self, transport: SyncTransport) -> None:
-        route = respx.get("https://test.goskope.com/api/v2/test")
+        route = respx.get(URL)
         route.side_effect = [
             httpx.Response(
                 200,
@@ -127,7 +155,7 @@ class TestSyncPaginatedResponse:
 
     @respx.mock
     def test_pages_yields_page_objects(self, transport: SyncTransport) -> None:
-        route = respx.get("https://test.goskope.com/api/v2/test")
+        route = respx.get(URL)
         route.side_effect = [
             httpx.Response(
                 200,
@@ -161,7 +189,7 @@ class TestSyncPaginatedResponse:
 
     @respx.mock
     def test_empty_response(self, transport: SyncTransport) -> None:
-        respx.get("https://test.goskope.com/api/v2/test").mock(
+        respx.get(URL).mock(
             return_value=httpx.Response(200, json={"result": [], "status": {"total": 0}})
         )
         paginator = SyncPaginatedResponse(
@@ -178,7 +206,7 @@ class TestSyncPaginatedResponse:
 
     @respx.mock
     def test_to_list_with_limit(self, transport: SyncTransport) -> None:
-        route = respx.get("https://test.goskope.com/api/v2/test")
+        route = respx.get(URL)
         route.side_effect = [
             httpx.Response(
                 200,
@@ -202,7 +230,7 @@ class TestSyncPaginatedResponse:
 
     @respx.mock
     def test_first(self, transport: SyncTransport) -> None:
-        respx.get("https://test.goskope.com/api/v2/test").mock(
+        respx.get(URL).mock(
             return_value=httpx.Response(
                 200,
                 json={
@@ -226,9 +254,7 @@ class TestSyncPaginatedResponse:
 
     @respx.mock
     def test_first_empty(self, transport: SyncTransport) -> None:
-        respx.get("https://test.goskope.com/api/v2/test").mock(
-            return_value=httpx.Response(200, json={"result": []})
-        )
+        respx.get(URL).mock(return_value=httpx.Response(200, json={"result": []}))
         paginator = SyncPaginatedResponse(
             transport=transport,
             method="GET",
@@ -242,7 +268,7 @@ class TestSyncPaginatedResponse:
 
     @respx.mock
     def test_params_include_offset_and_limit(self, transport: SyncTransport) -> None:
-        route = respx.get("https://test.goskope.com/api/v2/test")
+        route = respx.get(URL)
         route.mock(return_value=httpx.Response(200, json={"result": []}))
         paginator = SyncPaginatedResponse(
             transport=transport,
@@ -441,12 +467,14 @@ class TestLegacyPageTotals:
             await take_pages(paginators(kind, 1))
         assert caught.value.offset == 0
 
+    @pytest.mark.parametrize("metadata", [{"status": {"total": 1}}, {"total": 1}])
     @respx.mock
-    async def test_a_completed_total_stops_before_another_request(self, paginators, kind) -> None:
+    async def test_a_completed_total_stops_before_another_request(
+        self, paginators, kind, metadata
+    ) -> None:
+        """SPEC2-PAGE-1: steering/npa_apps_private.yaml:27-30 puts total beside data."""
         route = respx.get(URL).mock(
-            return_value=httpx.Response(
-                200, json={"result": [{"_id": "1"}], "status": {"total": 1}}
-            )
+            return_value=httpx.Response(200, json={"result": [{"_id": "1"}], **metadata})
         )
         pages = await take_pages(paginators(kind, 1))
         assert [page.has_more for page in pages] == [False]
@@ -482,3 +510,126 @@ class TestLegacyPageTotals:
         with pytest.raises(ResponseValidationError, match="Expected a list of records") as caught:
             await take_pages(paginators(kind, 1, refuse))
         assert caught.value.request_path == "/api/v2/test"
+
+
+@pytest.mark.parametrize("kind", ["sync", "async"])
+class TestUnpaginatedCollections:
+    """``paginated=False`` serves the operations that declare no offset window.
+
+    Two operations in the contract declare neither ``offset`` nor ``limit``:
+    ``GET /api/v2/infrastructure/publishers``, whose whole query is ``fields``
+    (``infrastructure/npa_publishers.yaml:1024-1032``), and
+    ``GET /api/v2/policy/urllist``, whose whole query is ``pending`` and
+    ``field`` (``policy/urllist.yaml:132-156``).  Sending a window they do not
+    declare asks the gateway to ignore it and then reasons about short pages
+    that were never pages; this mode fetches the collection once instead.
+    """
+
+    @respx.mock
+    async def test_no_paging_parameters_reach_the_wire(self, unpaginated, kind) -> None:
+        route = respx.get(URL).mock(return_value=httpx.Response(200, json={"result": []}))
+        await take_pages(unpaginated(kind, 2))
+        assert route.call_count == 1
+        assert not route.calls.last.request.url.params
+
+    @respx.mock
+    async def test_a_collection_larger_than_the_page_size_is_not_refused(
+        self, unpaginated, kind
+    ) -> None:
+        """The body is the whole collection, so no requested size bounds it."""
+        records = [{"_id": str(n)} for n in range(1, 6)]
+        route = respx.get(URL).mock(return_value=httpx.Response(200, json={"result": records}))
+        pages = await take_pages(unpaginated(kind, 2))
+        assert len(pages) == 1
+        assert [item.id for item in pages[0].items] == ["1", "2", "3", "4", "5"]
+        assert pages[0].limit is None
+        assert route.call_count == 1
+
+    @respx.mock
+    async def test_the_traversal_ends_without_refetching_the_collection(
+        self, unpaginated, kind
+    ) -> None:
+        """A second request with the same parameters would re-deliver the same rows."""
+        route = respx.get(URL).mock(
+            return_value=httpx.Response(200, json={"result": [{"_id": "1"}, {"_id": "2"}]})
+        )
+        pages = await take_pages(unpaginated(kind, 1))
+        assert [item.id for page in pages for item in page.items] == ["1", "2"]
+        assert route.call_count == 1
+
+    @respx.mock
+    async def test_an_empty_collection_yields_no_page_and_one_request(
+        self, unpaginated, kind
+    ) -> None:
+        route = respx.get(URL).mock(return_value=httpx.Response(200, json={"result": []}))
+        assert await take_pages(unpaginated(kind, 2)) == []
+        assert route.call_count == 1
+
+    @respx.mock
+    async def test_a_stated_total_still_reaches_the_page(self, unpaginated, kind) -> None:
+        respx.get(URL).mock(
+            return_value=httpx.Response(
+                200, json={"result": [{"_id": "1"}], "status": {"total": 1}}
+            )
+        )
+        page = (await take_pages(unpaginated(kind, 2)))[0]
+        assert (page.total, page.offset, page.has_more) == (1, 0, False)
+
+    async def test_an_incomplete_collection_is_not_reported_as_complete(
+        self, unpaginated, kind
+    ) -> None:
+        """SPEC2-INFRA-11: npa_publishers.yaml:877-879 declares the collection total."""
+        with respx.mock(assert_all_mocked=True) as router:
+            route = router.get(URL).mock(
+                return_value=httpx.Response(200, json={"result": [{"_id": "1"}], "total": 2})
+            )
+            with pytest.raises(PaginationError, match="incomplete") as caught:
+                await take_pages(unpaginated(kind, 1))
+        assert route.call_count == 1
+        assert caught.value.request_method == "GET"
+        assert caught.value.request_path == "/api/v2/test"
+
+
+class TestLocalPage:
+    """:func:`local_page` windows a whole-collection response client-side."""
+
+    def test_the_window_is_applied_to_the_records_in_hand(self) -> None:
+        items = [Alert.model_validate({"_id": str(n)}) for n in range(1, 6)]
+        page = local_page(items, {"total": 5}, 1, 2)
+        assert [item.id for item in page.items] == ["2", "3"]
+        assert (page.offset, page.limit, page.total, page.has_more) == (1, 2, 5, True)
+
+    def test_a_window_past_the_collection_is_empty_rather_than_an_error(self) -> None:
+        items = [Alert.model_validate({"_id": "1"})]
+        page = local_page(items, {"total": 1}, 5, 2)
+        assert page.items == []
+        assert (page.offset, page.limit, page.total) == (5, 2, 1)
+
+    def test_a_complete_array_establishes_continuation_without_inventing_a_total(self) -> None:
+        """SPEC2-INFRA-11: policy/urllist.yaml:157-165 returns the entire array."""
+        items = [Alert.model_validate({"_id": str(n)}) for n in (1, 2)]
+        page = local_page(items, {}, 0, 1)
+        assert [item.id for item in page.items] == ["1"]
+        assert (page.total, page.has_more) == (None, True)
+        assert local_page(items, {}, 1, 1).has_more is False
+
+    @pytest.mark.parametrize("total", [1, 3])
+    def test_an_inconsistent_collection_total_is_dropped_not_raised(self, total: int) -> None:
+        """npa_publishers.yaml:877-879 reports the collection total.
+
+        The operation declares no paging parameters, so the records in hand are
+        the collection by definition and a disagreeing total is the service's
+        own bookkeeping. Dropping it keeps the data reachable; raising would
+        deny the caller a response the gateway returned successfully.
+        """
+        items = [Alert.model_validate({"_id": str(n)}) for n in (1, 2)]
+        page = local_page(items, {"total": total}, 0, 1)
+        assert [item.id for item in page.items] == ["1"]
+        assert page.total is None
+        assert page.has_more is True
+
+    def test_no_window_returns_the_whole_collection(self) -> None:
+        items = [Alert.model_validate({"_id": str(n)}) for n in (1, 2, 3)]
+        page = local_page(items, {"total": 3}, 0, None)
+        assert [item.id for item in page.items] == ["1", "2", "3"]
+        assert (page.limit, page.has_more) == (None, False)

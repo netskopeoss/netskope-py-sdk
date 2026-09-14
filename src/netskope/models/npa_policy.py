@@ -135,11 +135,11 @@ class NpaPolicyRuleCreate(NpaPolicyRulePatch):
 class NpaGroupOrder(NpaRequest):
     """Where a new policy group lands relative to an existing one.
 
-    Serialized as a single ``group_order`` object, as the API accepts it.
+    Serialized as the legacy single ``group_order`` object.
     ``npa_policygroup_request`` (``policy/npa_policygroup.yaml:7-20``) nests a
     second ``group_order`` inside the first, whose wrapper carries no other
-    property — an authoring slip in the spec rather than a shape the gateway
-    wants, so the SDK sends one level and this is deliberately not "fixed".
+    property. The wrapper permits additional properties, so the legacy body
+    remains schema-valid, but their interpretation needs upstream clarification.
     """
 
     group_id: str

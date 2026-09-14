@@ -1,0 +1,1 @@
+"""The nsiq resource namespace."""

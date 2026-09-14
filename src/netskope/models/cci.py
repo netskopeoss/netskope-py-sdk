@@ -109,9 +109,12 @@ class CciTagRuleInput(_CciRequest):
 
 
 class CciTagCreate(_CciRequest):
+    # ``ids`` carries application IDs, which ``appTagExample``; the example the
+    # ``POST /cci/tags`` body points at (services/cci.yaml:48-57); writes as
+    # integers, so both JSON types are accepted and forwarded unchanged.
     name: str = Field(alias="tag", min_length=1, max_length=75)
     apps: list[str] | None = Field(None, min_length=1, max_length=100)
-    ids: list[str] | None = Field(None, min_length=1, max_length=100)
+    ids: list[str | int] | None = Field(None, min_length=1, max_length=100)
     rules: list[CciTagRuleInput] | None = Field(None, min_length=1)
     description: str | None = None
 
@@ -138,7 +141,8 @@ class CciTagPatch(_CciRequest):
 
     action: Literal["append", "remove"]
     apps: list[str] | None = Field(None, min_length=1, max_length=100)
-    ids: list[str] | None = Field(None, min_length=1, max_length=100)
+    # Application IDs, integers in the contract's own example (services/cci.yaml:48-57).
+    ids: list[str | int] | None = Field(None, min_length=1, max_length=100)
 
     @model_validator(mode="after")
     def one_membership(self) -> Self:

@@ -254,6 +254,8 @@ def test_get_retains_original_envelope_and_not_found_metadata(client: NetskopeCl
     assert dict(route.calls[0].request.url.params) == {
         "timeout": "180",
         "query": '_id eq "a1"',
+        # search_alert.yaml:340-345 defaults `limit` to 10000 (SPEC2-EV-4).
+        "limit": "1",
     }
     assert route.call_count == 1
     missing = client.alerts.with_response.get("b2")

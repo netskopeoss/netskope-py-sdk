@@ -19,6 +19,30 @@ expansion from 8 to 24 resource namespaces.
 
 ### Behavior changes
 
+- **Breaking:** the package is laid out in three layers: `netskope/core/` holds the
+  plumbing no API area owns, `netskope/resources/<area>/` is one package per API
+  namespace (`resource.py`, `decoder.py`, `paths.py`), and
+  `netskope/resources/shared/` holds what several areas share. The package root is
+  unchanged — `netskope`, `netskope.exceptions`, `netskope.response`,
+  `netskope.datasearch` and `netskope.models.*` all resolve exactly as before.
+  **Every other import path moved, and nothing re-exports to soften it.**
+  `from netskope.resources.dspm import DspmResource` becomes
+  `from netskope.resources.dspm.resource import DspmResource`; `AiccResource` and
+  `DemResource` come from `netskope.resources.{aicc,dem}.namespace`; the AICC endpoint
+  types from `netskope.resources.shared.aicc_endpoint`. `netskope.pagination` is
+  **removed** — import `Page` from `netskope.core.pagination`. Private paths moved too:
+  `netskope._pagination` is `netskope.core.pagination` and
+  `netskope.resources._alert_query` is `netskope.resources.shared.datasearch_query`.
+- The package now imports acyclically. Each area's path constants and payload
+  builders live in `paths.py`, which both `resource.py` and `decoder.py` import,
+  replacing 14 resource/decoder cycles that were held open by 53 imports hidden
+  inside method bodies. `dem` and `aicc`, previously the two largest modules at
+  2,120 and 984 lines, are packages of one module per sub-namespace.
+
+- Publisher and URL-list collections are fetched once, with page windows applied locally; publisher server-side filters are rejected. Local pages derive continuation from the fetched records, and drop a stated total that contradicts them rather than refusing the response.
+- Publisher PATCH requires `name`, publisher alert-configuration PUT requires all three configuration fields, and notification template POST and PATCH require complete valid bodies. Invalid request bounds and enums now fail before HTTP across DEM, RBI, IPS, NSIQ, RBAC roles, and user management; CCI lookups require one selector.
+- Enrollment token-set GETs and private-app or tag policy-usage POSTs no longer retry, following their declared write access.
+- Typed DNS deploys return pages of deployed objects; publisher alert-configuration and steering updates return acknowledgments. Private-app publisher removal returns applications, and publisher action results retain publisher lists.
 - A string `timestamp` on `Alert`, `Event`, `Incident`, and `Anomaly` (and their
   subclasses) decoded to `None` in 1.1.0, which read epoch numbers and nothing
   else. It now decodes to a timezone-aware `datetime`; a string carrying no UTC
@@ -65,6 +89,7 @@ expansion from 8 to 24 resource namespaces.
 
 ### Added
 
+- `DemAlertEntity`, `DemAlertMetricValue`, `RbiWatermark`, `PublisherAlertsConfigurationStatus`, and `SteeringConfigStatus` are public model exports. DNS profile and inheritance-group deletes accept `interactive`, defaulting to `False`.
 - Typed sync/async response access across event, incident, DEM/ADEM,
   administrative, NPA, steering, CCI, ATP/NSIQ, RBI, DSPM, and SPM operations.
   Operation-specific request models validate supported writes before HTTP;
@@ -113,6 +138,9 @@ expansion from 8 to 24 resource namespaces.
 
 ### Changed
 
+- DEM queries accept the declared zero limits and equal or mixed time bounds, reject out-of-range inputs without clamping, and require positive entity-query epochs. Entity queries no longer inherit the dataset endpoint's two-day window cap.
+- Audit and infrastructure event reads enforce their 5000-record ceiling and supported query features; datasearch reads send the required default timeout when callers pass `None`. Single-event lookups request one row and verify the returned identity.
+- SCIM requests accept both SCIM success bodies and JSON error bodies while preserving the SCIM request Content-Type.
 - New alert query methods use canonical `orderbys`; legacy `list()` keeps
   its existing ordering parameter. Existing one-page tag lists and legacy RBAC
   return types remain supported.
@@ -210,6 +238,28 @@ expansion from 8 to 24 resource namespaces.
 
 ### Fixed
 
+- RBAC role paths accept fractional numeric identifiers without truncation; legacy role creation fetches the exact returned role ID instead of converting it to an integer first.
+- Declared numeric response fields retain fractions, including incident identifiers, insertion times, event counts, RBAC identifiers, and notification timeouts. Policy aliases populate their public fields; client-status `ts` remains a raw integer because its unit is unspecified.
+- Sparse SPM history, ATP acknowledgments, NSIQ receipts, ADEM graphs, RBI watermarks, and DNS references no longer fail on fields the response schema makes optional. Legacy paginators retain top-level totals, and path identifiers reject trailing newlines.
+- An HTTP 200 body whose `status` is `not found` raises `NotFoundError` instead of
+  decoding to an all-`None` record; the value is declared at
+  `npa_publishers.yaml:871-876` and three other NPA schemas.
+- Error messages reported as `error_message` (ATP), `errorMsg` (ubadatasvc) or
+  `body.errors` (SPM) reach the exception instead of degrading to the HTTP reason
+  phrase, and a 429 carrying `retry_after` in its body populates
+  `RateLimitError.retry_after`.
+- `steering.get_tunnel` reads the `result` envelope the single-tunnel operation
+  declares (`ipsec.yaml:305-317`), not the `data` envelope its create and update
+  siblings use; it previously returned a record with every field `None`.
+- `AtpScanReport.verdict` is optional, so the documented in-progress poll decodes
+  (`atpsvc.yaml:409-419`); DSPM tag lists accept the string form their sibling
+  fields already used.
+- `spm.inventory(past_view=True)` requires `timestamp`, and RBI accepts a single
+  `status`, `fields` or `template_id` without splitting the string into
+  characters; empty id lists and `all=true` alongside ids are rejected.
+- Publisher-association and DNS deploy acknowledgements that carry no record
+  array decode as empty rather than raising, since neither schema marks the
+  array required.
 - UCI lookups accept email and domain-qualified usernames on both the plain
   (`incidents.get_uci()`) and typed entry points, in sync and async clients.
   Blank and non-string usernames and naive `from_time` datetimes fail before

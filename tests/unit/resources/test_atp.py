@@ -15,7 +15,7 @@ import respx
 
 from netskope import AsyncNetskopeClient, NetskopeClient
 from netskope.exceptions import ValidationError
-from netskope.resources.atp import AsyncAtpResource, AtpResource
+from netskope.resources.atp.resource import AsyncAtpResource, AtpResource
 from tests.unit.resources.conftest import sent_json
 
 _BASE = "https://t.goskope.com/api/v2/atp"

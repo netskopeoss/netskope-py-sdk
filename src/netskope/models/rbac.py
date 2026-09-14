@@ -145,9 +145,14 @@ class RolePatch(_RoleBody):
 
 
 class RoleMutationReceipt(NetskopeModel):
-    """The write acknowledgment, not a complete role detail."""
+    """The write acknowledgment, not a complete role detail.
 
-    id: int = Field(alias="roleId")
+    ``PostRoleResponseDTO`` (ms-rbac.yaml:2439-2444) and
+    ``PatchRoleResponseDto`` (:2529-2534) declare ``roleId`` as `type: number`,
+    which admits a fraction, so the identifier is not narrowed to int.
+    """
+
+    id: int | float = Field(alias="roleId")
 
     @field_validator("id", mode="before")
     @classmethod
@@ -164,7 +169,8 @@ class RbacRoleApiGroup(NetskopeModel):
     permission level (``none``, ``r``, ``rw``, ``rwa``) on one API group.
     """
 
-    api_group_id: int | None = Field(None, alias="apiGroupId")
+    # ApiGroupsDto.apiGroupId (ms-rbac.yaml:2190-2192) is `type: number`.
+    api_group_id: int | float | None = Field(None, alias="apiGroupId")
     api_group_name: str | None = Field(None, alias="apiGroupName")
     permission: str | None = None
     obfuscations: list[dict[str, Any]] = Field(default_factory=list)
@@ -175,7 +181,8 @@ class RbacRoleApiGroup(NetskopeModel):
 class RbacRoleScope(NetskopeModel):
     """A scope entry restricting the data an RBAC role can see."""
 
-    scope_field_id: int | None = Field(None, alias="scopeFieldId")
+    # RoleScopeResDto.scopeFieldId (ms-rbac.yaml:2040-2042) is `type: number`.
+    scope_field_id: int | float | None = Field(None, alias="scopeFieldId")
     scope_field_name: str | None = Field(None, alias="scopeFieldName")
     scope_value: str | None = Field(None, alias="scopeValue")
     excluded: bool | None = None
@@ -199,9 +206,13 @@ class RbacRoleIpAllowList(NetskopeModel):
 
 
 class RbacRoleSummary(NetskopeModel):
-    """A role list record, retaining the list endpoint's field names."""
+    """A role list record, retaining the list endpoint's field names.
 
-    id: int | None = Field(None, alias="roleId")
+    ``RoleViewDto.roleId`` (ms-rbac.yaml:1621-1623) and ``.userCount``
+    (:1651-1653) are `type: number`, so neither is narrowed to int.
+    """
+
+    id: int | float | None = Field(None, alias="roleId")
     name: str | None = None
     description: str | None = None
     type: int | None = None
@@ -211,13 +222,16 @@ class RbacRoleSummary(NetskopeModel):
     created_by: str | None = Field(None, alias="createdBy")
     updated_by: str | None = Field(None, alias="updatedBy")
     alias_name: str | None = Field(None, alias="aliasName")
-    user_count: int | None = Field(None, alias="userCount")
+    user_count: int | float | None = Field(None, alias="userCount")
 
 
 class RbacRoleDetail(NetskopeModel):
-    """A role detail with typed API-group grants, scopes, and IP restrictions."""
+    """A role detail with typed API-group grants, scopes, and IP restrictions.
 
-    id: int | None = Field(None, alias="roleId")
+    ``GetRoleResponseDTO.roleId`` (ms-rbac.yaml:2231-2233) is `type: number`.
+    """
+
+    id: int | float | None = Field(None, alias="roleId")
     name: str | None = Field(None, alias="roleName")
     description: str | None = Field(None, alias="roleDescription")
     scopes: list[RbacRoleScope] = Field(default_factory=list)
@@ -250,7 +264,7 @@ class RbacRole(NetskopeModel):
             print(f"{role.id}: {role.name}")
     """
 
-    id: int | None = Field(None, alias="roleId")
+    id: int | float | None = Field(None, alias="roleId")
     # The list endpoint uses "name"/"description"; the detail endpoint uses
     # "roleName"/"roleDescription".  populate_by_name accepts both.
     name: str | None = Field(None, alias="roleName")
@@ -262,7 +276,7 @@ class RbacRole(NetskopeModel):
     created_by: str | None = Field(None, alias="createdBy")
     updated_by: str | None = Field(None, alias="updatedBy")
     alias_name: str | None = Field(None, alias="aliasName")
-    user_count: int | None = Field(None, alias="userCount")
+    user_count: int | float | None = Field(None, alias="userCount")
     scopes: list[RbacRoleScope] = Field(default_factory=list)
     ip_allow_list: dict[str, Any] | None = Field(None, alias="ipAllowList")
     labels: dict[str, Any] | None = None

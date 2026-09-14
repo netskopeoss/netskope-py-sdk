@@ -17,7 +17,7 @@ import pytest
 
 from netskope import NetskopeClient
 from netskope.exceptions import APIError
-from netskope.resources.ips import IpsResource
+from netskope.resources.ips.resource import IpsResource
 
 from .conftest import skip_if_unavailable
 

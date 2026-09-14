@@ -77,13 +77,19 @@ def test_alert_lookup_and_scan_carry_the_timeout(client: NetskopeClient) -> None
 
 
 @respx.mock
-def test_a_caller_can_raise_or_omit_the_timeout(client: NetskopeClient) -> None:
-    """search_alert.yaml:317-319 types `timeout` as an integer in seconds."""
+def test_a_caller_can_raise_the_timeout_and_none_selects_the_default(
+    client: NetskopeClient,
+) -> None:
+    """search_alert.yaml:312-319 marks `timeout` required with `default: 180`.
+
+    ``None`` therefore selects the declared default; it cannot omit a required
+    parameter (SPEC2-EV-6).
+    """
     route = respx.get(ALERT_URL).respond(200, json=EMPTY)
     client.alerts.list_page(timeout=600)
     assert route.calls.last.request.url.params["timeout"] == "600"
     client.alerts.list_page(timeout=None)
-    assert "timeout" not in route.calls.last.request.url.params
+    assert route.calls.last.request.url.params["timeout"] == str(DATASEARCH_TIMEOUT_DEFAULT)
 
 
 @pytest.mark.parametrize("timeout", [0, -1, True, "180"])

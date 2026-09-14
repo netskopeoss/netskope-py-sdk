@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from datetime import UTC, datetime
+from typing import Any
 
 import httpx
 import pytest
@@ -11,7 +12,10 @@ import respx
 from netskope import AsyncNetskopeClient, NetskopeClient
 from netskope.exceptions import ValidationError
 from netskope.models.dem import DemAlert
-from netskope.resources.dem import AsyncDemResource, DemResource
+from netskope.resources.dem.namespace import (
+    AsyncDemResource,
+    DemResource,
+)
 from tests.unit.resources.conftest import sent_json
 
 _BASE = "https://t.goskope.com"
@@ -29,8 +33,8 @@ _DEFINITIONS = f"{_BASE}/api/v2/dem/query/definitions"
 
 # Fixed datetimes — never call datetime.now() in tests.
 _BEGIN = datetime(2026, 1, 1, tzinfo=UTC)
-_END = datetime(2026, 1, 2, tzinfo=UTC)  # +24h (inside the 48h getentities window)
-_END_72H = datetime(2026, 1, 4, tzinfo=UTC)  # +72h (outside the window)
+_END = datetime(2026, 1, 2, tzinfo=UTC)  # +24h
+_END_72H = datetime(2026, 1, 4, tzinfo=UTC)  # +72h
 _BEGIN_MS = int(_BEGIN.timestamp() * 1000)
 _END_MS = int(_END.timestamp() * 1000)
 _BEGIN_S = int(_BEGIN.timestamp())
@@ -302,10 +306,41 @@ class TestDemQueryGetData:
         assert not route.called
 
     @respx.mock
-    def test_limit_capped_at_50000(self, client: NetskopeClient) -> None:
+    def test_limit_and_offset_accept_the_declared_maximum(self, client: NetskopeClient) -> None:
+        """``QueryInput`` sets ``limit`` ``exclusiveMaximum: 10000`` and ``offset``
+        ``exclusiveMaximum: 100000`` (dem-workbench-query.yaml:447-461)."""
         route = respx.post(_GETDATA).mock(return_value=httpx.Response(200, json={}))
-        _dem(client).query.get_data("http", ["x"], begin=1, end=2, limit=99999)
-        assert sent_json(route)["limit"] == 50000
+        _dem(client).query.get_data("http", ["x"], begin=1, end=2, limit=9999, offset=99999)
+        body = sent_json(route)
+        assert body["limit"] == 9999
+        assert body["offset"] == 99999
+
+    @respx.mock
+    @pytest.mark.parametrize(
+        ("kwargs", "message"),
+        [
+            ({"limit": 10000}, "limit must be an integer between 0 and 9999"),
+            ({"limit": -1}, "limit must be an integer between 0 and 9999"),
+            ({"offset": 100000}, "offset must be an integer between 0 and 99999"),
+        ],
+    )
+    def test_out_of_range_paging_is_rejected(
+        self, client: NetskopeClient, kwargs: dict[str, int], message: str
+    ) -> None:
+        """The bounds are exclusive maxima, so 10000 and 100000 are out of range
+        (dem-workbench-query.yaml:447-461); nothing is clamped."""
+        route = respx.post(_GETDATA).mock(return_value=httpx.Response(200, json={}))
+        with pytest.raises(ValidationError, match=message):
+            _dem(client).query.get_data("http", ["x"], begin=1, end=2, **kwargs)
+        assert not route.called
+
+    @respx.mock
+    def test_zero_limit_and_offset_are_sent(self, client: NetskopeClient) -> None:
+        """Both bounds declare ``minimum: 0`` (dem-workbench-query.yaml:450, :458)."""
+        route = respx.post(_GETDATA).mock(return_value=httpx.Response(200, json={}))
+        _dem(client).query.get_data("http", ["x"], begin=1, end=2, limit=0, offset=0)
+        body = sent_json(route)
+        assert body["limit"] == 0 and body["offset"] == 0
 
     @respx.mock
     def test_invalid_data_source_no_http(self, client: NetskopeClient) -> None:
@@ -324,7 +359,7 @@ class TestDemQueryGetEntities:
             end_time=_END,
             user="a@b.com",
             applications=["Gmail"],
-            limit=250,
+            limit=100,
             offset=5,
             sort_order="desc",
         )
@@ -334,15 +369,49 @@ class TestDemQueryGetEntities:
         assert body["user"] == "a@b.com"
         assert body["applications"] == ["Gmail"]
         params = dict(route.calls.last.request.url.params)
-        # limit is capped at 100 and pagination goes in query params.
+        # Pagination goes in query params; limit's declared maximum is 100.
         assert params == {"limit": "100", "offset": "5", "sortorder": "desc"}
 
     @respx.mock
-    def test_window_over_48h_no_http(self, client: NetskopeClient) -> None:
+    def test_window_longer_than_two_days_is_sent(self, client: NetskopeClient) -> None:
+        """``GetEntitiesQueryInput`` types ``starttime``/``endtime`` as plain
+        integers with no range cap (dem-workbench-query.yaml:296-366) and the
+        operation (:1208) documents none, so a 72-hour window reaches the
+        gateway."""
+        route = respx.post(_GETENTITIES).mock(return_value=httpx.Response(200, json={"users": []}))
+        _dem(client).query.get_entities(start_time=_BEGIN, end_time=_END_72H)
+        body = sent_json(route)
+        assert body == {"starttime": _BEGIN_S, "endtime": int(_END_72H.timestamp())}
+
+    @respx.mock
+    @pytest.mark.parametrize(
+        ("kwargs", "message"),
+        [
+            ({"limit": 101}, "limit must be an integer between 0 and 100"),
+            ({"offset": 100000}, "offset must be an integer between 0 and 99999"),
+            ({"sort_order": "sideways"}, "sort_order must be one of: asc, desc"),
+            ({"monitoring": "telepathy"}, "monitoring must be one of: all, synthetic, proactive"),
+            ({"device_os": ["Plan9"]}, "Invalid device_os value"),
+        ],
+    )
+    def test_out_of_range_and_unenumerated_inputs_are_rejected(
+        self, client: NetskopeClient, kwargs: dict[str, Any], message: str
+    ) -> None:
+        """``limit`` is ``maximum: 100`` and ``offset`` ``exclusiveMaximum: 100000``
+        (dem-workbench-query.yaml:1212-1229); ``sortorder`` (:1237-1246),
+        ``monitoring`` (:334-341) and ``deviceOs`` (:309-321) are enumerated."""
         route = respx.post(_GETENTITIES).mock(return_value=httpx.Response(200, json={}))
-        with pytest.raises(ValidationError):
-            _dem(client).query.get_entities(start_time=_BEGIN, end_time=_END_72H)
+        with pytest.raises(ValidationError, match=message):
+            _dem(client).query.get_entities(start_time=_BEGIN, end_time=_END, **kwargs)
         assert not route.called
+
+    @respx.mock
+    def test_limit_zero_and_boundary_offset_are_sent(self, client: NetskopeClient) -> None:
+        """``limit`` declares ``minimum: 0`` and ``offset`` accepts 99999
+        (dem-workbench-query.yaml:1212-1229)."""
+        route = respx.post(_GETENTITIES).mock(return_value=httpx.Response(200, json={"users": []}))
+        _dem(client).query.get_entities(start_time=_BEGIN, end_time=_END, limit=0, offset=99999)
+        assert dict(route.calls.last.request.url.params) == {"limit": "0", "offset": "99999"}
 
 
 class TestDemQueryGetStates:

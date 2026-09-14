@@ -117,12 +117,20 @@ class SpmPolicyRule(NetskopeModel):
 
 
 class SpmInstanceScore(NetskopeModel):
-    id: str
-    posture_score: int
+    """One ``trends.samples[].posture_scores[]`` entry (spm/apps.yaml:678-690).
+
+    ``RecentChangesResponse`` declares no ``required`` list at any level, so a
+    sample that carries only one of the two keys still decodes.
+    """
+
+    id: str | None = None
+    posture_score: int | None = None
 
 
 class SpmTrendSample(NetskopeModel):
-    timestamp: int
+    """One ``trends.samples[]`` entry (spm/apps.yaml:656-690), nothing required."""
+
+    timestamp: int | None = None
     posture_confidence_index: int | None = None
     posture_scores: list[SpmInstanceScore] = Field(default_factory=list)
 

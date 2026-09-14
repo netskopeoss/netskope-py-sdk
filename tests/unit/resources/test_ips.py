@@ -23,7 +23,7 @@ import respx
 
 from netskope import AsyncNetskopeClient, NetskopeClient
 from netskope.exceptions import ValidationError
-from netskope.resources.ips import AsyncIpsResource, IpsResource
+from netskope.resources.ips.resource import AsyncIpsResource, IpsResource
 from tests.unit.resources.conftest import sent_json
 
 _STATUS_URL = "https://t.goskope.com/api/v2/ips/status"

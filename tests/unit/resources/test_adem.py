@@ -9,7 +9,10 @@ import respx
 
 from netskope import AsyncNetskopeClient, NetskopeClient
 from netskope.models.dem import AdemApplication, AdemDevice, AdemUserInfo
-from netskope.resources.dem import AsyncDemResource, DemResource
+from netskope.resources.dem.namespace import (
+    AsyncDemResource,
+    DemResource,
+)
 from tests.unit.resources.conftest import sent_json
 
 _BASE = "https://t.goskope.com"

@@ -30,9 +30,9 @@ For async usage::
             print(alert.alert_name)
 """
 
-from netskope._client import AsyncNetskopeClient, NetskopeClient
-from netskope._config import find_netskope_ca_cert
 from netskope._version import __version__
+from netskope.core.client import AsyncNetskopeClient, NetskopeClient
+from netskope.core.config import find_netskope_ca_cert
 from netskope.datasearch import (
     AsyncScanIterator,
     DatasearchWindow,

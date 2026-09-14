@@ -1,0 +1,1 @@
+"""The npa resource namespace."""

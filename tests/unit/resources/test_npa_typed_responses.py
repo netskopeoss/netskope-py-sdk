@@ -79,7 +79,7 @@ READS = [
                     }
                 ]
             },
-            "total": 9,
+            "total": 1,
         },
     ),
 ]
@@ -101,14 +101,18 @@ async def test_one_bounded_page_preserves_typed_items_and_wire_values(
     if inspect.isawaitable(response):
         response = await response
     page = response.parse()
-    assert page.total == 9
-    assert page.has_more is True
+    assert page.total == body["total"]
+    assert page.has_more is (path != "policy/urllist")
     assert page.limit == 2 and page.offset == 0
     assert len(page.items) == 1
     assert page.items[0].model_extra["future"] == [1]
     assert response.json() == body
     assert route.call_count == 1
-    assert dict(route.calls[0].request.url.params) == {"limit": "2", "offset": "0"}
+    # ``GET /policy/urllist`` declares only ``pending`` and ``field``
+    # (policy/urllist.yaml:132-156), so its window is applied locally and no
+    # paging parameters reach the wire.
+    expected = {} if path == "policy/urllist" else {"limit": "2", "offset": "0"}
+    assert dict(route.calls[0].request.url.params) == expected
 
 
 @pytest.mark.parametrize("asynchronous", [False, True])
@@ -353,11 +357,21 @@ WRITES = [
     (
         "PUT",
         "infrastructure/publishers/alertsconfiguration",
+        # All three keys are ``required`` on this PUT (npa_publishers.yaml:591-594),
+        # and its 200 carries only ``status`` (:630-638).
         lambda c: c.publishers.with_response.update_alerts_configuration_request(
-            PublisherAlertsConfigurationPatch(admin_users=["admin@example.com"])
+            PublisherAlertsConfigurationPatch(
+                admin_users=["admin@example.com"],
+                event_types=["UPGRADE_FAILED"],
+                selected_users="admin@example.com",
+            )
         ),
-        {"adminUsers": ["admin@example.com"]},
-        {"data": {"adminUsers": ["admin@example.com"]}},
+        {
+            "adminUsers": ["admin@example.com"],
+            "eventTypes": ["UPGRADE_FAILED"],
+            "selectedUsers": "admin@example.com",
+        },
+        {"status": "success"},
     ),
     (
         "POST",
@@ -399,8 +413,9 @@ KEYWORD_WRITES = [
             "npa", SteeringSettings({"flag_a": 1})
         ),
         {"flag_a": 1},
-        {"data": {"flag_a": 1}},
-        lambda parsed: parsed.data == {"flag_a": 1},
+        # The PATCH 200 declares only ``status`` (npa_global_config.yaml:274-283).
+        {"status": "success"},
+        lambda parsed: parsed.status == "success",
     ),
     (
         "PUT",
@@ -423,8 +438,13 @@ KEYWORD_WRITES = [
         "infrastructure/publisherupgradeprofiles/bulk",
         lambda c: c.npa.upgrade_profiles.with_response.assign(4, [10, 20]),
         {"publishers": {"apply": {"publisher_upgrade_profiles_id": "4"}, "id": ["10", "20"]}},
-        {"data": {"status": "success", "updated": True}},
-        lambda parsed: parsed.status == "success" and parsed.updated is True,
+        # publisher_upgrade_profile_bulk_response (npa_upgrade_profiles.yaml:186-205).
+        {"data": {"publishers": [{"id": 10}, {"id": 20}]}, "status": "success", "total": 2},
+        lambda parsed: (
+            parsed.status == "success"
+            and parsed.total == 2
+            and [pub.publisher_id for pub in parsed.publishers] == [10, 20]
+        ),
     ),
 ]
 

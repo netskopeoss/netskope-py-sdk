@@ -243,21 +243,24 @@ class TestAsyncUpgradeProfilesResource:
         }
 
 
-ASSIGN_BODIES = [
-    pytest.param({"status": "success", "updated": True}, id="flat"),
-    pytest.param({"data": {"status": "success", "updated": True}}, id="data"),
-]
-
-
 @pytest.mark.parametrize("asynchronous", [False, True])
-@pytest.mark.parametrize("body", ASSIGN_BODIES)
 @respx.mock
-async def test_typed_assign_unwraps_either_envelope(
+async def test_typed_assign_reads_the_declared_envelope(
     client: NetskopeClient,
     aclient: AsyncNetskopeClient,
     asynchronous: bool,
-    body: dict[str, object],
 ) -> None:
+    """``publisher_upgrade_profile_bulk_response`` is ``{data.publishers, status, total}``.
+
+    Spec: npa_upgrade_profiles.yaml:186-205, whose ``data.publishers`` items are
+    ``upgrade_publisher_response`` (:11-147).  Descending into ``data`` before
+    validating put the publisher records out of reach of the declared type.
+    """
+    body = {
+        "data": {"publishers": [{"id": 10, "name": "pub10"}, {"id": 20, "name": "pub20"}]},
+        "status": "success",
+        "total": 2,
+    }
     route = respx.put(_BULK_URL).mock(return_value=httpx.Response(200, json=body))
     profiles = (aclient if asynchronous else client).npa.upgrade_profiles.with_response
     response = profiles.assign(5, [10])
@@ -265,9 +268,31 @@ async def test_typed_assign_unwraps_either_envelope(
         response = await response
     assignment = response.parse()
 
-    assert assignment.status == "success"
-    assert assignment.updated is True
+    assert (assignment.status, assignment.total) == ("success", 2)
+    assert [pub.publisher_id for pub in assignment.publishers] == [10, 20]
+    assert [pub.publisher_name for pub in assignment.publishers] == ["pub10", "pub20"]
     assert response.json() == body
+    assert route.call_count == 1
+
+
+@pytest.mark.parametrize("asynchronous", [False, True])
+@respx.mock
+async def test_typed_assign_accepts_a_status_only_envelope(
+    client: NetskopeClient,
+    aclient: AsyncNetskopeClient,
+    asynchronous: bool,
+) -> None:
+    """Every property of the envelope is optional, so a bare status still parses."""
+    route = respx.put(_BULK_URL).mock(return_value=httpx.Response(200, json={"status": "success"}))
+    profiles = (aclient if asynchronous else client).npa.upgrade_profiles.with_response
+    response = profiles.assign(5, [10])
+    if inspect.isawaitable(response):
+        response = await response
+    assignment = response.parse()
+
+    assert assignment.status == "success"
+    assert assignment.publishers == []
+    assert assignment.total is None
     assert route.call_count == 1
 
 

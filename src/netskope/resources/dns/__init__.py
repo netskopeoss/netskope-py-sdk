@@ -1,0 +1,1 @@
+"""The dns resource namespace."""

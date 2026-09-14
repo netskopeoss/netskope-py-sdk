@@ -19,7 +19,7 @@ from netskope.exceptions import (
     ValidationError,
 )
 from netskope.models.devices import Device, DeviceTag
-from netskope.resources.devices import AsyncDevicesResource, DevicesResource
+from netskope.resources.devices.resource import AsyncDevicesResource, DevicesResource
 from tests.unit.resources.conftest import sent_json
 
 _DEVICES_URL = "https://t.goskope.com/api/v2/steering/devices"

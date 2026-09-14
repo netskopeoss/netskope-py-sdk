@@ -1,0 +1,1 @@
+"""The tokens resource namespace."""

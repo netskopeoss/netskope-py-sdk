@@ -7,14 +7,14 @@ import pytest
 import respx
 
 from netskope import AsyncNetskopeClient, NetskopeClient
-from netskope.exceptions import ValidationError
-from netskope.resources._extract import (
+from netskope.core.ids import (
     extract_item,
     extract_list,
     id_strings,
     quote_id,
     validate_id,
 )
+from netskope.exceptions import ValidationError
 from tests.unit.resources.conftest import sent_json
 
 
@@ -94,6 +94,20 @@ class TestValidateId:
     def test_error_message_uses_name(self) -> None:
         with pytest.raises(ValidationError, match="list_id"):
             validate_id("bad/id", name="list_id")
+
+    def test_trailing_newline_never_reaches_a_publisher_path(self) -> None:
+        """SPEC2-INFRA-1: npa_publishers.yaml:1407-1415 declares an integer path ID."""
+        with (
+            respx.mock(assert_all_mocked=True) as mock,
+            NetskopeClient(
+                tenant="example.goskope.coken",
+                allow_custom_tenant=True,
+                api_token="synthetic-token",
+            ) as sdk,
+        ):
+            with pytest.raises(ValidationError):
+                sdk.publishers.get("1\n")
+            assert not mock.calls
 
     def test_zero_is_a_usable_id(self) -> None:
         assert validate_id(0) == "0"

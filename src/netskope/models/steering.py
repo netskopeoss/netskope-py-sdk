@@ -17,8 +17,8 @@ class IPSecTunnelPatch(NpaRequest):
     ``bandwidth`` as a bare integer (``:187-188``) and ``encryption`` as a bare
     string (``:191-192``) with no enum on either, so a tenant on a tier outside
     the usual set is not shut out.
-    :data:`~netskope.resources.steering.TUNNEL_BANDWIDTHS` and
-    :data:`~netskope.resources.steering.TUNNEL_ENCRYPTIONS` name the values
+    :data:`~netskope.resources.steering.resource.TUNNEL_BANDWIDTHS` and
+    :data:`~netskope.resources.steering.resource.TUNNEL_ENCRYPTIONS` name the values
     Netskope commonly provisions.
     """
 
@@ -54,9 +54,31 @@ class IPSecTunnelCreate(IPSecTunnelPatch):
 
 
 class SteeringConfig(NetskopeModel):
-    """Global steering configuration for NPA or publishers."""
+    """Global steering configuration for NPA or publishers.
 
+    ``GET /globalconfig/clientconfiguration/npa``
+    (``steering/npa_global_config.yaml:229-236``) and
+    ``GET /globalconfig/publishers`` (``:363-370``) both answer with
+    ``{status, data}``, where ``data`` is ``global_config_data_response``
+    (``:34-41``); a flag mapping whose values are the strings ``"0"``/``"1"``.
+    """
+
+    status: str | None = None
     data: dict[str, Any] = Field(default_factory=dict)
+
+
+class SteeringConfigStatus(NetskopeModel):
+    """The acknowledgment a global-configuration ``PATCH`` answers with.
+
+    ``PATCH /globalconfig/clientconfiguration/npa``
+    (``steering/npa_global_config.yaml:274-283``) and
+    ``PATCH /globalconfig/publishers`` (``:408-417``) declare a 200 body whose
+    only property is ``status``, enum ``[success]``; neither echoes the stored
+    flags.  Read them back with
+    :meth:`~netskope.resources.steering.resource.SteeringResource.get_config`.
+    """
+
+    status: str | None = None
 
 
 class SteeringSettings(RootModel[dict[str, str | int]]):

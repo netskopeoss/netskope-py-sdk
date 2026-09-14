@@ -23,7 +23,7 @@ import respx
 
 from netskope import AsyncNetskopeClient, NetskopeClient
 from netskope.exceptions import ValidationError
-from netskope.resources.spm import AsyncSpmResource, SpmResource
+from netskope.resources.spm.resource import AsyncSpmResource, SpmResource
 from tests.unit.resources.conftest import sent_json
 
 _BASE = "https://t.goskope.com/api/v2/spm"

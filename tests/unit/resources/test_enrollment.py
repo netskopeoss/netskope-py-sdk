@@ -14,7 +14,7 @@ import respx
 from netskope import AsyncNetskopeClient, NetskopeClient
 from netskope.exceptions import ValidationError
 from netskope.models.enrollment import EnrollmentTokenSet
-from netskope.resources.enrollment import AsyncEnrollmentResource, EnrollmentResource
+from netskope.resources.enrollment.resource import AsyncEnrollmentResource, EnrollmentResource
 from tests.unit.resources.conftest import sent_json
 
 _URL = "https://t.goskope.com/api/v2/enrollment/tokenset"

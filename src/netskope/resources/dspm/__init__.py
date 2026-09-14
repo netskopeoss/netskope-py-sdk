@@ -1,0 +1,1 @@
+"""The dspm resource namespace."""

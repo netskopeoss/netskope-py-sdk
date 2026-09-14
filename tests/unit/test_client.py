@@ -9,14 +9,14 @@ import pytest
 
 from netskope import AsyncNetskopeClient, NetskopeClient, __version__
 from netskope.exceptions import ClientClosedError, ValidationError
-from netskope.resources.alerts import AlertsResource
-from netskope.resources.events import EventsResource
-from netskope.resources.incidents import IncidentsResource
-from netskope.resources.private_apps import PrivateAppsResource
-from netskope.resources.publishers import PublishersResource
-from netskope.resources.scim import ScimResource
-from netskope.resources.steering import SteeringResource
-from netskope.resources.url_lists import UrlListsResource
+from netskope.resources.alerts.resource import AlertsResource
+from netskope.resources.events.resource import EventsResource
+from netskope.resources.incidents.resource import IncidentsResource
+from netskope.resources.private_apps.resource import PrivateAppsResource
+from netskope.resources.publishers.resource import PublishersResource
+from netskope.resources.scim.resource import ScimResource
+from netskope.resources.steering.resource import SteeringResource
+from netskope.resources.url_lists.resource import UrlListsResource
 
 
 class TestNetskopeClient:

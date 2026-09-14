@@ -13,7 +13,7 @@ import respx
 from netskope import AsyncNetskopeClient, NetskopeClient
 from netskope.exceptions import ValidationError
 from netskope.models.dns import DnsInheritanceGroup, DnsProfile
-from netskope.resources.dns import AsyncDnsResource, DnsResource
+from netskope.resources.dns.resource import AsyncDnsResource, DnsResource
 from tests.unit.resources.conftest import sent_json
 
 _URL = "https://t.goskope.com/api/v2/profiles/dns"

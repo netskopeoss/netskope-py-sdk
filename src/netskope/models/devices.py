@@ -67,13 +67,17 @@ class DeviceTag(NetskopeModel):
     ``device_classification_count`` which the API populates only for
     general (unfiltered) and name-filtered tag queries and returns as
     ``null`` otherwise.
+
+    ``TagResponseDto`` declares ``id`` (devices/tag.yaml:738-741),
+    ``device_count`` (:749-753) and ``device_classification_count`` (:754-758)
+    as `type: number`, which admits a fraction, so none is narrowed to int.
     """
 
-    id: int | None = None
+    id: int | float | None = None
     name: str | None = None
     description: str | None = None
-    device_count: int | None = None
-    device_classification_count: int | None = None
+    device_count: int | float | None = None
+    device_classification_count: int | float | None = None
 
 
 class Device(NetskopeModel):

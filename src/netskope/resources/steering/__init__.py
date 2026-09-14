@@ -1,0 +1,1 @@
+"""The steering resource namespace."""

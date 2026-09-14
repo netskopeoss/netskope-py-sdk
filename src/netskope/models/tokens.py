@@ -55,7 +55,7 @@ class ApiToken(NetskopeModel):
 
     .. warning::
         The :attr:`token` secret is returned by the API exactly once — in the
-        response to :meth:`~netskope.resources.tokens.TokensResource.create`
+        response to :meth:`~netskope.resources.tokens.resource.TokensResource.create`
         (and to a ``reissue``).  Store it securely immediately; it cannot be
         retrieved again, and it is never printed by the SDK.  ``list``, ``get``,
         and plain updates return ``token=None``.
@@ -70,8 +70,13 @@ class ApiToken(NetskopeModel):
 
     id: str | None = None
     name: str | None = None
-    expires: int | None = None
-    """Expiry as seconds since the Unix epoch."""
+    expires: int | float | None = None
+    """Expiry as seconds since the Unix epoch.
+
+    ``ApiTokenReadResponse.expires`` (auth/api-tokens.yaml:59-61), and the
+    create and update responses (:31-33, :95-97), declare it `type: number`,
+    which admits a fraction, so it is not narrowed to int.
+    """
     endpoints: list[ApiTokenEndpoint] = Field(default_factory=list)
     token: str | None = None
     """The token secret. Only present on create/reissue responses — see warning above."""

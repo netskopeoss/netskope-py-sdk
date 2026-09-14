@@ -9,7 +9,7 @@ from pathlib import Path
 import pytest
 from pydantic import SecretStr
 
-from netskope._config import NetskopeConfig, find_netskope_ca_cert
+from netskope.core.config import NetskopeConfig, find_netskope_ca_cert
 from netskope.exceptions import ValidationError
 
 _CA_BUNDLE_ENV_VARS = (
@@ -288,10 +288,10 @@ class TestFindNetskopeCaCert:
     """Tests for find_netskope_ca_cert()."""
 
     def test_returns_none_when_no_paths_exist(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        monkeypatch.setattr("netskope._config.os.path.isfile", lambda _path: False)
+        monkeypatch.setattr("netskope.core.config.os.path.isfile", lambda _path: False)
         assert find_netskope_ca_cert() is None
 
     def test_returns_first_existing_path(self, monkeypatch: pytest.MonkeyPatch) -> None:
         target = "/opt/netskope/stagent/nsca/nscacert.pem"
-        monkeypatch.setattr("netskope._config.os.path.isfile", lambda path: path == target)
+        monkeypatch.setattr("netskope.core.config.os.path.isfile", lambda path: path == target)
         assert find_netskope_ca_cert() == target

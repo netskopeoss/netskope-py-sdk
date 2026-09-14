@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from enum import StrEnum
-from typing import Any, Literal, Self
+from typing import Any, Literal
 
 from pydantic import AliasChoices, BaseModel, ConfigDict, Field, model_validator
 
@@ -24,11 +24,16 @@ class PublisherCreate(BaseModel):
 
 
 class PublisherUpdate(BaseModel):
-    """A partial publisher update; omitted fields are not sent."""
+    """A publisher update; omitted fields are not sent, but ``name`` is required.
+
+    ``publisher_patch_request`` declares ``required: [name]``
+    (``npa_publishers.yaml:338-341``), so a PATCH that omits it; or sends it as
+    null; is rejected on arrival even when it carries other changes.
+    """
 
     model_config = ConfigDict(extra="forbid", strict=True, frozen=True)
 
-    name: str | None = None
+    name: str
 
 
 class PublisherStatus(StrEnum):
@@ -100,11 +105,42 @@ class PublisherApp(NetskopeModel):
     protocols: list[Any] | None = None
 
 
+def lift_publisher_records(data: Any) -> Any:
+    """Lift ``data.publishers`` onto the envelope so both stay reachable.
+
+    ``publishers_bulk_response`` (``npa_publishers.yaml:639-702``) and
+    ``publisher_upgrade_profile_bulk_response``
+    (``npa_upgrade_profiles.yaml:186-205``) both carry their publisher records
+    under ``data.publishers`` alongside a sibling ``status`` (and, for the
+    upgrade-profile bulk, ``total``).  Descending into ``data`` before
+    validating would put the records out of reach of a model that also declares
+    the envelope's own fields, so they are moved up one level instead.
+    """
+    if isinstance(data, dict) and "publishers" not in data:
+        nested = data.get("data")
+        if isinstance(nested, dict) and isinstance(nested.get("publishers"), list):
+            return {**data, "publishers": nested["publishers"]}
+    return data
+
+
 class PublisherActionResult(NetskopeModel):
-    """The acknowledgment returned by a bulk publisher action."""
+    """The result of a bulk publisher action.
+
+    ``publishers_bulk_response`` (``npa_publishers.yaml:639-702``) declares
+    exactly ``data.publishers``; an array of ``publisher_bulk_item``
+    (``:180-266``), the same record shape as :class:`Publisher`; and a
+    ``status`` enum.  The records are read into ``publishers`` rather than
+    discarded; it declares no ``message``, so one a tenant sends is reachable
+    through ``model_extra`` instead of as a field that is always ``None``.
+    """
 
     status: str | None = None
-    message: str | None = None
+    publishers: list[Publisher] = Field(default_factory=list)
+
+    @model_validator(mode="before")
+    @classmethod
+    def _lift_publishers(cls, data: Any) -> Any:
+        return lift_publisher_records(data)
 
 
 class PublisherRelease(NetskopeModel):
@@ -125,35 +161,27 @@ class PublisherRelease(NetskopeModel):
 
 
 class PublisherAlertsConfigurationPatch(NpaRequest):
-    """Explicit alert configuration changes; omitted fields are not sent.
+    """The complete alert configuration a ``PUT`` replaces the stored one with.
 
     ``publishers_alert_put_request`` (``npa_publishers.yaml:589-629``) declares
-    ``adminUsers``, ``eventTypes`` and ``selectedUsers`` required, and bounds
-    ``eventTypes`` to 1..5 entries (``:624-625``).  This model enforces the
-    bound and can send all three keys; it still permits a partial body, which
-    the gateway may reject.
+    ``adminUsers``, ``eventTypes`` and ``selectedUsers`` **required**
+    (``:591-594``) and bounds ``eventTypes`` to 1..5 entries (``:624-625``).
+    The operation is a whole-document replacement, so all three are required
+    here: a partial body would ask the gateway to store a configuration the
+    caller never described.
     """
 
-    admin_users: list[str] | None = Field(None, alias="adminUsers")
-    event_types: (
-        list[
-            Literal[
-                "UPGRADE_WILL_START",
-                "UPGRADE_STARTED",
-                "UPGRADE_SUCCEEDED",
-                "UPGRADE_FAILED",
-                "CONNECTION_FAILED",
-            ]
+    admin_users: list[str] = Field(alias="adminUsers")
+    event_types: list[
+        Literal[
+            "UPGRADE_WILL_START",
+            "UPGRADE_STARTED",
+            "UPGRADE_SUCCEEDED",
+            "UPGRADE_FAILED",
+            "CONNECTION_FAILED",
         ]
-        | None
-    ) = Field(None, alias="eventTypes", min_length=1, max_length=5)
-    selected_users: str | None = Field(None, alias="selectedUsers")
-
-    @model_validator(mode="after")
-    def require_changes(self) -> Self:
-        if not self.model_fields_set:
-            raise ValueError("At least one alert configuration field is required.")
-        return self
+    ] = Field(alias="eventTypes", min_length=1, max_length=5)
+    selected_users: str = Field(alias="selectedUsers")
 
 
 class PublisherAlertsConfiguration(NetskopeModel):
@@ -168,3 +196,16 @@ class PublisherAlertsConfiguration(NetskopeModel):
     admin_users: list[str] = Field(default_factory=list, alias="adminUsers")
     event_types: list[str] = Field(default_factory=list, alias="eventTypes")
     selected_users: str | None = Field(None, alias="selectedUsers")
+
+
+class PublisherAlertsConfigurationStatus(NetskopeModel):
+    """The acknowledgment ``PUT /publishers/alertsconfiguration`` answers with.
+
+    ``publishers_alert_put_response`` (``npa_publishers.yaml:630-638``) declares
+    one property; ``status``, enum ``success`` / ``not found`` / ``failure`` :
+    and no configuration at all.  Read the configuration back with
+    :meth:`~netskope.resources.publishers.resource.PublishersResource.get_alerts_configuration`
+    to see what the gateway stored.
+    """
+
+    status: str | None = None

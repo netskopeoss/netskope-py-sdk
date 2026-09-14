@@ -77,7 +77,9 @@ class AtpUrlScan(AdminRequest):
 
 
 class AtpFileSubmission(NetskopeModel):
-    job_id: str = Field(alias="jobid")
+    """``TssScanAPIResponse`` (atp/atpsvc.yaml:16-31); nothing is required."""
+
+    job_id: str | None = Field(None, alias="jobid")
     status: str | None = None
     md5: str | None = None
     sha256: str | None = None
@@ -85,7 +87,9 @@ class AtpFileSubmission(NetskopeModel):
 
 
 class AtpUrlSubmission(NetskopeModel):
-    submission_id: str
+    """``ScanInProgress`` (atp/urlscan.yaml:43-55); nothing is required."""
+
+    submission_id: str | None = None
     status: str | None = None
     message: str | None = None
     url_sha256: str | None = None
@@ -99,7 +103,11 @@ class AtpScanReport(NetskopeModel):
     md5: str
     sha256: str
     requests_served: int
-    verdict: str
+    # atp/atpsvc.yaml:66-73 lists `verdict` as required, but the same schema is
+    # reused for the 202 in-progress response (:409-419), whose own example is
+    # {jobid, md5, requests_served, sha256, status: InProgress} with no verdict.
+    # Polling is the documented flow, so the field has to be optional.
+    verdict: str | None = None
     av_detection: dict[str, JsonValue] = Field(default_factory=dict)
     dropped: list[JsonValue] = Field(default_factory=list)
     network: dict[str, JsonValue] = Field(default_factory=dict)
@@ -108,7 +116,11 @@ class AtpScanReport(NetskopeModel):
 
 
 class AtpSubmissionReport(NetskopeModel):
-    """TPaaS report content and its already-encoded process-tree document."""
+    """TPaaS report content and its already-encoded process-tree document.
 
-    report: dict[str, JsonValue]
+    ``GetReportResponse`` (atp/tpaassvc.yaml:64-70) declares no ``required``
+    list, so a reply that carries only ``processtree`` still decodes.
+    """
+
+    report: dict[str, JsonValue] = Field(default_factory=dict)
     process_tree: str | None = Field(None, alias="processtree")

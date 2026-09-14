@@ -15,7 +15,7 @@ import respx
 from netskope import AsyncNetskopeClient, NetskopeClient
 from netskope.exceptions import ValidationError
 from netskope.models.tokens import ApiToken, ApiTokenEndpoint
-from netskope.resources.tokens import AsyncTokensResource, TokensResource
+from netskope.resources.tokens.resource import AsyncTokensResource, TokensResource
 from tests.unit.resources.conftest import sent_json
 
 _URL = "https://t.goskope.com/api/v2/auth/tokens"

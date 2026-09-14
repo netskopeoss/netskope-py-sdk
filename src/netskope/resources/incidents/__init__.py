@@ -1,0 +1,1 @@
+"""The incidents resource namespace."""

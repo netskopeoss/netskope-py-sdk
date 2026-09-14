@@ -17,7 +17,7 @@ import respx
 
 from netskope import AsyncNetskopeClient, NetskopeClient
 from netskope.exceptions import ValidationError
-from netskope.resources.rbi import AsyncRbiResource, RbiResource
+from netskope.resources.rbi.resource import AsyncRbiResource, RbiResource
 from tests.unit.resources.conftest import sent_json
 
 _BASE = "https://t.goskope.com/api/v2/rbi"

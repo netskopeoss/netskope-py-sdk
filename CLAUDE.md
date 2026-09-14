@@ -82,14 +82,29 @@ This is a Python SDK for the Netskope REST API v2 with sync and async support. P
 
 **Request flow:** `NetskopeClient` → resource (e.g. `AlertsResource`) → `SyncTransport.request()` → `send_with_retries()` → httpx → `raise_for_status()` → response/pagination
 
+**Layout.** Three layers: `core/` is the plumbing no API area owns, `resources/<area>/` is one package per API namespace, `models/` is one module per area. **No module re-exports anything for convenience.** Import the module that owns the symbol: `netskope.resources.dspm.resource`, `netskope.resources.aicc.namespace`, `netskope.resources.shared.aicc_endpoint`, `netskope.core.pagination` for `Page`. `netskope`, `netskope.exceptions`, `netskope.response`, `netskope.datasearch` and `netskope.models.*` are the exception — they are the declared public API and export deliberately. `tests/unit/test_cli_public_surface.py` pins the 86 symbols netskope-cli imports as a deliberate coupling check between two repos that ship together — when a path moves, move the CLI and regenerate that table rather than adding a re-export to satisfy it.
+
+```
+netskope/
+├── __init__.py  exceptions.py  pagination.py  response.py  datasearch.py   public surface
+├── core/        client  config  transport  retry  pagination  resource  ids  decoding  response_list
+├── resources/
+│   ├── shared/  npa  admin  datasearch_query  aicc_contract  aicc_endpoint
+│   └── <area>/  resource.py  decoder.py  paths.py        (dem/ and aicc/ add sub-namespace modules)
+└── models/      <area>.py
+```
+
+**Each area package holds three files.** `resource.py` is the public namespace class; `decoder.py` holds the `with_response` accessors that keep the original HTTP response; `paths.py` holds the path constants and payload builders **both** of the others need. That third module is not optional bookkeeping — it is what keeps the package acyclic. `resource.py` imports `decoder.py` for its `with_response` accessor, so if `decoder.py` imported `resource.py` back for a path constant, the two would form a cycle. Before this split there were 14 such cycles, papered over by 53 imports hidden inside method bodies plus 14 matching `TYPE_CHECKING` blocks. `tests/unit/test_import_graph.py` fails on any cycle and on any resource import deferred into a function; **put shared paths and builders in `paths.py` rather than reaching across.**
+
 **Key layers:**
 
-- **`_client.py`** — `NetskopeClient` / `AsyncNetskopeClient` entry points. Instantiates transport and exposes resource namespaces as properties (e.g. `client.alerts`, `client.scim.users`).
-- **`_config.py`** — `NetskopeConfig.resolve()` implements a boto3-style credential chain: explicit params → env vars (`NETSKOPE_TENANT`, `NETSKOPE_API_TOKEN`). Validates tenant domain, blocks IP addresses (SSRF prevention), stores token as `SecretStr`.
-- **`_transport.py`** — `SyncTransport` / `AsyncTransport` wrap httpx with token injection, logging, and retry delegation. All HTTP flows through here.
-- **`_retry.py`** — Exponential backoff with jitter, respects `Retry-After` headers. Rebuilds request before each retry to avoid consumed stream issues.
-- **`_pagination.py`** — `SyncPaginatedResponse` / `AsyncPaginatedResponse` for offset-based pagination; `SyncScimPaginatedResponse` / `AsyncScimPaginatedResponse` for RFC 7644 SCIM pagination (`startIndex`/`count`). All return lazy iterators yielding typed Pydantic models.
-- **`resources/`** — Each API namespace (alerts, events, incidents, scim, publishers, private_apps, steering, url_lists) has sync + async resource classes inheriting from `_base.py`. Resources use `_build_params()` helpers and `_extract()` functions to handle response envelope variations.
+- **`core/client.py`** — `NetskopeClient` / `AsyncNetskopeClient` entry points. Instantiates transport and exposes resource namespaces as properties (e.g. `client.alerts`, `client.scim.users`).
+- **`core/config.py`** — `NetskopeConfig.resolve()` implements a boto3-style credential chain: explicit params → env vars (`NETSKOPE_TENANT`, `NETSKOPE_API_TOKEN`). Validates tenant domain, blocks IP addresses (SSRF prevention), stores token as `SecretStr`.
+- **`core/transport.py`** — `SyncTransport` / `AsyncTransport` wrap httpx with token injection, logging, and retry delegation. All HTTP flows through here.
+- **`core/retry.py`** — Exponential backoff with jitter, respects `Retry-After` headers. Rebuilds request before each retry to avoid consumed stream issues. A request not marked `retry_safe` gets a retry limit of **0**, which also suppresses retry on timeout and network error — so `retry_safe=True` on a read-shaped POST is load-bearing, not decoration.
+- **`core/pagination.py`** — `SyncPaginatedResponse` / `AsyncPaginatedResponse` for offset-based pagination; `SyncScimPaginatedResponse` / `AsyncScimPaginatedResponse` for RFC 7644 SCIM pagination (`startIndex`/`count`). All return lazy iterators yielding typed Pydantic models. `Page` is imported from here directly; there is no `netskope.pagination` façade.
+- **`core/resource.py`, `core/ids.py`, `core/decoding.py`, `core/response_list.py`** — the resource base classes, id validation and URL-segment quoting, and the shared envelope decoders.
+- **`resources/<area>/`** — Each API namespace (alerts, events, incidents, scim, publishers, private_apps, steering, url_lists, …) has sync + async resource classes inheriting from `core/resource.py`.
 - **`models/`** — Pydantic v2 models. `NetskopeModel` base uses `extra="allow"` (forward-compatible), `frozen=True` (immutable). `TimestampMixin` reads both epoch numbers and datetime strings into a UTC-aware datetime; a value it cannot read becomes `None` rather than rejecting the record (and with it the page). Field aliases map API names to Pythonic names (e.g. `_id` → `id`, `severity_level` → `severity`).
 - **`exceptions.py`** — Hierarchy: `NetskopeError` → `APIError` (with `status_code`, `request_id`) → specific errors (401→`AuthenticationError`, 429→`RateLimitError`, etc.). Non-HTTP failures are `NetskopeError` siblings of `APIError`: `ValidationError`, `ResponseValidationError`, `PaginationError`, and `ClientClosedError` (a request made after the client is closed).
 
@@ -102,7 +117,7 @@ repository's `docs/typed-sdk-development.md` describes the local artifact
 workflow that builds both packages from clean wheels.
 
 - `pagination.Page[T]` retains validated totals, offsets, limits, and continuation evidence.
-  Build one through `_pagination.build_page()` (or `_make_page`/`parse_object_page`, which
+  Build one through `core.pagination.build_page()` (or `_make_page`/`parse_object_page`, which
   wrap it) rather than constructing `Page` directly: it applies the requested-limit ceiling,
   the reported-offset check, and the total check in one place. Pass `echoed_offset` whenever
   the envelope reports the offset it served.
@@ -114,7 +129,13 @@ workflow that builds both packages from clean wheels.
 - New AICC endpoint handles expose typed queries, pages, and bounded traversal. They own
   total retention, duplicate/offset checks, and pagination limits for the CLI.
 - GET/HEAD/OPTIONS can retry by default. Explicitly safe read POSTs may opt in;
-  mutations do not automatically replay. Preserve omitted versus null/empty request fields.
+  use each operation's `rbac.access` to override that default. Enrollment token-set
+  reads and private-app policy-usage POSTs are marked `rw` and must not retry.
+  Preserve omitted versus null/empty request fields.
+- Unpaginated publisher and URL-list collections use `paginated=False`; their
+  page methods use `core.pagination.local_page()` and send no offset or limit.
+- Notification template POST and PATCH share the same required name, title, and
+  message fields. Validate both with `NotificationTemplateWrite`.
 
 ## Conventions
 
@@ -124,7 +145,7 @@ workflow that builds both packages from clean wheels.
 - Time parameters use `is not None` checks (epoch `0` is a valid value)
 - Pagination max safety limit: 1000 pages
 - `retry_on_status=frozenset()` disables status-based retries; `None` selects the
-  defaults (`_config.py` distinguishes the two with `is not None`)
+  defaults (`core/config.py` distinguishes the two with `is not None`)
 - ruff line-length: 100, target: py311
 - Toolchain: uv for the environment, the lockfile and packaging; ruff for lint (rules E, W, F, I, N, UP, B, SIM, RUF) and formatting; ty for type checking `src/`. All of it is configured in `pyproject.toml`. Suppress a ty diagnostic with `# ty: ignore[rule]` and say why on the line above; bare `# type: ignore` also works. Inside a class that defines a `list` method, spell the builtin `builtins.list[...]` in annotations — the method shadows the name in class scope
 - Tests use `respx` for HTTP mocking, `pytest-asyncio` (auto mode) for async tests

@@ -59,10 +59,19 @@ class DnsInheritanceGroupDeployment(AdminRequest):
 
 
 class DnsReference(NetskopeModel):
-    """An identifier/name entry from a DNS reference collection."""
+    """An identifier/name entry from a DNS reference collection.
 
-    id: str | int
-    name: str
+    ``DNSTunnel`` (``profiles/dns.yaml:13-27``), ``DNSDomainCategory``
+    (``:38-184``) and ``DNSRecordType`` (``:195-216``) each declare ``id`` and
+    ``name`` as plain optional properties with no ``required`` block, so a
+    record that omits one is a valid answer and must not reject its whole page.
+    ``category_type`` (``:179-184``, enum ``Security`` / ``Business``) is
+    declared by ``DNSDomainCategory`` only and is absent from the other two.
+    """
+
+    id: str | int | None = None
+    name: str | None = None
+    category_type: str | None = None
 
 
 class DnsProfile(NetskopeModel):

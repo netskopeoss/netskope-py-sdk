@@ -29,7 +29,7 @@ class Incident(NetskopeModel, TimestampMixin):
     """A Netskope security incident."""
 
     id: str | None = Field(None, alias="_id")
-    incident_id: str | int | None = None
+    incident_id: str | int | float | None = None
     user: str | None = None
     # The same rows reach IncidentEvent through the datasearch endpoint, where
     # these fields are already known to arrive as numbers on some tenants.
@@ -40,7 +40,12 @@ class Incident(NetskopeModel, TimestampMixin):
     app: str | None = None
     activity: str | None = None
     object_name: str | None = Field(None, alias="object")
-    policy_name: str | None = None
+    # Incident rows reach IncidentEvent through the same datasearch endpoint,
+    # where the matched policy is `policy` (search_alert.yaml:175-177,
+    # search_app.yaml:169-170); search_incident.yaml declares `policy` only
+    # inside the nested dlp object (:154-155), so this alias mirrors the
+    # sibling model rather than narrowing what a row may carry.
+    policy_name: str | None = Field(None, validation_alias=AliasChoices("policy_name", "policy"))
     action: str | None = None
     assignee: str | int | None = None
     dlp_profile: str | int | None = None
@@ -155,10 +160,24 @@ class IncidentUpdateOutcome(NetskopeModel):
     ``ok`` is the success flag. ``result`` is whatever the service reported
     alongside it: an entry count, a numeric count as a string, a message such
     as ``"Update Successful"``, or nothing at all.
+
+    ``incident_update_200_response_item`` (incidents/incident_update.yaml:8-14)
+    declares ``{ok: integer, result: string}`` with no ``required`` list and no
+    ``enum``/``minimum``/``maximum`` on ``ok``, so both properties are optional
+    and ``ok`` is an unbounded integer. Only ``ok == 1`` counts as acceptance :
+    see :attr:`IncidentUpdateResult.accepted`.
     """
 
-    ok: int = Field(ge=0, le=1)
+    ok: int | None = None
     result: int | str | None = None
+
+    @field_validator("ok", mode="before")
+    @classmethod
+    def _reject_boolean_flag(cls, value: Any) -> Any:
+        """``ok`` is declared ``type: integer``; JSON ``true`` is not one."""
+        if isinstance(value, bool):
+            raise ValueError("The ok flag must be an integer.")
+        return value
 
     @field_validator("result", mode="before")
     @classmethod
@@ -190,7 +209,8 @@ class IncidentUpdateResult(NetskopeModel):
         ``{"result": [{"ok": 1, "result": "Update Successful"}]}``
         (incident_update.yaml:69-75) — so ``ok`` is the acceptance signal and a
         message carries no count. A reported count of zero still contradicts
-        acceptance; read :attr:`accepted_entries` for the count itself.
+        acceptance; read :attr:`accepted_entries` for the count itself. An
+        absent ``ok``, or any value other than ``1``, is not acceptance.
         """
         return bool(self.outcomes) and all(
             outcome.ok == 1 and (outcome.count is None or outcome.count > 0)
