@@ -353,14 +353,14 @@ class TestPublishersResource:
         assert len(respx.calls) == 0
 
     @respx.mock
-    def test_list_page_drops_a_total_that_contradicts_the_rows(
+    def test_list_page_reports_a_total_that_contradicts_the_rows(
         self, client: NetskopeClient
     ) -> None:
         body = {"publishers": [{"publisher_id": n} for n in (1, 2, 3)], "total": 1}
         route = respx.get(_URL).mock(return_value=httpx.Response(200, json=body))
         page = client.publishers.list_page()
         assert [publisher.publisher_id for publisher in page.items] == [1, 2, 3]
-        assert page.total is None
+        assert page.total == 1
         assert route.call_count == 1
 
     @respx.mock
@@ -736,14 +736,14 @@ class TestAsyncPublishersResource:
         assert len(respx.calls) == 0
 
     @respx.mock
-    async def test_list_page_drops_a_total_that_contradicts_the_rows(
+    async def test_list_page_reports_a_total_that_contradicts_the_rows(
         self, aclient: AsyncNetskopeClient
     ) -> None:
         body = {"publishers": [{"publisher_id": n} for n in (1, 2, 3)], "total": 1}
         route = respx.get(_URL).mock(return_value=httpx.Response(200, json=body))
         page = await aclient.publishers.list_page()
         assert [publisher.publisher_id for publisher in page.items] == [1, 2, 3]
-        assert page.total is None
+        assert page.total == 1
         assert route.call_count == 1
 
     @respx.mock

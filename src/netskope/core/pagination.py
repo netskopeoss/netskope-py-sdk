@@ -72,6 +72,11 @@ class Page(Generic[T]):
             or operation-specific continuation evidence. ``None`` means the
             response does not establish this. ``False`` does not account for
             records skipped by a nonzero offset.
+        windowed_locally: Whether this page was cut from a full collection the
+            client already holds, because the operation declares no paging
+            parameters. When true the response body carries the whole
+            collection and ``items`` is a slice of it, so a consumer comparing
+            the two must apply ``offset`` and ``len(items)`` itself.
     """
 
     items: list[T]
@@ -80,6 +85,7 @@ class Page(Generic[T]):
     limit: int | None
     metadata: dict[str, Any] = field(default_factory=dict)
     has_more: bool | None = None
+    windowed_locally: bool = False
 
 
 def coerce_total(value: Any) -> int | None:
@@ -193,26 +199,25 @@ def local_page(
     applied to the records already in hand, and the complete collection
     establishes ``has_more`` without needing a total.
 
-    A ``total`` that disagrees with the number of records is dropped rather
-    than raised on. These operations cannot return a window, so the records in
-    hand are the collection by definition and a disagreeing total is the
-    service's own bookkeeping, not evidence of truncation; refusing the
-    response would leave the caller no way to read data the gateway returned
-    successfully.
+    The stated ``total`` is reported as received, even when it disagrees with
+    the number of records. ``npa_publishers.yaml:877`` declares it, and the
+    client has no better information about how many records exist than the
+    service that counted them; a disagreement means the service capped its own
+    response, which is worth surfacing rather than hiding. ``has_more`` is
+    derived from the records in hand, not from the total, so a wrong total
+    cannot make the traversal skip anything.
     """
     total = select_total(metadata)
-    if total is not None and total != len(items):
-        logger.debug(
-            "Discarding the stated total %d: the unpaginated response carries %d records.",
-            total,
-            len(items),
-        )
-        total = None
     window = items[offset:] if offset else items
     if limit is not None:
         window = window[:limit]
-    page = build_page(window, offset=offset, limit=limit, total=total, metadata=metadata)
+    # The page is built without the total so `build_page`'s records-past-total
+    # guard does not fire: that guard protects a *traversal* from a shrinking
+    # total, and there is no traversal here. The stated total is attached after.
+    page = build_page(window, offset=offset, limit=limit, total=None, metadata=metadata)
+    page.total = total
     page.has_more = offset + len(window) < len(items)
+    page.windowed_locally = True
     return page
 
 
