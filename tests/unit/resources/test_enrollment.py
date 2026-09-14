@@ -136,8 +136,10 @@ class TestEnrollmentResource:
 
     @respx.mock
     def test_delete_token_type_returns_none_on_204(self, enrollment: EnrollmentResource) -> None:
-        respx.delete(f"{_URL}/4/0").mock(return_value=httpx.Response(204))
+        route = respx.delete(f"{_URL}/4/0").mock(return_value=httpx.Response(204))
         assert enrollment.delete_token_type(4, 0) is None
+        # Without this the test cannot tell a decoded 204 from a request never made.
+        assert route.called
 
     def test_delete_token_type_rejects_bad_type(self, enrollment: EnrollmentResource) -> None:
         with pytest.raises(ValidationError):

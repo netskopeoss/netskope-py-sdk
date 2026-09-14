@@ -103,9 +103,16 @@ class TestUrlListsResource:
             client.url_lists.update(42)
 
     @respx.mock
-    def test_delete(self, client: NetskopeClient) -> None:
-        respx.delete(f"{_URL}/42").mock(return_value=httpx.Response(200, json={}))
-        client.url_lists.delete(42)  # Should not raise
+    def test_delete_issues_one_request_to_the_list_path(self, client: NetskopeClient) -> None:
+        """``delete`` returns nothing, so the route is the only evidence it ran.
+
+        ``tests/conftest.py:44`` sets ``assert_all_called=False``, so a route
+        left unasserted would let a no-op implementation pass this test.
+        """
+        route = respx.delete(f"{_URL}/42").mock(return_value=httpx.Response(200, json={}))
+
+        assert client.url_lists.delete(42) is None
+        assert route.call_count == 1
 
     @respx.mock
     def test_deploy_posts_to_the_urllist_deploy_path(self, client: NetskopeClient) -> None:
