@@ -2,7 +2,8 @@
 
 Kept apart from both so the resource can import the decoder for its
 ``with_response`` accessor without the decoder importing the resource
-back. This is the shape ``_alert_query.py`` already uses.
+back. This is the shape ``netskope/resources/shared/datasearch_query.py``
+already uses.
 """
 
 from __future__ import annotations

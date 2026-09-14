@@ -238,6 +238,19 @@ expansion from 8 to 24 resource namespaces.
 
 ### Fixed
 
+- `dem.query` time bounds that cannot be converted to the RFC 3339 shape the
+  operation declares raise `ValidationError` instead of a bare `ValueError` from
+  `datetime.fromtimestamp`. The usual cause is passing epoch seconds or
+  microseconds where the surface takes milliseconds.
+- `AiccMcpQuery` no longer offers `first_seen_after`. Four inventory list
+  operations declare that parameter and `/inventory/mcp-servers` does not, so it
+  moved from the shared base onto the four query models whose endpoints take it;
+  it was previously accepted by the model and then refused before the request.
+- A SCIM search matching nothing decodes as an empty page. `Resources` is
+  required only once `totalResults` is non-zero (RFC 7644 3.4.2), so
+  `scim.users.list_page()`, `scim.groups.list_page()` and `rbac.admins.list_page()`
+  no longer reject a conformant empty `ListResponse`. A non-zero total with no
+  collection is still an error.
 - `rbac.roles.list()`, `rbac.roles.get()` and `steering.get_tunnel()` raise
   `ResponseValidationError` rather than a bare `ValueError` when a 200 body carries
   no recognisable record. Those six call sites decoded outside the `ApiResponse`

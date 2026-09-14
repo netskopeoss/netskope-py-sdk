@@ -59,15 +59,20 @@ class _AlertQuery(BaseModel):
 def _validate_timeout(timeout: int | None) -> int:
     """Resolve the datasearch query timeout in seconds.
 
-    ``timeout`` is ``required: true`` on every ``/events/datasearch/*`` route
-    except clientstatus (events/search_alert.yaml:312-319,
+    Every ``/events/datasearch/*`` route **declares** ``timeout`` with
+    ``default: 180``, so the SDK sends it on all of them. Six of the seven also
+    mark it ``required: true`` (events/search_alert.yaml:312-319,
     events/search_app.yaml:343-350, events/search_network.yaml:218-225,
     events/search_page.yaml:283-290, events/search_incident.yaml:458-465,
-    events/search_epdlp.yaml:173-180), and each of them declares
-    ``default: 180``. ``None`` therefore selects that documented default; it
-    never omits a required parameter. Endpoints that declare no timeout at all
-    (``/events/data/audit``, ``/events/data/infrastructure``) omit it through
-    ``declares_timeout=False`` instead.
+    events/search_epdlp.yaml:173-180); clientstatus declares it as an optional
+    parameter with the same default. That difference is about whether the
+    gateway demands the parameter, not about whether it accepts one, so the
+    SDK's behaviour is the same for all seven: ``None`` selects the documented
+    default and never omits a required parameter.
+
+    Separately, the two routes that declare no ``timeout`` at all
+    (``/events/data/audit``, ``/events/data/infrastructure``) are not datasearch
+    routes; they omit the parameter through ``declares_timeout=False``.
     """
     if timeout is None:
         return DATASEARCH_TIMEOUT_DEFAULT

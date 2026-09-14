@@ -10,7 +10,7 @@ import pytest
 import respx
 
 from netskope import AsyncNetskopeClient, NetskopeClient
-from netskope.exceptions import ValidationError
+from netskope.exceptions import NetskopeError, ValidationError
 from netskope.models.dem import DATA_QUERY_SOURCES, DemAlert, DemQueryResult, QueryDataSource
 from netskope.resources.dem.namespace import (
     AsyncDemResource,
@@ -942,3 +942,43 @@ class TestAlertRuleWindowIsValidated:
         with pytest.raises(ValidationError) as typed:
             client.dem.alert_rules.with_response.list(offset=-3)
         assert str(untyped.value) == str(typed.value)
+
+
+class TestQueryTimeBoundsFailAsNetskopeErrors:
+    """A time bound the SDK cannot convert is a ValidationError, not a ValueError.
+
+    ``_absolute_bound`` converts epoch milliseconds to the RFC 3339 shape
+    ``QueryInput`` declares, and ``datetime.fromtimestamp`` raises a bare
+    ``ValueError`` (``OSError`` on some platforms) for a value out of the
+    representable date range. This is a request builder, so the
+    ``ValueError`` -> ``ResponseValidationError`` conversion in
+    ``ApiResponse.parse`` never applies: the raw exception would reach the
+    caller. The realistic trigger is passing epoch seconds or microseconds to a
+    surface whose historical unit is milliseconds.
+    """
+
+    @respx.mock
+    @pytest.mark.parametrize(
+        "begin",
+        [
+            pytest.param(1_700_000_000_000_000, id="microseconds-not-millis"),
+            pytest.param(10**18, id="far-future"),
+        ],
+    )
+    def test_an_unrepresentable_bound_raises_a_netskope_error(
+        self, client: NetskopeClient, begin: int
+    ) -> None:
+        with pytest.raises(ValidationError) as caught:
+            _dem(client).query.get_data("http", ["user_id"], begin=begin, end=begin + 1000)
+        assert isinstance(caught.value, NetskopeError)
+        assert len(respx.calls) == 0
+
+    @respx.mock
+    async def test_async_unrepresentable_bound_raises_a_netskope_error(
+        self, aclient: AsyncNetskopeClient
+    ) -> None:
+        with pytest.raises(ValidationError):
+            await _adem(aclient).query.get_data(
+                "http", ["user_id"], begin=10**18, end=10**18 + 1000
+            )
+        assert len(respx.calls) == 0

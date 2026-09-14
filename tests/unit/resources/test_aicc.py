@@ -12,9 +12,12 @@ from pydantic import ValidationError as ModelValidationError
 from netskope import AsyncNetskopeClient, NetskopeClient
 from netskope.exceptions import PaginationError, ResponseValidationError, ValidationError
 from netskope.models.aicc import (
+    AiccAgentQuery,
     AiccApplicationQuery,
     AiccDataCoverage,
     AiccExtensionRelatedQuery,
+    AiccIdentityQuery,
+    AiccMcpQuery,
     AiccModelQuery,
     AiccProtectionQuery,
     AiccSort,
@@ -744,3 +747,34 @@ class TestAiccContract:
             AiccDataCoverage.model_validate({"data_available_since": None}).data_available_since
             is None
         )
+
+
+def test_first_seen_after_is_declared_only_where_the_endpoint_takes_it():
+    """Four inventory endpoints declare ``first_seen_after``; mcp-servers does not.
+
+    ``aicc/inventory.yaml`` declares the parameter on ``/inventory/ai-applications``,
+    ``/inventory/identities``, ``/inventory/models`` and ``/inventory/agents``, and
+    not on ``/inventory/mcp-servers``, whose parameter list ends at ``active_only``.
+    Carrying the field on the shared base gave ``AiccMcpQuery`` a field the SDK
+    then refused at request time: the query model should not offer it at all.
+    """
+    for accepting in (AiccApplicationQuery, AiccIdentityQuery, AiccModelQuery, AiccAgentQuery):
+        assert "first_seen_after" in accepting.model_fields, accepting.__name__
+
+    assert "first_seen_after" not in AiccMcpQuery.model_fields
+    with pytest.raises(ModelValidationError):
+        AiccMcpQuery(**WINDOW, first_seen_after="2026-08-01T00:00:00Z")
+
+
+def test_the_contract_table_agrees_with_the_query_models():
+    """Every inventory list rule names the parameters its query model offers."""
+    pairs = (
+        ("/inventory/ai-applications", AiccApplicationQuery),
+        ("/inventory/identities", AiccIdentityQuery),
+        ("/inventory/models", AiccModelQuery),
+        ("/inventory/agents", AiccAgentQuery),
+        ("/inventory/mcp-servers", AiccMcpQuery),
+    )
+    for path, model in pairs:
+        allowed = {name for name, *_ in QUERY_RULES[path]}
+        assert ("first_seen_after" in allowed) == ("first_seen_after" in model.model_fields), path

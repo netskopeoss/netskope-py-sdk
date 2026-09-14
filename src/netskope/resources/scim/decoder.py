@@ -72,8 +72,21 @@ def _scim_page(response: httpx.Response, model: type[T], count: int, start_index
                 "The SCIM response startIndex does not match the requested page.",
                 offset=start_index - 1,
             )
+    # RFC 7644 3.4.2 requires `Resources` only when `totalResults` is non-zero,
+    # and the gateway's SCIM schema never lists it as required, so a search that
+    # matched nothing is an empty page rather than a decode failure -- which is
+    # already how the lazy iterator reads it. The tolerance stops there: a
+    # non-zero total with no collection is a response that contradicts itself,
+    # and reading it as an empty page would silently lose records.
+    empty = isinstance(body, dict) and str(body.get("totalResults")) == "0"
     return page(
-        response, model, "Resources", limit=count, offset=start_index - 1, total_key="totalResults"
+        response,
+        model,
+        "Resources",
+        limit=count,
+        offset=start_index - 1,
+        total_key="totalResults",
+        allow_missing=empty,
     )
 
 

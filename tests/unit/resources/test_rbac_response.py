@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from typing import Any
 
+import httpx
 import pytest
 import respx
 from pydantic import ValidationError as ModelValidationError
@@ -505,3 +506,33 @@ def test_admin_iterator_page_size_is_bounded_before_http(
     with pytest.raises(ValidationError, match="page_size must be an integer between 1 and 1000"):
         client.rbac.admins.list(page_size=page_size)
     assert len(respx.calls) == 0
+
+
+@respx.mock
+def test_an_empty_admin_search_decodes_as_an_empty_page(client: NetskopeClient) -> None:
+    """The admins page follows the same RFC 7644 rule as the SCIM pages.
+
+    ``Resources`` is REQUIRED only once ``totalResults`` is non-zero (RFC 7644
+    3.4.2), and the gateway's SCIM schema never lists it as required, so a
+    search that matched nothing is an empty page. A non-zero total with no
+    collection stays an error: reading that as empty would lose records.
+    """
+    empty = {
+        "schemas": ["urn:ietf:params:scim:api:messages:2.0:ListResponse"],
+        "totalResults": 0,
+        "startIndex": 1,
+        "itemsPerPage": 0,
+    }
+    respx.get(ADMINS_URL).mock(return_value=httpx.Response(200, json=empty))
+    page = client.rbac.admins.list_page()
+    assert page.items == []
+    assert page.total == 0
+
+
+@respx.mock
+def test_a_nonzero_admin_total_without_records_is_refused(client: NetskopeClient) -> None:
+    respx.get(ADMINS_URL).mock(
+        return_value=httpx.Response(200, json={"totalResults": 4, "startIndex": 1})
+    )
+    with pytest.raises((ResponseValidationError, PaginationError)):
+        client.rbac.admins.list_page()

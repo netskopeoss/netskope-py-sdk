@@ -6,7 +6,7 @@ connections), read the two connected-datastore analytics reports, and start
 classification scans.
 
 ``list_resources`` and ``list_page`` address the same verified public routes
-(``_dspm_response._ROUTES``); ``list_resources`` returns the raw body and
+(``netskope.resources.dspm.decoder._ROUTES``); ``list_resources`` returns the raw body and
 ``list_page`` returns typed records.  ``supported_resource_types`` names that
 surface.
 

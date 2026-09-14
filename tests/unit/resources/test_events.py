@@ -945,3 +945,30 @@ class TestClientStatusKeepsItsNestedObjects:
         event = ClientStatusEvent.model_validate({"hostname": "h", "os": "linux", "status": "up"})
         assert (event.hostname, event.os, event.status) == ("h", "linux", "up")
         assert event.host_info is None
+
+
+class TestClientStatusCarriesTheDeclaredTimeout:
+    """clientstatus takes ``timeout``; it just does not require it.
+
+    ``events/search_clientstatus.yaml:239-245`` declares the parameter with
+    ``default: 180`` and, unlike the other six datasearch routes, does not mark
+    it ``required: true``. Sending it is therefore correct, and the distinction
+    reads easily as "clientstatus does not declare a timeout" -- which is why
+    the query string is pinned here rather than left to the docstring.
+    """
+
+    @respx.mock
+    def test_the_query_carries_the_default_timeout(self, client: NetskopeClient) -> None:
+        route = respx.get(f"{_BASE}/api/v2/events/datasearch/clientstatus").mock(
+            return_value=httpx.Response(200, json={"result": [], "status": {}})
+        )
+        list(client.events.list("clientstatus"))
+        assert route.calls.last.request.url.params["timeout"] == "180"
+
+    @respx.mock
+    def test_a_caller_timeout_is_sent_as_given(self, client: NetskopeClient) -> None:
+        route = respx.get(f"{_BASE}/api/v2/events/datasearch/clientstatus").mock(
+            return_value=httpx.Response(200, json={"result": [], "status": {}})
+        )
+        list(client.events.list("clientstatus", timeout=42))
+        assert route.calls.last.request.url.params["timeout"] == "42"

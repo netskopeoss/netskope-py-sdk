@@ -2,7 +2,8 @@
 
 Kept apart from both so the resource can import the decoder for its
 ``with_response`` accessor without the decoder importing the resource
-back. This is the shape ``_alert_query.py`` already uses.
+back. This is the shape ``netskope/resources/shared/datasearch_query.py``
+already uses.
 """
 
 from __future__ import annotations
@@ -200,8 +201,16 @@ def _parse_role(body: Any, model: type[T]) -> T:
 
 
 def _parse_admins_page(body: Any, start_index: int, count: int) -> Page[AdminUser]:
-    if not isinstance(body, dict) or not isinstance(body.get("Resources"), list):
+    if not isinstance(body, dict):
         raise ValueError("Invalid admin response: expected a SCIM Resources collection.")
+    if not isinstance(body.get("Resources"), list):
+        # RFC 7644 3.4.2 requires `Resources` only once `totalResults` is
+        # non-zero, so a search that matched nothing may omit it. A non-zero
+        # total with no collection stays an error: reading it as an empty page
+        # would silently lose records.
+        if str(body.get("totalResults")) != "0":
+            raise ValueError("Invalid admin response: expected a SCIM Resources collection.")
+        body = {**body, "Resources": []}
     if len(body["Resources"]) > count:
         raise PaginationError(
             "The admin response exceeded the requested page size.", offset=start_index - 1

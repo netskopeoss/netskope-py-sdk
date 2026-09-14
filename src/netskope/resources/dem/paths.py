@@ -2,7 +2,8 @@
 
 Kept apart from both so the resource can import the decoder for its
 ``with_response`` accessor without the decoder importing the resource
-back. This is the shape ``_alert_query.py`` already uses.
+back. This is the shape ``netskope/resources/shared/datasearch_query.py``
+already uses.
 """
 
 from __future__ import annotations
@@ -153,7 +154,17 @@ def _absolute_bound(value: datetime | int) -> dict[str, str]:
     stay in this surface's historical unit — epoch milliseconds — and are
     converted here.
     """
-    moment = datetime.fromtimestamp(_epoch_millis(value) / 1000, tz=UTC)
+    try:
+        moment = datetime.fromtimestamp(_epoch_millis(value) / 1000, tz=UTC)
+    except (ValueError, OSError, OverflowError) as exc:
+        # A request builder has no `ApiResponse.parse` above it to restate a
+        # bare ValueError, so it has to be stated here. The usual cause is a
+        # caller passing epoch seconds or microseconds to a surface whose unit
+        # is milliseconds.
+        raise ValidationError(
+            "Time bounds must be epoch milliseconds within the representable "
+            f"date range; {value!r} is not."
+        ) from exc
     return {"absolute": moment.isoformat().replace("+00:00", "Z")}
 
 
@@ -340,10 +351,12 @@ def _getentities_body(
     source_ip: str | None,
     user_location: builtins.list[dict[str, str]] | None = None,
 ) -> dict[str, Any]:
-    # ``GetEntitiesQueryInput`` (dem-workbench-query.yaml:296-366) types
-    # ``starttime``/``endtime`` as plain integers with no range cap, and the
-    # operation (:1208) documents none, so the window is the gateway's call.
-    # The documented two-day cap belongs to ``/query/getdataset`` alone.
+    # ``GetEntitiesQueryInput`` (dem-workbench-query.yaml:296-366) declares
+    # ``exclusiveMinimum: 0.0`` on both ``starttime`` and ``endtime``, so 1 is
+    # the lowest epoch second this operation accepts. It states no upper bound,
+    # and the documented two-day window cap belongs to ``/query/getdataset``
+    # alone. Epoch 0 is a valid time value elsewhere in this SDK; here the
+    # schema excludes it.
     body: dict[str, Any] = {
         "starttime": _bounded("start_time", _epoch_seconds(start_time), 1, None),
         "endtime": _bounded("end_time", _epoch_seconds(end_time), 1, None),

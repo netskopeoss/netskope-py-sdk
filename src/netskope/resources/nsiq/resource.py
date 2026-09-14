@@ -4,7 +4,10 @@ Covers the ``/api/v2/nsiq`` gateway surface: URL category lookups, URL
 re-categorization requests and their status, RetroHunt IOC (file-hash)
 lookups, and false-positive submissions (URL / malware / IPS).
 
-All methods return the raw decoded JSON body as a ``dict``.  The transport
+Legacy methods retain their original dictionary results. The public
+``with_response`` accessors expose typed records with future response fields
+preserved, plus the completed response when original wire values are needed.
+The transport
 raises :class:`~netskope.exceptions.APIError` automatically for HTTP-200
 responses whose body is an error envelope (``{"status": "error", ...}``), so
 callers can treat a returned dict as a success payload.

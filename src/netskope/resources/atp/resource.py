@@ -11,7 +11,9 @@ the ``/api/v2/atp`` route prefix:
 - **TPaaS URL scan** (``tpaas/urlscan/*``) — submit a URL for scanning and
   fetch its report / artifact listing by ``submission_id``.
 
-All methods return the raw decoded JSON body as a ``dict`` (no typed models).
+Legacy methods retain their original dictionary results. The public
+``with_response`` accessors expose typed records with future response fields
+preserved, plus the completed response when original wire values are needed.
 The transport raises :class:`~netskope.exceptions.APIError` automatically on
 HTTP error statuses *and* on HTTP-200 bodies of the form
 ``{"status": "error", ...}``.
@@ -138,10 +140,11 @@ class AtpResource(SyncResource):
     # -- TPaaS file scanning -------------------------------------------------
     #
     # The TPaaS file-submit endpoints (POST /tpaas/submission/scan and
-    # /scan_large) require multipart/form-data uploads.  They are not exposed
-    # here because the SDK's retry layer re-reads the request body on each
-    # attempt, which is incompatible with httpx's streaming multipart bodies.
-    # Only the JSON result/report reads for a submission_id are supported.
+    # /scan_large) are not exposed here; only the JSON result/report reads for a
+    # submission_id are. The retry layer is not the reason: `scan_file` above
+    # performs exactly this kind of multipart upload, and `_retry_limit`
+    # (core/retry.py) returns 0 for any POST unless `retry_safe=True` is passed,
+    # so a submit is never replayed.
 
     def get_scan_result(self, submission_id: str) -> dict[str, Any]:
         """Get the TPaaS scan result/verdict for a submission.

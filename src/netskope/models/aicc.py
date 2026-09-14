@@ -52,13 +52,17 @@ class AiccSort(AiccQuery):
 
 
 class AiccInventoryQuery(AiccWindow):
+    # `first_seen_after` is NOT here: four of the five inventory list operations
+    # declare it, and `/inventory/mcp-servers` does not (aicc/inventory.yaml).
+    # On the shared base it gave `AiccMcpQuery` a field the request builder then
+    # refused, so each subclass declares it only where its endpoint takes it.
     search: str | None = Field(None, max_length=200)
     sort: AiccSort | None = None
     active_only: bool | None = None
-    first_seen_after: str | None = None
 
 
 class AiccApplicationQuery(AiccInventoryQuery):
+    first_seen_after: str | None = None
     category: list[str] | None = Field(None, min_length=1)
     status: list[str] | None = Field(None, min_length=1)
     ccl: list[str] | None = Field(None, min_length=1)
@@ -78,6 +82,7 @@ class AiccMcpQuery(AiccInventoryQuery):
 
 
 class AiccIdentityQuery(AiccInventoryQuery):
+    first_seen_after: str | None = None
     type: Literal["user", "unknown"] | None = None
     user_group: list[str] | None = Field(None, min_length=1)
     ou: list[str] | None = Field(None, min_length=1)
@@ -89,11 +94,13 @@ class AiccIdentityQuery(AiccInventoryQuery):
 
 
 class AiccModelQuery(AiccInventoryQuery):
+    first_seen_after: str | None = None
     deployment: list[str] | None = Field(None, min_length=1)
     provider: list[str] | None = Field(None, min_length=1)
 
 
 class AiccAgentQuery(AiccInventoryQuery):
+    first_seen_after: str | None = None
     category: list[str] | None = Field(None, min_length=1)
     framework: list[str] | None = Field(None, min_length=1)
 

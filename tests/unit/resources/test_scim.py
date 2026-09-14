@@ -7,12 +7,14 @@ envelope decoding, the id validation it applies, and both SCIM paginators.
 
 from __future__ import annotations
 
+from typing import ClassVar
+
 import httpx
 import pytest
 import respx
 
 from netskope import AsyncNetskopeClient, NetskopeClient
-from netskope.exceptions import ValidationError
+from netskope.exceptions import PaginationError, ResponseValidationError, ValidationError
 from netskope.models.scim import ScimGroup, ScimGroupPatch, ScimUser, ScimUserPatch
 from netskope.resources.scim.decoder import (
     MAX_SCIM_PAGE_SIZE,
@@ -912,3 +914,51 @@ class TestScimPageSizeRail:
 
         with pytest.raises(ValidationError):
             client.scim.users.list(page_size=MAX_SCIM_PAGE_SIZE + 1)
+
+
+class TestAnEmptyListResponseDecodes:
+    """A SCIM search that matched nothing is a page, not a decode failure.
+
+    RFC 7644 3.4.2 makes ``Resources`` REQUIRED only when ``totalResults`` is
+    non-zero, and the gateway's SCIM schema never lists it in a ``required:``
+    block. The SDK's own lazy iterator already agrees: ``_scim_records`` reads
+    ``body.get("Resources", [])``, so the same empty search succeeded through
+    ``.list()`` and failed through ``.list_page()``.
+    """
+
+    _EMPTY: ClassVar[dict[str, object]] = {
+        "schemas": ["urn:ietf:params:scim:api:messages:2.0:ListResponse"],
+        "totalResults": 0,
+        "startIndex": 1,
+        "itemsPerPage": 0,
+    }
+
+    @respx.mock
+    def test_users_list_page_returns_an_empty_page(self, client: NetskopeClient) -> None:
+        respx.get(_USERS_URL).mock(return_value=httpx.Response(200, json=self._EMPTY))
+        page = client.scim.users.list_page()
+        assert page.items == []
+        assert page.total == 0
+
+    @respx.mock
+    def test_groups_list_page_returns_an_empty_page(self, client: NetskopeClient) -> None:
+        respx.get(_GROUPS_URL).mock(return_value=httpx.Response(200, json=self._EMPTY))
+        page = client.scim.groups.list_page()
+        assert page.items == []
+
+    @respx.mock
+    async def test_async_users_list_page_returns_an_empty_page(
+        self, aclient: AsyncNetskopeClient
+    ) -> None:
+        respx.get(_USERS_URL).mock(return_value=httpx.Response(200, json=self._EMPTY))
+        page = await aclient.scim.users.list_page()
+        assert page.items == []
+
+    @respx.mock
+    def test_a_nonzero_total_without_records_is_still_refused(self, client: NetskopeClient) -> None:
+        """RFC 7644 requires Resources once totalResults is non-zero."""
+        respx.get(_USERS_URL).mock(
+            return_value=httpx.Response(200, json={**self._EMPTY, "totalResults": 3})
+        )
+        with pytest.raises((ResponseValidationError, PaginationError)):
+            client.scim.users.list_page()
