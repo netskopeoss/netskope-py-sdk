@@ -78,7 +78,9 @@ class TestSteeringDevicesIntegration:
         try:
             device = client.steering.list_devices(page_size=5).first()
         except APIError as e:
-            skip_if_unavailable(e, "steering devices")
+            # Same undeclared route as tests/integration/test_live_devices.py;
+            # resources/steering/resource.py documents that no spec declares it.
+            skip_if_unavailable(e, "steering devices", unrouted_ok=True)
         else:
             if device is not None:
                 assert isinstance(device, Device)

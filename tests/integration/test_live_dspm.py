@@ -7,7 +7,9 @@ Credentials come from environment variables only (see conftest.py).
 
 READ-ONLY smokes only: this module never connects or scans datastores.  DSPM
 is a separately licensed feature, so every call is wrapped in
-``skip_if_unavailable`` — tenants without DSPM skip rather than fail.
+``skip_if_unavailable`` — tenants without DSPM skip rather than fail on a
+402/403/501 or a licensing message.  A 404 fails: these paths were wrong once
+already, and that is the failure this suite exists to catch.
 
 DSPM is not yet wired onto the client, so the resource is built directly from
 the client's transport.

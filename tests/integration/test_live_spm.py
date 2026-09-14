@@ -6,8 +6,9 @@ Run with: pytest tests/integration/ -m integration -v
 Credentials come from environment variables only (see conftest.py).
 
 All checks are READ-ONLY smokes.  SPM is a licensed add-on, so tenants
-without it will return 402/403/404/501 or a licensing error — those are
-skips, not failures (see :func:`skip_if_unavailable`).
+without it will return 402/403/501 or a licensing error — those are skips,
+not failures (see :func:`skip_if_unavailable`).  A 404 fails instead, because
+it is what a mistyped path returns.
 
 ``client.spm`` is not wired into the client, so these tests instantiate the
 :class:`~netskope.resources.spm.resource.SpmResource` directly against the client's
