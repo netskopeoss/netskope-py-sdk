@@ -14,9 +14,10 @@ import pytest
 import respx
 
 from netskope import AsyncNetskopeClient, NetskopeClient
-from netskope.exceptions import ValidationError
+from netskope.exceptions import RateLimitError, ValidationError
+from netskope.models.atp import AtpScanReport
 from netskope.resources.atp.resource import AsyncAtpResource, AtpResource
-from tests.unit.resources.conftest import sent_json
+from tests.unit.resources.conftest import EXAMPLE_BASE, sent_json
 
 _BASE = "https://t.goskope.com/api/v2/atp"
 
@@ -252,3 +253,52 @@ class TestAtpResourceAsync:
 
         assert route.called
         assert result["artifact_count"] == 2
+
+
+# --- Gateway contract conformance -------------------------------------------------------------
+#
+# Folded in from the spec-conformance reviews: each test cites the
+# production/endpoints file and line whose shape it pins.
+
+
+def test_atp_scan_report_decodes_the_in_progress_poll() -> None:
+    """atp/atpsvc.yaml:409-419 reuses TssScanReportResponse for the 202.
+
+    That schema lists `verdict` as required (:66-73), but the 202's own example
+    omits it, and polling is the documented flow.
+    """
+    report = AtpScanReport.model_validate(
+        {
+            "jobid": "j1",
+            "md5": "d41d8cd98f00b204e9800998ecf8427e",
+            "requests_served": 1,
+            "sha256": "e3b0c44298fc1c149afbf4c8996fb924",
+            "status": "InProgress",
+        }
+    )
+    assert report.verdict is None
+    assert report.status == "InProgress"
+
+
+@respx.mock
+def test_error_message_field_reaches_the_exception(example_client: NetskopeClient) -> None:
+    """atp/atpsvc.yaml:3-9 reports the diagnosis as `error_message`."""
+    respx.post(f"{EXAMPLE_BASE}/api/v2/atp/tpaas/urlscan/submission/scan").mock(
+        return_value=httpx.Response(400, json={"error_message": "bad url", "status": "Error"})
+    )
+    with pytest.raises(Exception) as excinfo:
+        example_client.atp.scan_url("http://example.com/a")
+    assert "bad url" in str(excinfo.value)
+
+
+@respx.mock
+def test_rate_limit_reads_retry_after_from_the_body(example_client: NetskopeClient) -> None:
+    """atp/urlscan.yaml:22-32 declares retry_after in the 429 body, not a header."""
+    respx.post(f"{EXAMPLE_BASE}/api/v2/atp/tpaas/urlscan/submission/scan").mock(
+        return_value=httpx.Response(
+            429, json={"message": "quota exceeded", "status": "Error", "retry_after": 120}
+        )
+    )
+    with pytest.raises(RateLimitError) as excinfo:
+        example_client.atp.scan_url("http://example.com/a")
+    assert excinfo.value.retry_after == 120.0

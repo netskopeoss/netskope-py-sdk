@@ -10,18 +10,25 @@ PATCH, and ``templateActionType`` is limited to ``block``/``useralert``.
 
 from __future__ import annotations
 
+import json
+from typing import ClassVar
+
 import httpx
 import pytest
 import respx
 
 from netskope import AsyncNetskopeClient, NetskopeClient
 from netskope.exceptions import ValidationError
-from netskope.models.notifications import NotificationTemplate, TemplateActionType
+from netskope.models.notifications import (
+    NotificationTemplate,
+    NotificationTemplateWrite,
+    TemplateActionType,
+)
 from netskope.resources.notifications.resource import (
     AsyncNotificationsResource,
     NotificationsResource,
 )
-from tests.unit.resources.conftest import sent_json
+from tests.unit.resources.conftest import contract_router, sent_json
 
 _TEMPLATES_URL = "https://t.goskope.com/api/v2/notifications/user/templates"
 _SETTINGS_URL = "https://t.goskope.com/api/v2/notifications/user/deliverysettings"
@@ -331,3 +338,112 @@ class TestAsyncNotificationsResource:
         respx.get(_SETTINGS_URL).mock(return_value=httpx.Response(200, json=_SETTINGS))
         settings = await AsyncNotificationsResource(aclient._transport).get_delivery_settings()
         assert settings == _SETTINGS
+
+
+# --- Gateway contract conformance -------------------------------------------------------------
+#
+# Folded in from the spec-conformance reviews: each test cites the
+# production/endpoints file and line whose shape it pins.
+
+
+class TestNotificationTemplateRules:
+    _TEMPLATE: ClassVar[dict[str, str]] = {"id": "42", "name": "Custom Block Page"}
+
+    def test_create_applies_lengths_and_button_rules(self, contract_client: NetskopeClient) -> None:
+        """``NotificationsCreateRequest`` caps ``title`` at 60 and each button
+        label at 14 characters, and its property descriptions make
+        ``ackButtonText`` required for ``block`` and disallowed for
+        ``useralert`` (user-notifications-templates.yaml:10-91)."""
+        with contract_router() as mock:
+            route = mock.post("/api/v2/notifications/user/templates").mock(
+                return_value=httpx.Response(201, json=self._TEMPLATE)
+            )
+            with pytest.raises(ValidationError, match="title"):
+                contract_client.notifications.create_template(
+                    "n", title="T" * 80, message="m", ack_button_text="OK"
+                )
+            with pytest.raises(ValidationError, match="ackButtonText"):
+                contract_client.notifications.create_template(
+                    "n", title="T", message="m", ack_button_text="A" * 30
+                )
+            with pytest.raises(ValidationError, match="forbid proceed/stop"):
+                contract_client.notifications.create_template(
+                    "n",
+                    title="T",
+                    message="m",
+                    action_type="block",
+                    ack_button_text="OK",
+                    proceed_button_text="Go",
+                )
+            assert route.call_count == 0
+
+    def test_a_valid_create_still_sends_camel_case_fields(
+        self, contract_client: NetskopeClient
+    ) -> None:
+        with contract_router() as mock:
+            route = mock.post("/api/v2/notifications/user/templates").mock(
+                return_value=httpx.Response(201, json=self._TEMPLATE)
+            )
+            contract_client.notifications.create_template(
+                "Custom Block Page",
+                title="Access Denied",
+                message="This site is blocked.",
+                action_type="block",
+                ack_button_text="OK",
+            )
+        assert json.loads(route.calls.last.request.content) == {
+            "name": "Custom Block Page",
+            "title": "Access Denied",
+            "message": "This site is blocked.",
+            "templateActionType": "block",
+            "ackButtonText": "OK",
+        }
+
+    def test_patch_requires_the_complete_body_and_applies_the_lengths(
+        self, contract_client: NetskopeClient
+    ) -> None:
+        """``PATCH /user/templates/{id}`` points at the same body schema
+        (user-notifications-templates.yaml:376-381), so required fields and ``maxLength`` rules
+        apply to PATCH as well as POST."""
+        with contract_router() as mock:
+            route = mock.patch("/api/v2/notifications/user/templates/42").mock(
+                return_value=httpx.Response(200, json={**self._TEMPLATE, "subtitle": "New"})
+            )
+            with pytest.raises(ValidationError, match="subtitle"):
+                contract_client.notifications.update_template(42, subtitle="S" * 100)
+            with pytest.raises(ValidationError, match="name"):
+                contract_client.notifications.update_template(42, subtitle="New")
+            template = contract_client.notifications.update_template(
+                42,
+                name="Block",
+                title="Denied",
+                message="Blocked",
+                ack_button_text="OK",
+                subtitle="New",
+            )
+        assert template.subtitle == "New"
+        assert json.loads(route.calls.last.request.content) == {
+            "name": "Block",
+            "title": "Denied",
+            "message": "Blocked",
+            "ackButtonText": "OK",
+            "subtitle": "New",
+        }
+
+    async def test_async_writes_apply_the_same_rules(
+        self, contract_aclient: AsyncNetskopeClient
+    ) -> None:
+        with contract_router() as mock:
+            route = mock.route(url__regex=r".*").mock(return_value=httpx.Response(200, json={}))
+            with pytest.raises(ValidationError, match="title"):
+                await contract_aclient.notifications.create_template(
+                    "n", title="T" * 80, message="m", ack_button_text="OK"
+                )
+            with pytest.raises(ValidationError, match="stopButtonText"):
+                await contract_aclient.notifications.update_template(42, stop_button_text="S" * 30)
+            assert route.call_count == 0
+
+    def test_the_typed_write_model_is_unchanged(self) -> None:
+        """The typed surface already required the trio and the button rules."""
+        with pytest.raises(Exception, match="title"):
+            NotificationTemplateWrite(name="n", title="T" * 80, message="m", ackButtonText="OK")

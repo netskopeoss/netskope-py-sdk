@@ -13,8 +13,9 @@ import respx
 
 from netskope import AsyncNetskopeClient, NetskopeClient
 from netskope.exceptions import ValidationError
-from netskope.models.scim import ScimGroup, ScimUser
+from netskope.models.scim import ScimGroup, ScimGroupPatch, ScimUser, ScimUserPatch
 from netskope.resources.scim.decoder import (
+    MAX_SCIM_PAGE_SIZE,
     AsyncScimGroupsResponses,
     AsyncScimUsersResponses,
     ScimGroupsResponses,
@@ -27,7 +28,7 @@ from netskope.resources.scim.resource import (
     ScimUsersResource,
     _extract_scim,
 )
-from tests.unit.resources.conftest import sent_json
+from tests.unit.resources.conftest import CONTRACT_BASE, sent_json
 
 _USERS_URL = "https://t.goskope.com/api/v2/scim/Users"
 _GROUPS_URL = "https://t.goskope.com/api/v2/scim/Groups"
@@ -646,3 +647,268 @@ class TestAsyncScimGroupsResource:
             with pytest.raises(ValidationError, match="Invalid id for URL path"):
                 await call
         assert not route.called
+
+
+# --- Gateway contract conformance -------------------------------------------------------------
+#
+# Folded in from the spec-conformance reviews: each test cites the
+# production/endpoints file and line whose shape it pins.
+
+
+class TestScimResponseDeletes:
+    @respx.mock
+    def test_groups_delete(self, client: NetskopeClient) -> None:
+        route = respx.delete(f"{_GROUPS_URL}/grp-1").mock(return_value=httpx.Response(204))
+        assert client.scim.groups.with_response.delete("grp-1") is None
+        assert route.calls.last.request.method == "DELETE"
+
+    @respx.mock
+    def test_groups_delete_percent_encodes_the_id(self, client: NetskopeClient) -> None:
+        route = respx.delete(f"{_GROUPS_URL}/eng%2Fweb").mock(return_value=httpx.Response(204))
+        client.scim.groups.with_response.delete("eng/web")
+        assert route.calls.last.request.url.raw_path.endswith(b"/eng%2Fweb")
+
+    def test_groups_delete_rejects_an_id_with_whitespace(self, client: NetskopeClient) -> None:
+        with respx.mock:
+            route = respx.route(host="t.goskope.com")
+            with pytest.raises(ValidationError, match="Invalid id for URL path"):
+                client.scim.groups.with_response.delete("grp 1")
+            assert not route.called
+
+    @respx.mock
+    async def test_async_users_delete(self, aclient: AsyncNetskopeClient) -> None:
+        route = respx.delete(f"{_USERS_URL}/8f2c4a1b").mock(return_value=httpx.Response(204))
+        assert await aclient.scim.users.with_response.delete("8f2c4a1b") is None
+        assert route.called
+
+    @respx.mock
+    async def test_async_users_delete_percent_encodes_the_id(
+        self, aclient: AsyncNetskopeClient
+    ) -> None:
+        route = respx.delete(f"{_USERS_URL}/user%40example.com").mock(
+            return_value=httpx.Response(204)
+        )
+        await aclient.scim.users.with_response.delete("user@example.com")
+        assert route.calls.last.request.url.raw_path.endswith(b"/user%40example.com")
+
+    @respx.mock
+    async def test_async_groups_delete(self, aclient: AsyncNetskopeClient) -> None:
+        route = respx.delete(f"{_GROUPS_URL}/grp-1").mock(return_value=httpx.Response(204))
+        assert await aclient.scim.groups.with_response.delete("grp-1") is None
+        assert route.called
+
+
+_SCIM_USERS_URL = f"{CONTRACT_BASE}/api/v2/scim/Users"
+_contract_mock = respx.mock(assert_all_mocked=True, assert_all_called=False)
+_SCIM_ACCEPT = "application/scim+json;charset=utf-8, application/json"
+
+
+@_contract_mock
+def test_scim_accept_lists_both_documented_media_types(contract_client: NetskopeClient) -> None:
+    route = _contract_mock.get(_SCIM_USERS_URL).respond(
+        200, json={"Resources": [], "totalResults": 0, "startIndex": 1}
+    )
+    contract_client.scim.users.list_page(count=1)
+    assert route.calls.last.request.headers["Accept"] == _SCIM_ACCEPT
+
+
+@_contract_mock
+def test_scim_content_type_remains_the_bare_scim_type(contract_client: NetskopeClient) -> None:
+    route = _contract_mock.post(_SCIM_USERS_URL).respond(
+        201, json={"id": "u1", "userName": "a@b.c", "active": True}
+    )
+    contract_client.scim.users.create("a@b.c", email="a@b.c")
+    headers = route.calls.last.request.headers
+    assert headers["Content-Type"] == "application/scim+json;charset=utf-8"
+    assert headers["Accept"] == _SCIM_ACCEPT
+
+
+_PATCH_SCHEMA = "urn:ietf:params:scim:api:messages:2.0:PatchOp"
+
+
+class TestScimPatchAcknowledgments:
+    """SPEC-I1: PATCH /Users/{id} and /Groups/{id} answer 204 with no body."""
+
+    @respx.mock
+    def test_legacy_user_update_returns_none_on_204(self, client: NetskopeClient) -> None:
+        """scim-apis.yaml:2265-2266 declares 204 "Empty response" as the only success."""
+        respx.patch(f"{_USERS_URL}/8f2c4a1b").mock(return_value=httpx.Response(204))
+        assert client.scim.users.update("8f2c4a1b", {"active": False}) is None
+
+    @respx.mock
+    def test_legacy_user_update_still_decodes_a_body(self, client: NetskopeClient) -> None:
+        """A tenant that answers 200 with a user is decoded rather than discarded."""
+        respx.patch(f"{_USERS_URL}/8f2c4a1b").mock(
+            return_value=httpx.Response(200, json={"id": "8f2c4a1b", "userName": "a@b.example"})
+        )
+        user = client.scim.users.update("8f2c4a1b", {"active": False})
+        assert isinstance(user, ScimUser)
+        assert user.user_name == "a@b.example"
+
+    @respx.mock
+    async def test_async_legacy_user_update_returns_none_on_204(
+        self, aclient: AsyncNetskopeClient
+    ) -> None:
+        respx.patch(f"{_USERS_URL}/8f2c4a1b").mock(return_value=httpx.Response(204))
+        assert await aclient.scim.users.update("8f2c4a1b", {"active": False}) is None
+
+    @respx.mock
+    def test_typed_user_patch_returns_none_on_204(self, client: NetskopeClient) -> None:
+        respx.patch(f"{_USERS_URL}/8f2c4a1b").mock(return_value=httpx.Response(204))
+        response = client.scim.users.with_response.patch(
+            "8f2c4a1b", ScimUserPatch(fields={"active": False})
+        )
+        assert response.parse() is None
+
+    @respx.mock
+    def test_typed_group_patch_returns_none_on_204(self, client: NetskopeClient) -> None:
+        """scim-apis.yaml:700-701 declares the same empty response for groups."""
+        respx.patch(f"{_GROUPS_URL}/grp-1").mock(return_value=httpx.Response(204))
+        response = client.scim.groups.with_response.patch(
+            "grp-1", ScimGroupPatch(display_name="new_group_name")
+        )
+        assert response.parse() is None
+
+    @respx.mock
+    async def test_async_typed_group_patch_returns_none_on_204(
+        self, aclient: AsyncNetskopeClient
+    ) -> None:
+        respx.patch(f"{_GROUPS_URL}/grp-1").mock(return_value=httpx.Response(204))
+        response = await aclient.scim.groups.with_response.patch(
+            "grp-1", ScimGroupPatch(display_name="new_group_name")
+        )
+        assert response.parse() is None
+
+
+class TestScimPatchOperations:
+    """SPEC-I2 / SPEC-I3: operations are path-scoped, with the spec's own path names."""
+
+    @respx.mock
+    def test_group_display_name_uses_the_lowercase_path(self, client: NetskopeClient) -> None:
+        """The group path enum is members|externalid|displayname (scim-apis.yaml:610-616)."""
+        route = respx.patch(f"{_GROUPS_URL}/grp-1").mock(return_value=httpx.Response(204))
+        client.scim.groups.with_response.patch(
+            "grp-1", ScimGroupPatch(display_name="new_group_name")
+        )
+        # The replaceDisplayName example, verbatim (scim-apis.yaml:658-666).
+        assert sent_json(route) == {
+            "schemas": [_PATCH_SCHEMA],
+            "Operations": [{"op": "replace", "path": "displayname", "value": "new_group_name"}],
+        }
+
+    @respx.mock
+    def test_group_members_keeps_the_lowercase_members_path(self, client: NetskopeClient) -> None:
+        """``members`` is already the enum spelling (scim-apis.yaml:612, example :644-647)."""
+        route = respx.patch(f"{_GROUPS_URL}/grp-1").mock(return_value=httpx.Response(204))
+        client.scim.groups.with_response.patch("grp-1", ScimGroupPatch(member_ids=["u-1"]))
+        assert sent_json(route)["Operations"] == [
+            {"op": "replace", "path": "members", "value": [{"value": "u-1"}]}
+        ]
+
+    @respx.mock
+    def test_group_patch_sends_one_operation_per_attribute(self, client: NetskopeClient) -> None:
+        """The multipleOperations example lists one entry per attribute (:684-697)."""
+        route = respx.patch(f"{_GROUPS_URL}/grp-1").mock(return_value=httpx.Response(204))
+        client.scim.groups.with_response.patch(
+            "grp-1", ScimGroupPatch(display_name="updated_group_name", member_ids=["u-1"])
+        )
+        assert [op["path"] for op in sent_json(route)["Operations"]] == [
+            "displayname",
+            "members",
+        ]
+
+    @respx.mock
+    def test_legacy_user_update_is_path_scoped(self, client: NetskopeClient) -> None:
+        """Every documented user operation carries a path (scim-apis.yaml:1950-1973)."""
+        route = respx.patch(f"{_USERS_URL}/8f2c4a1b").mock(return_value=httpx.Response(204))
+        client.scim.users.update("8f2c4a1b", {"active": False})
+        # The replaceActiveStatus example, verbatim (scim-apis.yaml:2013-2021).
+        assert sent_json(route) == {
+            "schemas": [_PATCH_SCHEMA],
+            "Operations": [{"op": "replace", "path": "active", "value": False}],
+        }
+
+    @respx.mock
+    async def test_async_legacy_user_update_is_path_scoped(
+        self, aclient: AsyncNetskopeClient
+    ) -> None:
+        route = respx.patch(f"{_USERS_URL}/8f2c4a1b").mock(return_value=httpx.Response(204))
+        await aclient.scim.users.update("8f2c4a1b", {"userName": "newuser@example.com"})
+        # The replaceUserName example, verbatim (scim-apis.yaml:2004-2012).
+        assert sent_json(route)["Operations"] == [
+            {"op": "replace", "path": "userName", "value": "newuser@example.com"}
+        ]
+
+    @respx.mock
+    def test_typed_user_patch_is_path_scoped(self, client: NetskopeClient) -> None:
+        route = respx.patch(f"{_USERS_URL}/8f2c4a1b").mock(return_value=httpx.Response(204))
+        client.scim.users.with_response.patch(
+            "8f2c4a1b", ScimUserPatch(fields={"externalid": "external-user-123"})
+        )
+        assert sent_json(route)["Operations"] == [
+            {"op": "replace", "path": "externalid", "value": "external-user-123"}
+        ]
+
+
+class TestScimGroupMembers:
+    """SPEC-I7: members are excluded from a group read unless asked for."""
+
+    @respx.mock
+    def test_group_get_sends_no_attributes_by_default(self, client: NetskopeClient) -> None:
+        route = respx.get(f"{_GROUPS_URL}/grp-1").mock(
+            return_value=httpx.Response(200, json={"id": "grp-1", "displayName": "sample_group1"})
+        )
+        client.scim.groups.get("grp-1")
+        assert route.calls.last.request.url.params == httpx.QueryParams()
+
+    @respx.mock
+    def test_group_get_can_ask_for_members(self, client: NetskopeClient) -> None:
+        """scim-apis.yaml:462 documents ``attributes=members``; the param is at :464-473."""
+        route = respx.get(f"{_GROUPS_URL}/grp-1").mock(
+            return_value=httpx.Response(
+                200,
+                json={
+                    "id": "grp-1",
+                    "displayName": "sample_group1",
+                    "members": [{"value": "u-1", "display": "User One"}],
+                },
+            )
+        )
+        group = client.scim.groups.get("grp-1", attributes="members")
+        assert dict(route.calls.last.request.url.params) == {"attributes": "members"}
+        assert isinstance(group, ScimGroup)
+        assert [member.value for member in group.members] == ["u-1"]
+
+    @respx.mock
+    async def test_async_group_get_can_exclude_attributes(
+        self, aclient: AsyncNetskopeClient
+    ) -> None:
+        """``excludedAttributes`` is the companion parameter (scim-apis.yaml:474-479)."""
+        route = respx.get(f"{_GROUPS_URL}/grp-1").mock(
+            return_value=httpx.Response(200, json={"id": "grp-1"})
+        )
+        await aclient.scim.groups.get("grp-1", excluded_attributes="members")
+        assert dict(route.calls.last.request.url.params) == {"excludedAttributes": "members"}
+
+
+class TestScimPageSizeRail:
+    """SPEC-I12: the page-size ceiling is an SDK rail, not a gateway rule."""
+
+    @respx.mock
+    def test_a_count_above_the_published_maxresults_is_accepted(
+        self, client: NetskopeClient
+    ) -> None:
+        """``count`` is a plain integer with no bounds (scim-apis.yaml:1014-1025)."""
+        route = respx.get(_USERS_URL).mock(
+            return_value=httpx.Response(
+                200, json={"totalResults": 0, "startIndex": 1, "Resources": []}
+            )
+        )
+        client.scim.users.list_page(count=MAX_SCIM_PAGE_SIZE)
+        assert dict(route.calls.last.request.url.params)["count"] == str(MAX_SCIM_PAGE_SIZE)
+
+    def test_the_sdk_rail_stops_an_unbounded_page(self, client: NetskopeClient) -> None:
+        from netskope.exceptions import ValidationError
+
+        with pytest.raises(ValidationError):
+            client.scim.users.list(page_size=MAX_SCIM_PAGE_SIZE + 1)

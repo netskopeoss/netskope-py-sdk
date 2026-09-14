@@ -12,6 +12,7 @@ import respx
 from pydantic import ValidationError as PydanticValidationError
 
 from netskope import AsyncNetskopeClient, NetskopeClient
+from netskope.datasearch import DATASEARCH_TIMEOUT_DEFAULT
 from netskope.exceptions import (
     NotFoundError,
     PaginationError,
@@ -19,6 +20,7 @@ from netskope.exceptions import (
     ValidationError,
 )
 from netskope.models.alerts import Alert, DatasearchBucket
+from tests.unit.resources.conftest import CONTRACT_BASE
 
 _PATH = "/api/v2/events/datasearch/alert"
 _URL = f"https://t.goskope.com{_PATH}"
@@ -254,7 +256,7 @@ def test_get_retains_original_envelope_and_not_found_metadata(client: NetskopeCl
     assert dict(route.calls[0].request.url.params) == {
         "timeout": "180",
         "query": '_id eq "a1"',
-        # search_alert.yaml:340-345 defaults `limit` to 10000 (SPEC2-EV-4).
+        # search_alert.yaml:340-345 defaults `limit` to 10000.
         "limit": "1",
     }
     assert route.call_count == 1
@@ -363,3 +365,39 @@ async def test_page_rejects_more_rows_than_the_requested_limit(
     assert caught.value.request_path == _PATH
     assert caught.value.request_id == "oversized-page"
     assert route.call_count == 1
+
+
+# --- Gateway contract conformance -------------------------------------------------------------
+#
+# Folded in from the spec-conformance reviews: each test cites the
+# production/endpoints file and line whose shape it pins.
+
+_ALERT_URL = f"{CONTRACT_BASE}/api/v2/events/datasearch/alert"
+_contract_mock = respx.mock(assert_all_mocked=True, assert_all_called=False)
+
+
+@pytest.mark.parametrize(
+    "call",
+    [
+        pytest.param(lambda c: c.alerts.list_page(timeout=None), id="alerts.list_page"),
+        pytest.param(lambda c: list(c.alerts.list(timeout=None)), id="alerts.list"),
+        pytest.param(
+            lambda c: c.alerts.with_response.aggregate_page(group_by="app", timeout=None),
+            id="alerts.aggregate_page",
+        ),
+        pytest.param(lambda c: c.alerts.get("abc", timeout=None), id="alerts.get"),
+        pytest.param(
+            lambda c: c.alerts.with_response.list_page(timeout=None).parse(),
+            id="alerts.with_response.list_page",
+        ),
+    ],
+)
+@_contract_mock
+def test_timeout_none_sends_the_declared_default(
+    contract_client: NetskopeClient, call: object
+) -> None:
+    route = _contract_mock.get(_ALERT_URL).respond(
+        200, json={"result": [{"_id": "abc"}], "status": {}}
+    )
+    call(contract_client)
+    assert route.calls.last.request.url.params["timeout"] == str(DATASEARCH_TIMEOUT_DEFAULT)

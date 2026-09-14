@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from typing import Any
+
 import httpx
 import pytest
 import respx
@@ -9,6 +11,8 @@ import respx
 from netskope import AsyncNetskopeClient, NetskopeClient
 from netskope.exceptions import NotFoundError, ValidationError
 from netskope.models.alerts import Alert
+from netskope.models.events import Event
+from netskope.models.incidents import Incident
 
 _ALERTS_URL = "https://t.goskope.com/api/v2/events/datasearch/alert"
 
@@ -125,3 +129,41 @@ class TestAsyncAlertsResource:
         assert params["groupbys"] == "alert_type"
         assert params["orderbys"] == "timestamp DESC"
         assert "sortby" not in params
+
+
+# --- Gateway contract conformance -------------------------------------------------------------
+#
+# Folded in from the spec-conformance reviews: each test cites the
+# production/endpoints file and line whose shape it pins.
+
+_contract_mock = respx.mock(assert_all_mocked=True, assert_all_called=False)
+
+
+@pytest.mark.parametrize("model", [Alert, Event, Incident])
+def test_the_epdlp_spelling_still_wins(model: type) -> None:
+    """search_epdlp.yaml:88 is the one schema that spells it policy_name."""
+    assert model.model_validate({"policy_name": "epdlp rule"}).policy_name == "epdlp rule"
+
+
+@pytest.mark.parametrize("timeout", [0, -1, True, "180"])
+@_contract_mock
+def test_an_unusable_timeout_still_fails_before_http(
+    contract_client: NetskopeClient, timeout: object
+) -> None:
+    with pytest.raises(ValidationError):
+        contract_client.alerts.list_page(timeout=timeout)
+    assert not _contract_mock.calls
+
+
+@pytest.mark.parametrize("timeout", [0, -1, True, "180"])
+@respx.mock
+def test_an_unusable_timeout_fails_before_http(client: NetskopeClient, timeout: Any) -> None:
+    with pytest.raises(ValidationError):
+        client.alerts.list_page(timeout=timeout)
+    assert not respx.calls
+
+
+def test_a_bare_alert_row_still_decodes_object_categories() -> None:
+    """dataexport.yaml:255-257 leaves the item type open entirely."""
+    alert = Alert.model_validate({"_id": "a1", "other_categories": [{"id": 7}]})
+    assert alert.other_categories == [{"id": 7}]

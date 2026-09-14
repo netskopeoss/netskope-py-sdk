@@ -251,3 +251,42 @@ class TestAsyncTokensResource:
         assert (await atokens.revoke("tok-1")).id == "tok-1"
         assert deleted.called
         assert sent_json(revoked) == {"operation": "revoke"}
+
+
+# --- Gateway contract conformance -------------------------------------------------------------
+#
+# Folded in from the spec-conformance reviews: each test cites the
+# production/endpoints file and line whose shape it pins.
+
+
+class TestApiTokenRevoke:
+    """SPEC-I16: revoke is a PATCH operation, distinct from DELETE."""
+
+    @respx.mock
+    def test_revoke_patches_the_operation(self, client: NetskopeClient) -> None:
+        """ApiTokenUpdateRequest.operation is [reissue, revoke] (auth/api-tokens.yaml:86-94)."""
+        route = respx.patch(f"{_URL}/tok-1").mock(
+            return_value=httpx.Response(200, json={"id": "tok-1", "name": "ci-token"})
+        )
+        token = client.tokens.revoke("tok-1")
+        assert route.calls.last.request.method == "PATCH"
+        # "other fields ("name","expires" and "endpoints") are not allowed" (:87-90).
+        assert sent_json(route) == {"operation": "revoke"}
+        assert token.id == "tok-1"
+
+    @respx.mock
+    def test_delete_remains_the_delete_operation(self, client: NetskopeClient) -> None:
+        """DELETE /tokens/{id} is its own operation (auth/api-tokens.yaml:212-226)."""
+        route = respx.delete(f"{_URL}/tok-1").mock(
+            return_value=httpx.Response(200, json={"id": "tok-1", "name": "ci-token"})
+        )
+        assert client.tokens.delete("tok-1") is None
+        assert route.calls.last.request.method == "DELETE"
+
+    @respx.mock
+    async def test_async_revoke_patches_the_operation(self, aclient: AsyncNetskopeClient) -> None:
+        route = respx.patch(f"{_URL}/tok-1").mock(
+            return_value=httpx.Response(200, json={"id": "tok-1", "name": "ci-token"})
+        )
+        await aclient.tokens.revoke("tok-1")
+        assert sent_json(route) == {"operation": "revoke"}

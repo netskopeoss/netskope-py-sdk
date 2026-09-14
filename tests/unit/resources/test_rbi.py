@@ -11,14 +11,17 @@ classes directly against the transport.
 
 from __future__ import annotations
 
+from typing import Any
+
 import httpx
 import pytest
 import respx
 
 from netskope import AsyncNetskopeClient, NetskopeClient
 from netskope.exceptions import ValidationError
+from netskope.models.rbi import RbiTemplateSettings, RbiToggle
 from netskope.resources.rbi.resource import AsyncRbiResource, RbiResource
-from tests.unit.resources.conftest import sent_json
+from tests.unit.resources.conftest import EXAMPLE_BASE, contract_router, sent_json
 
 _BASE = "https://t.goskope.com/api/v2/rbi"
 _APPLICATIONS_URL = f"{_BASE}/applications"
@@ -507,3 +510,113 @@ class TestInlineCdrApiKey:
         assert request.headers["X-CDR-Api-Key"] == "sk-abc"
         assert "api_key" not in str(request.url)
         assert request.url.params["vendor"] == "votiro"
+
+
+# --- Gateway contract conformance -------------------------------------------------------------
+#
+# Folded in from the spec-conformance reviews: each test cites the
+# production/endpoints file and line whose shape it pins.
+
+
+@respx.mock
+def test_rbi_list_templates_accepts_a_single_status(example_client: NetskopeClient) -> None:
+    """rbi/templates.yaml:220-229 declares `status` as an array, style=form.
+
+    A bare `str` is iterable, so forwarding it unchanged produced
+    `status=a,p,p,l,i,e,d`.
+    """
+    route = respx.get(f"{EXAMPLE_BASE}/api/v2/rbi/templates").mock(
+        return_value=httpx.Response(200, json={"data": [], "total_count": 0})
+    )
+    example_client.rbi.list_templates(status="applied")
+    assert dict(route.calls[-1].request.url.params)["status"] == "applied"
+
+    example_client.rbi.list_templates(status=["applied", "pending-create"])
+    assert dict(route.calls[-1].request.url.params)["status"] == "applied,pending-create"
+
+
+@respx.mock
+def test_rbi_deploy_bounds_its_template_ids(example_client: NetskopeClient) -> None:
+    """rbi/templates.yaml:2061 and :2085 set minItems 1; :456-460 forbids all+ids."""
+    route = respx.post(f"{EXAMPLE_BASE}/api/v2/rbi/templates/deploy").mock(
+        return_value=httpx.Response(200, json={"status": "ok"})
+    )
+    example_client.rbi.deploy_templates("abc")
+    assert route.calls[-1].request.read() == b'{"template_ids":["abc"]}'
+
+    with pytest.raises(ValidationError, match="at least one template"):
+        example_client.rbi.deploy_templates([])
+    with pytest.raises(ValidationError, match="exactly one"):
+        example_client.rbi.deploy_templates(["a"], deploy_all=True)
+
+
+class TestRbiWatermarkIsOptional:
+    def test_watermark_without_enabled_decodes(self) -> None:
+        """``watermark.enabled`` is in no ``required`` list and the contract
+        notes migrated tenants may not carry it (rbi/templates.yaml:1654-1661);
+        ``TemplateData`` also leaves ``watermark`` itself out of its required
+        set (:1662-1678)."""
+        settings = RbiTemplateSettings.model_validate({"name": "t", "watermark": {}})
+        assert settings.watermark is not None and settings.watermark.enabled is None
+
+    def test_the_other_toggles_still_require_enabled(self) -> None:
+        """Every other ``$Enabled`` toggle requires ``enabled``."""
+        with pytest.raises(Exception, match="enabled"):
+            RbiToggle.model_validate({})
+
+
+class TestRbiTemplateQueryEnums:
+    @pytest.mark.parametrize(
+        ("kwargs", "message"),
+        [
+            ({"sort_by": "nope"}, "sort_by must be one of"),
+            ({"sort_order": "sideways"}, "sort_order must be one of"),
+            ({"status": ["bogus"]}, "Invalid status value"),
+            ({"fields": ["not_a_field"]}, "Invalid fields value"),
+            ({"status": []}, "at least one template status"),
+        ],
+    )
+    def test_unenumerated_values_are_rejected(
+        self, contract_client: NetskopeClient, kwargs: dict[str, Any], message: str
+    ) -> None:
+        """``sortby`` (rbi/templates.yaml:181-194), ``sortorder`` (:195-206),
+        ``status`` (:207-229, ``minItems: 1``) and ``fields`` (:230-257) are all
+        enumerated."""
+        with contract_router() as mock:
+            route = mock.get("/api/v2/rbi/templates").mock(
+                return_value=httpx.Response(200, json={})
+            )
+            with pytest.raises(ValidationError, match=message):
+                contract_client.rbi.list_templates(**kwargs)
+            assert route.call_count == 0
+
+    def test_declared_values_are_comma_joined(self, contract_client: NetskopeClient) -> None:
+        """``status`` and ``fields`` are ``style: form, explode: false``
+        (rbi/templates.yaml:218-219, :237-238)."""
+        with contract_router() as mock:
+            route = mock.get("/api/v2/rbi/templates").mock(
+                return_value=httpx.Response(200, json={"templates": []})
+            )
+            contract_client.rbi.list_templates(
+                sort_by="template_name",
+                sort_order="desc",
+                status=["applied", "pending-update"],
+                fields=["name", "watermark"],
+            )
+        assert dict(route.calls.last.request.url.params) == {
+            "sortby": "template_name",
+            "sortorder": "desc",
+            "status": "applied,pending-update",
+            "fields": "name,watermark",
+        }
+
+    async def test_async_rejects_the_same_values(
+        self, contract_aclient: AsyncNetskopeClient
+    ) -> None:
+        with contract_router() as mock:
+            route = mock.get("/api/v2/rbi/templates").mock(
+                return_value=httpx.Response(200, json={})
+            )
+            with pytest.raises(ValidationError, match="sort_by must be one of"):
+                await contract_aclient.rbi.list_templates(sort_by="nope")
+            assert route.call_count == 0

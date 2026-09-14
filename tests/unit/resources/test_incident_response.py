@@ -8,7 +8,9 @@ from datetime import UTC, datetime
 import pytest
 import respx
 
-from netskope.exceptions import APIError, ResponseValidationError, ValidationError
+from netskope import NetskopeClient
+from netskope.exceptions import APIError, NotFoundError, ResponseValidationError, ValidationError
+from netskope.models.incidents import UserConfidenceIndex
 
 BASE = "https://t.goskope.com"
 ID = 1807262583165050077
@@ -364,3 +366,80 @@ def test_bounded_incident_page_and_legacy_update_remain_distinct(client):
     assert (
         json.loads(write.calls.last.request.content)["payload"][0]["object_id"] == "legacy-object"
     )
+
+
+# --- Gateway contract conformance -------------------------------------------------------------
+#
+# Folded in from the spec-conformance reviews: each test cites the
+# production/endpoints file and line whose shape it pins.
+
+FORENSICS_URL = f"{BASE}/api/v2/incidents/dlpincidents/1234/forensics"
+UCI_URL = f"{BASE}/api/v2/ubadatasvc/user/uci"
+
+
+@respx.mock
+def test_uci_decodes_the_declared_time_series(client: NetskopeClient) -> None:
+    """ubadatasvc.yaml:61-69 defines ConfidenceTimeSeries as confidences plus userId."""
+    respx.post(UCI_URL).respond(
+        200,
+        json={
+            "userId": "demo@netskope.com",
+            "confidences": [
+                {"start": 1661126400000, "confidenceScore": 950},
+                {"confidenceScore": 900},
+                {"start": 1661212800000},
+            ],
+        },
+    )
+    uci = client.incidents.with_response.get_uci("demo@netskope.com").parse()
+    assert isinstance(uci, UserConfidenceIndex)
+    assert uci.user_id == "demo@netskope.com"
+    assert uci.confidences is not None
+    assert [point.confidence_score for point in uci.confidences] == [950, 900, None]
+    assert [point.start for point in uci.confidences] == [1661126400000, None, 1661212800000]
+
+
+@respx.mock
+def test_forensics_reports_the_reason_from_data_error(client: NetskopeClient) -> None:
+    """ims_forensics.yaml:60-94 returns the Error arm of `data` on HTTP 200 with status error."""
+    respx.get(FORENSICS_URL).respond(
+        200,
+        json={
+            "data": {"error": "Incident's Forensic File not found in destination."},
+            "status": "error",
+        },
+    )
+    with pytest.raises(NotFoundError) as caught:
+        client.incidents.with_response.get_forensics("1234").parse()
+    assert "not found in destination" in str(caught.value)
+
+
+@respx.mock
+def test_forensics_names_the_error_even_without_a_status_field(client: NetskopeClient) -> None:
+    """ims_forensics.yaml:25-36 types `data` as oneOf[Forensics, Error]; `status` is optional."""
+    respx.get(FORENSICS_URL).respond(
+        200, json={"data": {"error": "Forensic File could not be retrieved."}}
+    )
+    with pytest.raises(ResponseValidationError) as caught:
+        client.incidents.with_response.get_forensics("1234").parse()
+    assert "could not be retrieved" in str(caught.value)
+
+
+@respx.mock
+def test_forensics_decodes_the_documented_success_body(client: NetskopeClient) -> None:
+    """ims_forensics.yaml:80-86 shows the Success example verbatim."""
+    respx.get(FORENSICS_URL).respond(
+        200,
+        json={
+            "data": {
+                "content": "sample file content",
+                "meta": '{"meta":"data"}',
+                "preview_image": "base64encoded Image Thumbnail File",
+            },
+            "status": "success",
+        },
+    )
+    forensics = client.incidents.with_response.get_forensics("1234").parse()
+    assert forensics.content == "sample file content"
+    assert forensics.meta == '{"meta":"data"}'
+    assert forensics.preview_image == "base64encoded Image Thumbnail File"

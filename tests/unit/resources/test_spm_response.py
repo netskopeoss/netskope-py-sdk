@@ -9,11 +9,16 @@ Every case below decodes a body shaped like the one its operation declares in
 
 from __future__ import annotations
 
+from typing import Any, ClassVar
+
+import httpx
 import pytest
 import respx
 
 from netskope import AsyncNetskopeClient, NetskopeClient
 from netskope.exceptions import ResponseValidationError
+from netskope.models.spm import SpmInstanceScore, SpmTrendSample
+from tests.unit.resources.conftest import contract_router
 
 _INVENTORY_ROWS = {
     "data": [
@@ -155,3 +160,52 @@ def test_inventory_body_and_typed_rows():
     sent = route.calls.last.request.read()
     assert b'"ngl_query":"app:Box"' in sent
     assert b'"group_by":"resource_name"' in sent
+
+
+# --- Gateway contract conformance -------------------------------------------------------------
+#
+# Folded in from the spec-conformance reviews: each test cites the
+# production/endpoints file and line whose shape it pins.
+
+
+class TestSpmRecentChangesAreSparse:
+    _BODY: ClassVar[dict[str, Any]] = {
+        "trends": {
+            "samples": [{"posture_confidence_index": 70, "posture_scores": [{"id": "M365"}]}],
+            "by_trajectory": {"up": ["M365"]},
+        }
+    }
+
+    def test_models_require_nothing(self) -> None:
+        """``RecentChangesResponse`` declares no ``required`` list at any level:
+        the samples items (spm/apps.yaml:656-690) and their ``posture_scores``
+        items (:678-690) are all optional."""
+        assert SpmTrendSample.model_validate({"posture_confidence_index": 70}).timestamp is None
+        assert SpmInstanceScore.model_validate({"id": "M365"}).posture_score is None
+        assert SpmInstanceScore.model_validate({"posture_score": 80}).id is None
+
+    def test_sync_parses_a_sample_without_timestamp_or_score(
+        self, contract_client: NetskopeClient
+    ) -> None:
+        with contract_router() as mock:
+            mock.post("/api/v2/spm/apps/recentchanges/getstats").mock(
+                return_value=httpx.Response(200, json=self._BODY)
+            )
+            changes = contract_client.spm.with_response.recent_changes(
+                start=1758127874, end=1759127874
+            ).parse()
+        assert changes.trends is not None
+        sample = changes.trends.samples[0]
+        assert sample.timestamp is None and sample.posture_confidence_index == 70
+        assert sample.posture_scores[0].id == "M365"
+
+    async def test_async_parses_the_same_body(self, contract_aclient: AsyncNetskopeClient) -> None:
+        with contract_router() as mock:
+            mock.post("/api/v2/spm/apps/recentchanges/getstats").mock(
+                return_value=httpx.Response(200, json=self._BODY)
+            )
+            response = await contract_aclient.spm.with_response.recent_changes(
+                start=1758127874, end=1759127874
+            )
+        changes = response.parse()
+        assert changes.trends is not None and changes.trends.samples[0].timestamp is None

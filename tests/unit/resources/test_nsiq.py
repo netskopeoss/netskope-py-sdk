@@ -14,15 +14,24 @@ instantiate the resource classes directly against the client's transport.
 from __future__ import annotations
 
 from collections.abc import AsyncIterator, Iterator
+from typing import Any
 
 import httpx
 import pytest
 import respx
 
 from netskope import AsyncNetskopeClient, NetskopeClient
-from netskope.exceptions import RateLimitError
+from netskope.exceptions import RateLimitError, ValidationError
+from netskope.models.notifications import NotificationTemplateWrite
+from netskope.models.nsiq import (
+    FalsePositiveReceipt,
+    RecategorizationReceipt,
+    RecategorizationUrl,
+    UrlLookupReport,
+)
+from netskope.models.rbi import RbiApplications
 from netskope.resources.nsiq.resource import AsyncNsiqResource, NsiqResource
-from tests.unit.resources.conftest import sent_json
+from tests.unit.resources.conftest import contract_router, sent_json
 
 _BASE = "https://t.goskope.com/api/v2/nsiq"
 _URLLOOKUP_URL = f"{_BASE}/urllookup"
@@ -417,3 +426,123 @@ class TestReadOnlyPostsRetry:
         with pytest.raises(RateLimitError):
             _nsiq(retry_client).recategorize("http://x.test", ["Shopping"])
         assert route.call_count == 1
+
+
+# --- Gateway contract conformance -------------------------------------------------------------
+#
+# Folded in from the spec-conformance reviews: each test cites the
+# production/endpoints file and line whose shape it pins.
+
+
+class TestRecategorizationReceiptIsSparse:
+    def test_models_require_nothing(self) -> None:
+        """``SubmissionDetail`` (nsiq/url_recategorization.yaml:150-158) and
+        ``RecatUrlId`` (:93-107) declare no ``required`` list."""
+        assert RecategorizationReceipt.model_validate({}).task_id is None
+        assert RecategorizationUrl.model_validate({"url": "http://x.example"}).id is None
+
+    def test_sync_parses_a_receipt_without_task_id(self, contract_client: NetskopeClient) -> None:
+        from netskope.models.nsiq import RecategorizationRequest, UrlRecategorization
+
+        request = RecategorizationRequest(
+            recat_requests=[UrlRecategorization(url="http://x.example", suggested_categories=["A"])]
+        )
+        with contract_router() as mock:
+            mock.post("/api/v2/nsiq/url/recategorizations").mock(
+                return_value=httpx.Response(
+                    201, json={"status": "success", "data": {"urls": [{"url": "http://x.example"}]}}
+                )
+            )
+            receipt = contract_client.nsiq.with_response.recategorize(request).parse()
+        assert receipt.task_id is None and receipt.urls[0].url == "http://x.example"
+
+
+class TestRecategorizationListInputs:
+    @pytest.mark.parametrize(
+        ("kwargs", "message"),
+        [
+            ({"limit": 11}, "limit must be an integer between 1 and 10"),
+            ({"limit": 0}, "limit must be an integer between 1 and 10"),
+            ({"offset": -1}, "offset must be a nonnegative integer"),
+            ({"status": "bogus"}, "status must be one of"),
+            ({"sort_by": "nope"}, "sort_by must be one of"),
+            ({"sort_order": "sideways"}, "sort_order must be one of"),
+        ],
+    )
+    def test_invalid_inputs_are_rejected(
+        self, contract_client: NetskopeClient, kwargs: dict[str, Any], message: str
+    ) -> None:
+        """``GET /url/recategorizations`` declares ``limit``
+        ``minimum: 1, maximum: 10`` (nsiq/url_recategorization.yaml:339-347),
+        ``offset`` ``minimum: 0`` (:329-338), and enumerates ``status``
+        (:318-328), ``sortby`` (:348-359) and ``sortorder`` (:360-369)."""
+        with contract_router() as mock:
+            route = mock.get("/api/v2/nsiq/url/recategorizations").mock(
+                return_value=httpx.Response(200, json={})
+            )
+            with pytest.raises(ValidationError, match=message):
+                contract_client.nsiq.list_recategorizations(**kwargs)
+            assert route.call_count == 0
+
+    @pytest.mark.parametrize("limit", [1, 10])
+    def test_boundary_and_enumerated_values_are_sent(
+        self, contract_client: NetskopeClient, limit: int
+    ) -> None:
+        with contract_router() as mock:
+            route = mock.get("/api/v2/nsiq/url/recategorizations").mock(
+                return_value=httpx.Response(200, json={"data": []})
+            )
+            contract_client.nsiq.list_recategorizations(
+                limit=limit, offset=0, status="completed", sort_by="start_time", sort_order="desc"
+            )
+        assert dict(route.calls.last.request.url.params) == {
+            "limit": str(limit),
+            "offset": "0",
+            "status": "completed",
+            "sortby": "start_time",
+            "sortorder": "desc",
+        }
+
+    async def test_async_rejects_the_same_inputs(
+        self, contract_aclient: AsyncNetskopeClient
+    ) -> None:
+        with contract_router() as mock:
+            route = mock.get("/api/v2/nsiq/url/recategorizations").mock(
+                return_value=httpx.Response(200, json={})
+            )
+            with pytest.raises(ValidationError, match="limit must be an integer between 1 and 10"):
+                await contract_aclient.nsiq.list_recategorizations(limit=500)
+            assert route.call_count == 0
+
+
+class TestOptionalResponseFields:
+    def test_url_lookup_report_survives_a_sparse_row(self) -> None:
+        """``url-lookup-report`` declares no required properties (nsiq/url_lookup.yaml)."""
+        report = UrlLookupReport.model_validate({"site": "netskope"})
+        assert report.url is None and report.site == "netskope"
+
+    def test_false_positive_receipt_survives_a_sparse_row(self) -> None:
+        """``FPCaseInfo``/``FPTicketInfo`` declare no required properties
+        (nsiq/fp_submission.yaml:30-55)."""
+        receipt = FalsePositiveReceipt.model_validate({"tickets": [{"system": "jira"}]})
+        assert receipt.incident_id is None
+        assert receipt.tickets[0].ticket_id is None
+        assert receipt.tickets[0].system == "jira"
+
+    @pytest.mark.parametrize("color", ["#A659B1", "#ABC", "#RRGGBBAA", "rebeccapurple"])
+    def test_stripe_color_is_a_free_form_string(self, color: str) -> None:
+        """``stripeColor`` is a bare string with no pattern
+        (user-notifications-templates.yaml:62-64)."""
+        template = NotificationTemplateWrite(
+            name="Block",
+            title="Access Denied",
+            message="Blocked by policy.",
+            ackButtonText="OK",
+            stripeColor=color,
+        )
+        assert template.stripe_color == color
+
+    def test_rbi_applications_tolerates_a_missing_collection(self) -> None:
+        """Only ``message`` and ``status`` are required (rbi/templates.yaml:7)."""
+        body = RbiApplications.model_validate({"status": "success", "message": "ok"})
+        assert body.applications == {}

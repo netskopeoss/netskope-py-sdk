@@ -262,3 +262,22 @@ class TestAsyncLocalBrokersResource:
         )
         with pytest.raises(NetskopeError, match="token"):
             await aclient.npa.local_brokers.create_registration_token(10)
+
+
+# --- Gateway contract conformance -------------------------------------------------------------
+#
+# Folded in from the spec-conformance reviews: each test cites the
+# production/endpoints file and line whose shape it pins.
+
+
+def test_local_broker_declares_only_the_spec_fields() -> None:
+    """lbroker_response.data has no status and no publisher_id.
+
+    Spec: npa_lbrokers.yaml:139-183 (single) and :192-242 (list item).
+    """
+    assert "status" not in LocalBroker.model_fields
+    assert "publisher_id" not in LocalBroker.model_fields
+    broker = LocalBroker.model_validate(
+        {"id": 4, "name": "broker-1", "common_name": "abc", "registered": True}
+    )
+    assert broker.name == "broker-1"

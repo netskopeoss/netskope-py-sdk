@@ -11,7 +11,15 @@ from pydantic import ValidationError as ModelValidationError
 
 from netskope import AsyncNetskopeClient, NetskopeClient
 from netskope.exceptions import PaginationError, ResponseValidationError, ValidationError
-from netskope.models.aicc import AiccApplicationQuery, AiccSort
+from netskope.models.aicc import (
+    AiccApplicationQuery,
+    AiccDataCoverage,
+    AiccExtensionRelatedQuery,
+    AiccModelQuery,
+    AiccProtectionQuery,
+    AiccSort,
+)
+from netskope.resources.shared.aicc_contract import QUERY_RULES
 
 BASE = "https://test.goskope.com/api/v2/aicc"
 WINDOW = {"start_time": "2026-08-01T00:00:00Z", "end_time": "2026-08-18T00:00:00Z"}
@@ -620,3 +628,119 @@ def test_empty_list_filters_are_rejected_rather_than_dropped(collection, field):
         with pytest.raises(ModelValidationError):
             endpoint.query_type(**WINDOW, **{field: []})
     assert not respx.calls
+
+
+# --- Gateway contract conformance -------------------------------------------------------------
+#
+# Folded in from the spec-conformance reviews: each test cites the
+# production/endpoints file and line whose shape it pins.
+
+_BASE = "https://t.goskope.com"
+_AICC = f"{_BASE}/api/v2/aicc"
+_WINDOW = {"start_time": "2026-08-01T00:00:00Z", "end_time": "2026-08-18T00:00:00Z"}
+
+
+class TestAiccContract:
+    @respx.mock
+    @pytest.mark.parametrize(
+        ("collection", "path", "query", "message"),
+        [
+            (
+                "applications",
+                "inventory/ai-applications",
+                AiccApplicationQuery(**_WINDOW, risk_level=["Severe"]),
+                "reconciled_risk_level",
+            ),
+            (
+                "models",
+                "inventory/models",
+                AiccModelQuery(**_WINDOW, deployment=["serverless"]),
+                "deployment",
+            ),
+        ],
+    )
+    def test_array_enums_are_checked_element_by_element(
+        self, collection: str, path: str, query: object, message: str
+    ) -> None:
+        """``ReconciledRiskLevel`` (aicc/inventory.yaml:6851) and the ``deployment``
+        enum (:3902-3914) constrain each array element."""
+        route = respx.get(f"{_AICC}/{path}").mock(return_value=httpx.Response(200, json={}))
+        with (
+            NetskopeClient(tenant="t.goskope.com", api_token="tok") as client,
+            pytest.raises(ValidationError, match=message),
+        ):
+            getattr(client.aicc, collection).list_page(query)
+        assert route.call_count == 0
+
+    @respx.mock
+    def test_accepted_enum_values_reach_the_wire(self) -> None:
+        route = respx.get(f"{_AICC}/inventory/ai-applications").mock(
+            return_value=httpx.Response(200, json={"data": {"total": 0, "items": []}})
+        )
+        with NetskopeClient(tenant="t.goskope.com", api_token="tok") as client:
+            client.aicc.applications.list_page(
+                AiccApplicationQuery(**_WINDOW, risk_level=["Critical", "High"])
+            )
+        params = route.calls.last.request.url.params
+        assert params.get_list("reconciled_risk_level") == ["Critical", "High"]
+
+    @pytest.mark.parametrize(
+        ("contract", "name", "expected"),
+        [
+            (
+                "/inventory/extensions/{extension_name}/identities",
+                "type",
+                ("browser_extension", "editor_extension", "desktop_extension"),
+            ),
+            (
+                "/inventory/models",
+                "deployment",
+                ("cloud", "endpoint", "self_hosted_vm", "self_hosted_k8s"),
+            ),
+            (
+                "/provider/{provider}/data-protection/violations",
+                "severity",
+                ("critical", "high", "medium", "low"),
+            ),
+            (
+                "/analytics/identities",
+                "reconciled_risk_level",
+                (
+                    "Critical",
+                    "High",
+                    "Medium",
+                    "Low",
+                    "Inconclusive",
+                    "Legitimate",
+                    "Unknown",
+                ),
+            ),
+        ],
+    )
+    def test_contract_carries_the_spec_enumerations(
+        self, contract: str, name: str, expected: tuple[str, ...]
+    ) -> None:
+        """aicc/inventory.yaml:1521-1531, :3902-3914, :3752-3763 and :6851-6853."""
+        choices = {rule[0]: rule[3] for rule in QUERY_RULES[contract]}
+        assert choices[name] == expected
+
+    @pytest.mark.parametrize(
+        ("model", "kwargs"),
+        [
+            (AiccExtensionRelatedQuery, {"type": "kernel_extension"}),
+            (AiccProtectionQuery, {"severity": ["catastrophic"]}),
+        ],
+    )
+    def test_scalar_enums_are_refused_by_the_query_contract(
+        self, model: type, kwargs: dict[str, object]
+    ) -> None:
+        with pytest.raises(ModelValidationError):
+            model(**_WINDOW, **kwargs)
+
+    def test_data_coverage_tolerates_a_missing_timestamp(self) -> None:
+        """``data_available_since`` is nullable with no required list (:5978-5981)."""
+        assert AiccDataCoverage.model_validate({}).data_available_since is None
+        assert (
+            AiccDataCoverage.model_validate({"data_available_since": None}).data_available_since
+            is None
+        )

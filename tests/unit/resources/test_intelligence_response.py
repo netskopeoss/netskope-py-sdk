@@ -14,7 +14,13 @@ from pydantic import ValidationError as ModelValidationError
 
 from netskope import NetskopeClient
 from netskope.exceptions import APIError, ResponseValidationError, ValidationError
-from netskope.models.atp import AtpFileScan, AtpUrlScan
+from netskope.models.atp import (
+    AtpFileScan,
+    AtpFileSubmission,
+    AtpSubmissionReport,
+    AtpUrlScan,
+    AtpUrlSubmission,
+)
 from netskope.models.nsiq import (
     RecategorizationRequest,
     UrlFalsePositive,
@@ -22,6 +28,7 @@ from netskope.models.nsiq import (
     UrlLookup,
     UrlRecategorization,
 )
+from tests.unit.resources.conftest import contract_router
 
 BASE = "https://t.goskope.com"
 # A benign text member named sample.exe, ZipCrypto-encrypted with password infected.
@@ -305,3 +312,36 @@ def test_success_with_invalid_receipt_never_causes_a_second_submission(client):
     assert error.value.request_id == "request-7"
     assert "response-secret" not in str(error.value)
     assert route.call_count == 1
+
+
+# --- Gateway contract conformance -------------------------------------------------------------
+#
+# Folded in from the spec-conformance reviews: each test cites the
+# production/endpoints file and line whose shape it pins.
+
+
+class TestAtpAcknowledgementsAreSparse:
+    def test_models_require_nothing(self) -> None:
+        """``TssScanAPIResponse`` (atp/atpsvc.yaml:16-31), ``ScanInProgress``
+        (atp/urlscan.yaml:43-55) and ``GetReportResponse``
+        (atp/tpaassvc.yaml:64-70) declare no ``required`` list."""
+        assert AtpFileSubmission.model_validate({"status": "Ok", "md5": "0" * 32}).job_id is None
+        assert (
+            AtpUrlSubmission.model_validate({"status": "Ok", "message": "queued"}).submission_id
+            is None
+        )
+        assert AtpSubmissionReport.model_validate({"processtree": "[]"}).report == {}
+
+    def test_submission_report_without_report_parses(self, contract_client: NetskopeClient) -> None:
+        with contract_router() as mock:
+            mock.get("/api/v2/atp/tpaas/submission/s1/reports").mock(
+                return_value=httpx.Response(
+                    200,
+                    json={
+                        "processtree": '[{"track": true, "pid": 1140, '
+                        '"process_name": "WINWORD.EXE"}]'
+                    },
+                )
+            )
+            report = contract_client.atp.with_response.get_submission_report("s1").parse()
+        assert report.report == {} and report.process_tree is not None

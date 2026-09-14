@@ -18,7 +18,7 @@ from netskope.exceptions import (
     ResponseValidationError,
     ValidationError,
 )
-from netskope.models.devices import Device, DeviceTag
+from netskope.models.devices import Device, DeviceTag, SupportedOperatingSystems
 from netskope.resources.devices.resource import AsyncDevicesResource, DevicesResource
 from tests.unit.resources.conftest import sent_json
 
@@ -413,3 +413,31 @@ class TestTagsSubresourceCaching:
     async def test_async_tags_property_is_cached(self, aclient: AsyncNetskopeClient) -> None:
         devices = _adevices(aclient)
         assert devices.tags is devices.tags
+
+
+# --- Gateway contract conformance -------------------------------------------------------------
+#
+# Folded in from the spec-conformance reviews: each test cites the
+# production/endpoints file and line whose shape it pins.
+
+
+class TestSupportedOperatingSystems:
+    """SPEC-I5: AvailableOsFamily has no required properties."""
+
+    def test_a_missing_available_os_is_an_empty_list(self) -> None:
+        """devices/provisioner-core.yaml:320-333 declares no ``required:`` list."""
+        assert SupportedOperatingSystems.model_validate({}).available_os == []
+
+    def test_the_documented_example_parses(self) -> None:
+        families = ["windows", "mac", "android", "ios", "chromeos", "linux"]
+        assert (
+            SupportedOperatingSystems.model_validate({"available_os": families}).available_os
+            == families
+        )
+
+    @respx.mock
+    def test_typed_supported_os_tolerates_an_empty_body(self, client: NetskopeClient) -> None:
+        respx.get("https://t.goskope.com/api/v2/devices/supportedos").mock(
+            return_value=httpx.Response(200, json={})
+        )
+        assert client.devices.with_response.supported_os().parse().available_os == []

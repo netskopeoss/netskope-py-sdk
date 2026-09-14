@@ -8,6 +8,7 @@ import httpx
 import pytest
 import respx
 
+from netskope import AsyncNetskopeClient, NetskopeClient
 from netskope.datasearch import DatasearchWindow, ScanStopReason
 from netskope.exceptions import (
     NotFoundError,
@@ -16,6 +17,7 @@ from netskope.exceptions import (
     ValidationError,
 )
 from netskope.models.events import AuditEvent, ClientStatusEvent, NetworkEvent, PageEvent
+from tests.unit.resources.conftest import CONTRACT_BASE
 
 BASE = "https://t.goskope.com"
 
@@ -335,3 +337,62 @@ async def test_async_page_aggregate_scan_and_metrics_parity(aclient):
     )
     assert (await aclient.events.transaction_metrics()).backlog_message_count == {}
     assert metrics.calls.last.request.url.params["hours"] == "24"
+
+
+# --- Gateway contract conformance -------------------------------------------------------------
+#
+# Folded in from the spec-conformance reviews: each test cites the
+# production/endpoints file and line whose shape it pins.
+
+_ALERT_URL = f"{CONTRACT_BASE}/api/v2/events/datasearch/alert"
+_APP_URL = f"{CONTRACT_BASE}/api/v2/events/datasearch/application"
+_contract_mock = respx.mock(assert_all_mocked=True, assert_all_called=False)
+_TWO_ROWS = {"result": [{"_id": "zzz"}, {"_id": "abc"}], "status": {}}
+_WRONG_ROW = {"result": [{"_id": "zzz"}], "status": {}}
+
+
+@pytest.mark.parametrize("body", [_TWO_ROWS, _WRONG_ROW], ids=["multiple", "wrong-id"])
+@_contract_mock
+def test_alert_get_surfaces_refuse_a_mismatched_lookup(
+    contract_client: NetskopeClient, body: dict[str, object]
+) -> None:
+    _contract_mock.get(_ALERT_URL).respond(200, json=body)
+    with pytest.raises(ResponseValidationError):
+        contract_client.alerts.get("abc")
+    with pytest.raises(ResponseValidationError):
+        contract_client.alerts.with_response.get("abc").parse()
+
+
+@pytest.mark.parametrize("body", [_TWO_ROWS, _WRONG_ROW], ids=["multiple", "wrong-id"])
+@_contract_mock
+def test_event_get_surfaces_refuse_a_mismatched_lookup(
+    contract_client: NetskopeClient, body: dict[str, object]
+) -> None:
+    _contract_mock.get(_APP_URL).respond(200, json=body)
+    with pytest.raises(ResponseValidationError):
+        contract_client.events.get("abc")
+    with pytest.raises(ResponseValidationError):
+        contract_client.events.with_response.get("abc").parse()
+
+
+@pytest.mark.parametrize("body", [_TWO_ROWS, _WRONG_ROW], ids=["multiple", "wrong-id"])
+@_contract_mock
+async def test_async_event_get_surfaces_refuse_a_mismatched_lookup(
+    contract_aclient: AsyncNetskopeClient, body: dict[str, object]
+) -> None:
+    _contract_mock.get(_APP_URL).respond(200, json=body)
+    with pytest.raises(ResponseValidationError):
+        await contract_aclient.events.get("abc")
+    with pytest.raises(ResponseValidationError):
+        (await contract_aclient.events.with_response.get("abc")).parse()
+
+
+@_contract_mock
+async def test_async_alert_get_surfaces_refuse_a_mismatched_lookup(
+    contract_aclient: AsyncNetskopeClient,
+) -> None:
+    _contract_mock.get(_ALERT_URL).respond(200, json=_TWO_ROWS)
+    with pytest.raises(ResponseValidationError):
+        await contract_aclient.alerts.get("abc")
+    with pytest.raises(ResponseValidationError):
+        (await contract_aclient.alerts.with_response.get("abc")).parse()

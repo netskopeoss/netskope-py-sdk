@@ -2,15 +2,19 @@
 
 from __future__ import annotations
 
+from typing import Any
+
 import httpx
 import pytest
 import respx
+from pydantic import ValidationError as PydanticValidationError
 
 from netskope import AsyncNetskopeClient, NetskopeClient
 from netskope.exceptions import ValidationError
 from netskope.models.devices import Device
 from netskope.models.infrastructure import IPSecTunnel, Pop
-from tests.unit.resources.conftest import sent_json
+from netskope.models.steering import IPSecTunnelCreate, SteeringConfigStatus
+from tests.unit.resources.conftest import CONTRACT_BASE, EXAMPLE_BASE, sent_json
 
 _BASE = "https://t.goskope.com"
 _CLIENTCONFIG_URL = f"{_BASE}/api/v2/steering/globalconfig/clientconfiguration"
@@ -426,3 +430,316 @@ class TestAsyncSteeringResource:
         assert len(devices) == 1
         assert devices[0].host_name == "laptop-01"
         assert route.calls.last.request.url.params["limit"] == "10"
+
+
+# --- Gateway contract conformance -------------------------------------------------------------
+#
+# Folded in from the spec-conformance reviews: each test cites the
+# production/endpoints file and line whose shape it pins.
+
+_CONTRACT_TUNNELS_URL = f"{CONTRACT_BASE}/api/v2/steering/ipsec/tunnels"
+_CONTRACT_POPS_URL = f"{CONTRACT_BASE}/api/v2/steering/ipsec/pops"
+_NPA_CONFIG_URL = f"{CONTRACT_BASE}/api/v2/steering/globalconfig/clientconfiguration/npa"
+
+
+@pytest.mark.parametrize("asynchronous", [False, True])
+@respx.mock
+async def test_steering_config_patch_returns_a_status_acknowledgment(
+    contract_client: NetskopeClient, contract_aclient: AsyncNetskopeClient, asynchronous: bool
+) -> None:
+    """The global-config PATCH 200 declares only ``status``.
+
+    Spec: steering/npa_global_config.yaml:274-283 for
+    ``/globalconfig/clientconfiguration/npa`` and :408-417 for
+    ``/globalconfig/publishers``; neither echoes the stored flags, so the old
+    return value was an all-default ``SteeringConfig``.
+    """
+    route = respx.patch(_NPA_CONFIG_URL).mock(
+        return_value=httpx.Response(200, json={"status": "success"})
+    )
+    client = contract_aclient if asynchronous else contract_client
+    result = client.steering.update_config("npa", settings={"npa_ff": "1"})
+    if asynchronous:
+        result = await result
+
+    assert isinstance(result, SteeringConfigStatus)
+    assert result.status == "success"
+    assert sent_json(route) == {"npa_ff": "1"}
+
+
+@respx.mock
+def test_typed_steering_config_patch_returns_the_acknowledgment(
+    contract_client: NetskopeClient,
+) -> None:
+    """The typed accessor reports the same acknowledgment (:274-283)."""
+    from netskope.models.steering import SteeringSettings
+
+    respx.patch(_NPA_CONFIG_URL).mock(return_value=httpx.Response(200, json={"status": "success"}))
+    parsed = contract_client.steering.with_response.update_config_request(
+        "npa", SteeringSettings({"npa_ff": 1})
+    ).parse()
+    assert isinstance(parsed, SteeringConfigStatus)
+    assert parsed.status == "success"
+
+
+@pytest.mark.parametrize(
+    "accessor,url",
+    [("list_pops_page", _CONTRACT_POPS_URL), ("list_tunnels_page", _CONTRACT_TUNNELS_URL)],
+)
+@respx.mock
+def test_ipsec_limit_admits_its_declared_range(
+    contract_client: NetskopeClient, accessor: str, url: str
+) -> None:
+    """``limit`` declares ``minimum: 0, maximum: 100``.
+
+    Spec: steering/ipsec.yaml:478-486 for ``GET /ipsec/pops`` and :672-680 for
+    ``GET /ipsec/tunnels``; these are the only formal ``maximum:`` values in the
+    slice.  An unbounded ``limit`` was spent on a round trip the gateway can
+    only reject or silently clamp.
+    """
+    route = respx.get(url).mock(return_value=httpx.Response(200, json={"result": [], "total": 0}))
+    method = getattr(contract_client.steering.with_response, accessor)
+
+    for limit in (0, 100):
+        method(limit=limit).parse()
+    assert [dict(call.request.url.params)["limit"] for call in route.calls] == ["0", "100"]
+
+    for limit in (101, 1000, -1):
+        with pytest.raises(ValidationError, match="limit must be an integer"):
+            method(limit=limit)
+    assert route.call_count == 2
+
+
+@pytest.mark.parametrize(
+    "accessor,url",
+    [("list_pops_page", _CONTRACT_POPS_URL), ("list_tunnels_page", _CONTRACT_TUNNELS_URL)],
+)
+@respx.mock
+async def test_async_ipsec_limit_admits_its_declared_range(
+    contract_aclient: AsyncNetskopeClient, accessor: str, url: str
+) -> None:
+    """The async accessors enforce the same bounds (ipsec.yaml:478-486, :672-680)."""
+    route = respx.get(url).mock(return_value=httpx.Response(200, json={"result": [], "total": 0}))
+    method = getattr(contract_aclient.steering.with_response, accessor)
+    (await method(limit=100)).parse()
+    with pytest.raises(ValidationError, match="limit must be an integer"):
+        await method(limit=101)
+    assert route.call_count == 1
+
+
+@pytest.mark.parametrize("lister", ["list_pops", "list_tunnels"])
+@pytest.mark.parametrize("page_size", [0, -1, True])
+def test_ipsec_iterators_require_a_positive_page_size(
+    contract_client: NetskopeClient, lister: str, page_size: Any
+) -> None:
+    """A page size of 0 is inside the declared ``limit`` range but cannot advance.
+
+    ``limit`` declares ``minimum: 0`` (steering/ipsec.yaml:478-486), which a
+    one-page accessor can honour; an offset traversal stepping by 0 would never
+    reach the next page, so the iterator requires a positive stride.
+    """
+    with pytest.raises(ValidationError, match="page_size"):
+        getattr(contract_client.steering, lister)(page_size=page_size)
+
+
+@pytest.mark.parametrize(
+    "lister,url", [("list_pops", _CONTRACT_POPS_URL), ("list_tunnels", _CONTRACT_TUNNELS_URL)]
+)
+@respx.mock
+def test_ipsec_iterators_clamp_to_the_declared_maximum(
+    contract_client: NetskopeClient, lister: str, url: str
+) -> None:
+    """A page size above ``maximum: 100`` is clamped rather than sent (:478-486, :672-680)."""
+    route = respx.get(url).mock(return_value=httpx.Response(200, json={"result": []}))
+    list(getattr(contract_client.steering, lister)(page_size=500))
+    assert dict(route.calls.last.request.url.params)["limit"] == "100"
+
+
+@pytest.mark.parametrize("value", ["yes", 2, "01", None, True])
+@respx.mock
+def test_legacy_steering_update_rejects_undeclared_flag_values(
+    contract_client: NetskopeClient, value: Any
+) -> None:
+    """``global_config_data_request`` admits only ``0`` and ``1``.
+
+    Spec: steering/npa_global_config.yaml:43-52 :
+    ``additionalProperties: oneOf [{string, pattern ^[01]$}, {integer, enum [0, 1]}]``.
+    The legacy path forwarded the mapping unchecked while the typed path
+    validated it.
+    """
+    with pytest.raises(ValidationError, match=r"must be 0 or 1"):
+        contract_client.steering.update_config("npa", settings={"npa_ff": value})
+    assert len(respx.calls) == 0
+
+
+@pytest.mark.parametrize("value", ["yes", 2])
+@respx.mock
+async def test_async_legacy_steering_update_rejects_undeclared_flag_values(
+    contract_aclient: AsyncNetskopeClient, value: Any
+) -> None:
+    """The async mirror applies the same domain (npa_global_config.yaml:43-52)."""
+    with pytest.raises(ValidationError, match=r"must be 0 or 1"):
+        await contract_aclient.steering.update_config("npa", settings={"npa_ff": value})
+    assert len(respx.calls) == 0
+
+
+@pytest.mark.parametrize("value", [0, 1, "0", "1"])
+@respx.mock
+def test_legacy_steering_update_sends_the_declared_flag_values(
+    contract_client: NetskopeClient, value: Any
+) -> None:
+    """Both declared spellings still reach the wire unchanged (:43-52)."""
+    route = respx.patch(_NPA_CONFIG_URL).mock(
+        return_value=httpx.Response(200, json={"status": "success"})
+    )
+    contract_client.steering.update_config("npa", settings={"npa_ff": value})
+    assert sent_json(route) == {"npa_ff": value}
+
+
+@respx.mock
+def test_get_tunnel_reads_the_result_envelope(example_client: NetskopeClient) -> None:
+    """steering/ipsec.yaml:305-317 keys the single-tunnel read under `result`.
+
+    The create (:90-101) and patch (:3-14) responses use `data`; both must decode.
+    """
+    respx.get(f"{EXAMPLE_BASE}/api/v2/steering/ipsec/tunnels/5").mock(
+        return_value=httpx.Response(
+            200, json={"result": [{"id": 5, "site": "NYC"}], "status": "success", "total": 1}
+        )
+    )
+    assert example_client.steering.get_tunnel(5).site == "NYC"
+
+    respx.get(f"{EXAMPLE_BASE}/api/v2/steering/ipsec/tunnels/6").mock(
+        return_value=httpx.Response(200, json={"data": {"id": 6, "site": "SFO"}})
+    )
+    assert example_client.steering.get_tunnel(6).site == "SFO"
+
+
+_GLOBALCONFIG_URL = f"{EXAMPLE_BASE}/api/v2/steering/globalconfig"
+
+
+@respx.mock
+@pytest.mark.parametrize("scope", ["nsc", "ztna"])
+def test_steering_rejects_scopes_the_spec_has_no_path_for(
+    example_client: NetskopeClient, scope: str
+) -> None:
+    """npa_global_config.yaml declares six paths, none of them nsc or ztna.
+
+    Spec: /globalconfig (:80), /globalconfig/metadata (:172),
+    /globalconfig/clientconfiguration/npa (:218) and its metadata (:307),
+    /globalconfig/publishers (:352) and its metadata (:441).
+    """
+    with pytest.raises(ValidationError, match="npa, publishers"):
+        example_client.steering.with_response.get_config(scope)
+    assert len(respx.calls) == 0
+
+
+@respx.mock
+def test_steering_keeps_the_two_scopes_the_spec_declares(example_client: NetskopeClient) -> None:
+    """npa routes under clientconfiguration (:218); publishers does not (:352)."""
+    npa = respx.get(f"{_GLOBALCONFIG_URL}/clientconfiguration/npa").mock(
+        return_value=httpx.Response(200, json={"data": {"flag": 1}})
+    )
+    publishers = respx.get(f"{_GLOBALCONFIG_URL}/publishers").mock(
+        return_value=httpx.Response(200, json={"data": {"flag": 0}})
+    )
+    example_client.steering.get_config("npa")
+    example_client.steering.get_config("publishers")
+
+    assert (npa.call_count, publishers.call_count) == (1, 1)
+
+
+@respx.mock
+def test_ipsec_create_accepts_a_bandwidth_outside_the_usual_tiers(
+    example_client: NetskopeClient,
+) -> None:
+    """ipsec_tunnel_request_post puts no enum on bandwidth or encryption.
+
+    Spec: steering/ipsec.yaml:237-238 (``bandwidth: integer``) and :241-242
+    (``encryption: string``).  A tenant on a tier outside the usual set could
+    not use the SDK at all.
+    """
+    route = respx.post(f"{EXAMPLE_BASE}/api/v2/steering/ipsec/tunnels").mock(
+        return_value=httpx.Response(200, json={"result": {"id": 1, "site": "IPSec site1"}})
+    )
+    example_client.steering.create_tunnel(
+        "IPSec site1",
+        ["stl1"],
+        "psk",
+        "5.NE_2_59f18ccc",
+        bandwidth=500,
+        encryption="AES192-GCM",
+    )
+
+    body = sent_json(route)
+    assert body["bandwidth"] == 500
+    assert body["encryption"] == "AES192-GCM"
+    # The request key is ``enable`` (steering/ipsec.yaml:239-240).
+    assert body["enable"] is True
+
+
+def test_ipsec_request_model_accepts_the_same_range() -> None:
+    """The typed path matches the untyped one (steering/ipsec.yaml:237-242)."""
+    request = IPSecTunnelCreate(
+        site="IPSec site1",
+        pops=["stl1"],
+        psk="psk",
+        srcidentity="5.NE_2_59f18ccc",
+        bandwidth=500,
+        encryption="AES192-GCM",
+    )
+    assert (request.bandwidth, request.encryption) == (500, "AES192-GCM")
+    with pytest.raises(PydanticValidationError, match="greater than 0"):
+        IPSecTunnelCreate(
+            site="s", pops=["p"], psk="k", srcidentity="i", bandwidth=0, encryption="x"
+        )
+
+
+def test_ipsec_tunnel_model_reads_the_result_item() -> None:
+    """ipsec_tunnel_result_item declares enabled and an array of pop objects.
+
+    Spec: steering/ipsec.yaml:318-379, with pops (:355-358) referencing
+    ipsec_tunnel_pop_result_item (:158-183).  The SDK declared name, source_ip,
+    destination_ip, status, pop and proto, none of which appear there.
+    """
+    tunnel = IPSecTunnel.model_validate(
+        {
+            "bandwidth": 50,
+            "enabled": True,
+            "encryption": "AES128-CBC",
+            "id": 1,
+            "notes": "Customer managed site",
+            "pops": [{"gateway": "163.116.247.38", "name": "stl1", "primary": True}],
+            "site": "IPSec site1",
+            "srcidentity": "5.NE_2_59f18ccc",
+            "vendor": "Default",
+            "version": 2,
+        }
+    )
+    assert (tunnel.id, tunnel.site, tunnel.enabled) == (1, "IPSec site1", True)
+    assert tunnel.pops is not None and tunnel.pops[0]["name"] == "stl1"
+    for absent in ("name", "source_ip", "destination_ip", "status", "pop", "proto"):
+        assert absent not in IPSecTunnel.model_fields
+
+
+def test_pop_model_reads_the_pop_result_item() -> None:
+    """ipsec_pop_result_item has no country and no address list.
+
+    Spec: steering/ipsec.yaml:28-81; ``country`` exists only as a query
+    parameter on GET /ipsec/pops (:408-415).
+    """
+    pop = Pop.model_validate(
+        {
+            "acceptingtunnels": True,
+            "bandwidth": "1000",
+            "gateway": "163.116.247.38",
+            "id": "1",
+            "location": "Saint Louis",
+            "name": "stl1",
+            "probeip": "10.137.22.216",
+            "region": "US",
+        }
+    )
+    assert (pop.name, pop.region, pop.gateway) == ("stl1", "US", "163.116.247.38")
+    assert "country" not in Pop.model_fields
+    assert "ip_addresses" not in Pop.model_fields

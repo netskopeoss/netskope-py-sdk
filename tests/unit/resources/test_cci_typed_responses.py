@@ -3,11 +3,14 @@
 from __future__ import annotations
 
 import inspect
+import json
 
+import httpx
 import pytest
 import respx
 from pydantic import ValidationError as ModelValidationError
 
+from netskope import AsyncNetskopeClient, NetskopeClient
 from netskope.exceptions import (
     NetskopeError,
     PaginationError,
@@ -15,7 +18,7 @@ from netskope.exceptions import (
     ValidationError,
 )
 from netskope.models.cci import CciAppQuery, CciTagCreate, CciTagPatch
-from tests.unit.resources.conftest import sent_json
+from tests.unit.resources.conftest import contract_router, sent_json
 
 BASE = "https://t.goskope.com/api/v2/services/cci"
 
@@ -305,3 +308,65 @@ def test_a_usable_tag_count_that_disagrees_is_rejected(client, count):
     with pytest.raises(PaginationError):
         response.parse()
     assert response.json() == body
+
+
+# --- Gateway contract conformance -------------------------------------------------------------
+#
+# Folded in from the spec-conformance reviews: each test cites the
+# production/endpoints file and line whose shape it pins.
+
+
+class TestCciApplicationQueryAndTagIds:
+    def test_legacy_and_typed_paths_agree_on_one_selector(
+        self, contract_client: NetskopeClient
+    ) -> None:
+        """``GET /cci/app``: "All the query parameters are mutually exclusive
+        except limit & offset" (services/cci.yaml:2889)."""
+        from netskope.models.cci import CciAppQuery
+
+        with contract_router() as mock:
+            route = mock.get("/api/v2/services/cci/app").mock(
+                return_value=httpx.Response(200, json={"data": []})
+            )
+            with pytest.raises(ValidationError, match="exactly one CCI selector"):
+                contract_client.cci.lookup_app("Dropbox", ccl="high")
+            # The typed surface already rejected the pair at construction.
+            with pytest.raises(Exception, match="exactly one CCI selector"):
+                CciAppQuery(apps=["Dropbox"], ccl="high")
+            contract_client.cci.with_response.list_page(CciAppQuery(apps=["Dropbox"])).parse()
+            assert route.call_count == 1
+
+    def test_tag_writes_accept_the_integer_ids_the_example_uses(
+        self, contract_client: NetskopeClient
+    ) -> None:
+        """``appTagExample``; the example the ``POST /cci/tags`` body points at
+        ; writes ``ids`` as integers (services/cci.yaml:48-57)."""
+        assert CciTagCreate(tag="ccl_high", ids=[1, 2]).ids == [1, 2]
+        assert CciTagPatch(action="append", ids=[1, 2]).ids == [1, 2]
+        with contract_router() as mock:
+            create = mock.post("/api/v2/services/cci/tags").mock(
+                return_value=httpx.Response(200, json={"status": "Success"})
+            )
+            patch = mock.patch("/api/v2/services/cci/tags/ccl_high").mock(
+                return_value=httpx.Response(200, json={"status": "Success"})
+            )
+            contract_client.cci.tags.with_response.create_request(
+                CciTagCreate(tag="ccl_high", ids=[1, 2])
+            )
+            contract_client.cci.tags.with_response.update_request(
+                "ccl_high", CciTagPatch(action="append", ids=[1, 2])
+            )
+        assert json.loads(create.calls.last.request.content)["ids"] == [1, 2]
+        assert json.loads(patch.calls.last.request.content)["ids"] == [1, 2]
+
+    async def test_async_tag_create_sends_integer_ids(
+        self, contract_aclient: AsyncNetskopeClient
+    ) -> None:
+        with contract_router() as mock:
+            create = mock.post("/api/v2/services/cci/tags").mock(
+                return_value=httpx.Response(200, json={"status": "Success"})
+            )
+            await contract_aclient.cci.tags.with_response.create_request(
+                CciTagCreate(tag="ccl_high", ids=[1, 2])
+            )
+        assert json.loads(create.calls.last.request.content)["ids"] == [1, 2]

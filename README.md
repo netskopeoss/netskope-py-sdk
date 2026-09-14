@@ -766,10 +766,11 @@ of the Netskope API gateway contract — the internal OpenAPI definitions the
 gateway is built from. Those definitions are not public, so this repository
 carries neither a copy nor a link to them.
 
-The conformance checks live in `tests/unit/resources/test_spec_*.py`
-(`test_spec_events.py`, `test_spec_identity.py`, `test_spec_infra.py`,
-`test_spec_services.py`). Each assertion cites the contract file and line the
-shape comes from, for example:
+The conformance checks sit in the test file for the resource they cover, under
+a `Gateway contract conformance` heading: the publisher checks are in
+`tests/unit/resources/test_publishers.py`, the DNS ones in `test_dns.py`, and so
+on. Each assertion cites the contract file and line the shape comes from, for
+example:
 
 ```python
 def test_transaction_metrics_sends_only_hours(client: NetskopeClient) -> None:
@@ -779,8 +780,9 @@ def test_transaction_metrics_sends_only_hours(client: NetskopeClient) -> None:
 Those citations are the record of why a parameter is spelled the way it is, why
 a field was removed from a model, and why an argument is rejected before a
 request is built. Response fixtures use the contract's own example values
-wherever it publishes them. Every test runs against `respx` mocks on
-`example.goskope.com`; none of them reaches a live tenant.
+wherever it publishes them. Every test runs against `respx` mocks on a host that
+resolves nowhere (the `contract_client` and `example_client` fixtures in
+`tests/unit/resources/conftest.py`); none of them reaches a live tenant.
 
 ## Context Managers
 

@@ -14,7 +14,7 @@ from netskope import AsyncNetskopeClient, NetskopeClient
 from netskope.exceptions import ValidationError
 from netskope.models.npa_policy import NpaPolicyGroup, NpaPolicyRule
 from netskope.resources.npa.resource import AsyncNpaResource, NpaResource
-from tests.unit.resources.conftest import sent_json
+from tests.unit.resources.conftest import EXAMPLE_BASE, sent_json
 
 _BASE = "https://t.goskope.com"
 _RULES_URL = f"{_BASE}/api/v2/policy/npa/rules"
@@ -525,3 +525,31 @@ class TestAsyncNpaPolicy:
         with pytest.raises(ValidationError):
             await _anpa(aclient).search("publisher", "x")  # singular is a validation type
         assert len(respx.calls) == 0
+
+
+# --- Gateway contract conformance -------------------------------------------------------------
+#
+# Folded in from the spec-conformance reviews: each test cites the
+# production/endpoints file and line whose shape it pins.
+
+
+@respx.mock
+def test_policy_rule_create_sends_group_id_as_a_string(example_client: NetskopeClient) -> None:
+    """npa_policy_request.group_id is {type: string, example: "1"}.
+
+    Spec: policy/npa_policy.yaml:11-13.  The typed path already cast it; the
+    untyped ``rules.create()`` helper sent the integer through unchanged.
+    """
+    route = respx.post(f"{EXAMPLE_BASE}/api/v2/policy/npa/rules").mock(
+        return_value=httpx.Response(200, json={"data": {"rule_id": 1, "rule_name": "vantest"}})
+    )
+    example_client.npa.policy.rules.create(
+        rule_name="vantest",
+        group_id=1,
+        enabled=True,
+        rule_data={"policy_type": "private-app", "privateApps": ["app1"]},
+    )
+
+    body = sent_json(route)
+    assert body["group_id"] == "1"
+    assert body["enabled"] == "1"

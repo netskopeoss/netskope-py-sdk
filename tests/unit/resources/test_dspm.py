@@ -20,9 +20,9 @@ import respx
 
 from netskope import AsyncNetskopeClient, NetskopeClient
 from netskope.exceptions import ResponseValidationError, ValidationError
-from netskope.models.dspm import DspmResourceType, SortOrder
+from netskope.models.dspm import DspmFileSensitiveType, DspmResourceType, SortOrder
 from netskope.resources.dspm.resource import AsyncDspmResource, DspmResource
-from tests.unit.resources.conftest import sent_json
+from tests.unit.resources.conftest import contract_router, sent_json
 
 _BASE_URL = "https://t.goskope.com/api/v2/dspm"
 
@@ -290,3 +290,39 @@ class TestScanDatastores:
         )
         await _adspm(aclient).scan_datastores(["ds-1", "ds-2"])
         assert route.call_count == 2
+
+
+# --- Gateway contract conformance -------------------------------------------------------------
+#
+# Folded in from the spec-conformance reviews: each test cites the
+# production/endpoints file and line whose shape it pins.
+
+
+def test_dspm_data_tags_accepts_strings_and_integers() -> None:
+    """dspm_external.yaml:7162 declares `dataTags` with untyped items.
+
+    Every sibling tag list in the same file is `items: {type: string}`.
+    """
+    record = DspmFileSensitiveType.model_validate({"dataTags": ["pii", 7]})
+    assert record.data_tags == ["pii", 7]
+
+
+class TestDspmLegacyRoutes:
+    def test_legacy_list_uses_the_verified_path(self, contract_client: NetskopeClient) -> None:
+        """``GET /datastores/connected`` (dspm/dspm_external.yaml) is the route
+        both surfaces resolve; the module docstring now says so."""
+        with contract_router() as mock:
+            route = mock.get("/api/v2/dspm/datastores/connected").mock(
+                return_value=httpx.Response(200, json={"success": True, "data": {"results": []}})
+            )
+            contract_client.dspm.list_resources("connected_datastores")
+        assert route.call_count == 1
+
+    def test_an_unmapped_resource_name_raises_instead_of_building_a_path(
+        self, contract_client: NetskopeClient
+    ) -> None:
+        with contract_router() as mock:
+            route = mock.route(url__regex=r".*").mock(return_value=httpx.Response(200, json={}))
+            with pytest.raises(ValidationError, match="No verified public DSPM read contract"):
+                contract_client.dspm.list_resources("columns")
+            assert route.call_count == 0

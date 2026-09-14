@@ -386,7 +386,7 @@ async def test_detail_identity_is_checked_without_changing_legacy_get(
 
 @pytest.mark.parametrize("asynchronous", [False, True])
 async def test_legacy_role_list_enforces_the_declared_limit(asynchronous: bool) -> None:
-    """SPEC2-ID-6: rbac/ms-rbac.yaml:993-999 bounds the limit to 1 through 1000."""
+    """rbac/ms-rbac.yaml:993-999 bounds the limit to 1 through 1000."""
     with respx.mock(assert_all_mocked=True) as mock:
         options = {
             "tenant": "example.goskope.coken",

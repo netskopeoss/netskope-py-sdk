@@ -24,7 +24,7 @@ import respx
 from netskope import AsyncNetskopeClient, NetskopeClient
 from netskope.exceptions import ValidationError
 from netskope.resources.spm.resource import AsyncSpmResource, SpmResource
-from tests.unit.resources.conftest import sent_json
+from tests.unit.resources.conftest import EXAMPLE_BASE, sent_json
 
 _BASE = "https://t.goskope.com/api/v2/spm"
 _INVENTORY_URL = f"{_BASE}/inventory/getresources"
@@ -355,3 +355,23 @@ class TestRecentChanges:
 
         assert result == body
         assert sent_json(route) == {"time_range": {"start": 1, "end": 2}}
+
+
+# --- Gateway contract conformance -------------------------------------------------------------
+#
+# Folded in from the spec-conformance reviews: each test cites the
+# production/endpoints file and line whose shape it pins.
+
+
+@respx.mock
+def test_spm_past_view_requires_a_timestamp(example_client: NetskopeClient) -> None:
+    """spm/inventory.yaml:343-352 and :371-379 — past_view=true requires timestamp."""
+    route = respx.post(f"{EXAMPLE_BASE}/api/v2/spm/inventory/getresources").mock(
+        return_value=httpx.Response(200, json={"data": {"results": [], "total": 0}})
+    )
+    with pytest.raises(ValidationError, match="timestamp"):
+        example_client.spm.inventory(past_view=True)
+    assert not route.calls
+
+    example_client.spm.inventory(past_view=True, timestamp=1700000000)
+    assert route.calls

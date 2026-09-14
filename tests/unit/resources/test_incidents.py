@@ -9,9 +9,14 @@ import pytest
 import respx
 
 from netskope import AsyncNetskopeClient, NetskopeClient
-from netskope.exceptions import ValidationError
-from netskope.models.incidents import Incident, IncidentNote
-from tests.unit.resources.conftest import sent_json
+from netskope.exceptions import ResponseValidationError, ValidationError
+from netskope.models.incidents import (
+    Incident,
+    IncidentNote,
+    IncidentUpdateOutcome,
+    UserConfidenceIndex,
+)
+from tests.unit.resources.conftest import CONTRACT_BASE, sent_json
 
 _BASE = "https://t.goskope.com"
 _SEARCH_URL = f"{_BASE}/api/v2/events/datasearch/incident"
@@ -362,3 +367,112 @@ class TestAsyncIncidentsResource:
         with pytest.raises(ValidationError):
             await aclient.incidents.add_note("134", "x" * 600)
         assert len(respx.calls) == 0
+
+
+# --- Gateway contract conformance -------------------------------------------------------------
+#
+# Folded in from the spec-conformance reviews: each test cites the
+# production/endpoints file and line whose shape it pins.
+
+_CONTRACT_UPDATE_URL = f"{CONTRACT_BASE}/api/v2/incidents/update"
+_contract_mock = respx.mock(assert_all_mocked=True, assert_all_called=False)
+
+
+def test_the_update_outcome_is_optional_and_unbounded() -> None:
+    assert IncidentUpdateOutcome.model_validate({}).ok is None
+    assert IncidentUpdateOutcome.model_validate({"ok": 2}).ok == 2
+    assert IncidentUpdateOutcome.model_validate({"result": "Update Successful"}).ok is None
+
+
+@pytest.mark.parametrize(
+    "entry,accepted",
+    [
+        ({"ok": 1, "result": "Update Successful"}, True),
+        ({"result": "Update Successful"}, False),
+        ({"ok": 2, "result": "1"}, False),
+        ({"ok": 0, "result": "0"}, False),
+    ],
+)
+@_contract_mock
+def test_a_contract_legal_update_ack_decodes(
+    contract_client: NetskopeClient, entry: dict[str, object], accepted: bool
+) -> None:
+    _contract_mock.patch(_CONTRACT_UPDATE_URL).respond(200, json={"result": [entry]})
+    result = contract_client.incidents.update_one(1, field="status", new_value="x", user="u")
+    assert result.accepted is accepted
+
+
+@_contract_mock
+def test_a_boolean_ok_flag_is_still_refused(contract_client: NetskopeClient) -> None:
+    """incident_update.yaml:10-11 types ok as an integer; JSON true is not one."""
+    _contract_mock.patch(_CONTRACT_UPDATE_URL).respond(
+        200, json={"result": [{"ok": True, "result": 1}]}
+    )
+    with pytest.raises(ResponseValidationError):
+        contract_client.incidents.update_one(1, field="status", new_value="x", user="u")
+
+
+@pytest.mark.parametrize("body", [{}, {"result": []}, {"result": "garbage"}])
+@_contract_mock
+def test_a_body_that_reports_no_outcome_is_still_refused(
+    contract_client: NetskopeClient, body: dict[str, object]
+) -> None:
+    _contract_mock.patch(_CONTRACT_UPDATE_URL).respond(200, json=body)
+    with pytest.raises(ResponseValidationError):
+        contract_client.incidents.update_one(1, field="status", new_value="x", user="u")
+
+
+@respx.mock
+async def test_async_anomalies_read_the_results_key(aclient: AsyncNetskopeClient) -> None:
+    """uba.yaml:926-937 requires both `results` and `totalCount` on UserAnomalies."""
+    respx.post(f"{_BASE}/api/v2/incidents/users/getanomalies").respond(
+        200,
+        json={
+            "results": [
+                {
+                    "anomalyId": "66c66dda184d542f2188282f",
+                    "user": "demo@netskope.com",
+                    "score": 25,
+                    "windowId": 1661126400000,
+                }
+            ],
+            "totalCount": 1,
+        },
+    )
+    anomalies = await aclient.incidents.get_anomalies(["demo@netskope.com"])
+    assert [anomaly.id for anomaly in anomalies] == ["66c66dda184d542f2188282f"]
+    assert anomalies[0].window_id == 1661126400000
+
+
+@respx.mock
+def test_anomaly_sort_order_is_always_sent(client: NetskopeClient) -> None:
+    """uba.yaml:2205-2216 defaults sortorder to asc; the SDK sends an explicit desc."""
+    route = respx.post(f"{_BASE}/api/v2/incidents/users/getanomalies").respond(
+        200, json={"results": [], "totalCount": 0}
+    )
+    client.incidents.get_anomalies(["demo@netskope.com"])
+    assert route.calls.last.request.url.params["sortorder"] == "desc"
+    client.incidents.get_anomalies(["demo@netskope.com"], sort_order="asc")
+    assert route.calls.last.request.url.params["sortorder"] == "asc"
+
+
+def test_a_confidence_point_needs_neither_field() -> None:
+    """ubadatasvc.yaml:52-60 declares Confidence with no `required` list."""
+    uci = UserConfidenceIndex.model_validate({"userId": "u", "confidences": [{}]})
+    assert uci.confidences is not None
+    assert uci.confidences[0].start is None
+    assert uci.confidences[0].confidence_score is None
+
+
+@respx.mock
+def test_the_documented_update_envelope_reports_acceptance(client: NetskopeClient) -> None:
+    """incident_update.yaml:69-75 wraps {ok, result} items in {"result": [...]}."""
+    route = respx.patch(f"{_BASE}/api/v2/incidents/update").respond(
+        200, json={"result": [{"ok": 1, "result": "Update Successful"}]}
+    )
+    result = client.incidents.update_one(
+        1234567890, field="status", new_value="in_progress", user="user@domain.com"
+    )
+    assert result.accepted
+    assert result.accepted_entries == 0
+    assert route.call_count == 1

@@ -4,21 +4,30 @@ from __future__ import annotations
 
 import inspect
 
+import httpx
 import pytest
 import respx
 from pydantic import ValidationError as ModelValidationError
 
+from netskope import AsyncNetskopeClient, NetskopeClient
 from netskope.exceptions import NetskopeError, ResponseValidationError, ValidationError
 from netskope.models.infrastructure import LocalBrokerCreate, LocalBrokerPatch, UpgradeProfileUpdate
-from netskope.models.npa_policy import NpaPolicyGroupCreate, NpaPolicyRuleCreate, NpaPolicyRulePatch
+from netskope.models.npa_policy import (
+    NpaPolicyGroup,
+    NpaPolicyGroupCreate,
+    NpaPolicyGroupPatch,
+    NpaPolicyRule,
+    NpaPolicyRuleCreate,
+    NpaPolicyRulePatch,
+)
 from netskope.models.private_apps import (
     PrivateAppCreate,
     PrivateAppDiscoveryRequest,
     PrivateAppPatch,
 )
-from netskope.models.publishers import PublisherAlertsConfigurationPatch
+from netskope.models.publishers import PublisherAlertsConfigurationPatch, PublisherStatus
 from netskope.models.steering import IPSecTunnelCreate, IPSecTunnelPatch, SteeringSettings
-from tests.unit.resources.conftest import sent_json
+from tests.unit.resources.conftest import EXAMPLE_BASE, sent_json, sent_params
 
 BASE = "https://t.goskope.com/api/v2"
 PROFILE = {
@@ -579,3 +588,214 @@ async def test_url_list_invalid_type_fails_before_lookup(client, aclient, asynch
         if inspect.isawaitable(result):
             await result
     assert len(respx.calls) == 0
+
+
+# --- Gateway contract conformance -------------------------------------------------------------
+#
+# Folded in from the spec-conformance reviews: each test cites the
+# production/endpoints file and line whose shape it pins.
+
+_BASE = "https://t.goskope.com/api/v2/policy/npa"
+_RULES_URL = f"{_BASE}/rules"
+_GROUPS_URL = f"{_BASE}/policygroups"
+_RULE = {
+    "rule_id": 18,
+    "rule_name": "allow-ssh",
+    "enabled": "1",
+    "group_id": "3",
+    "action": "allow",
+    "rule_data": {"privateApps": ["ssh-box"]},
+}
+
+_GROUP = {"group_id": "3", "group_name": "engineering", "can_be_edited_deleted": "True"}
+
+
+class TestNpaPolicyRuleResponses:
+    """client.npa.policy.rules.with_response.get, sync and async."""
+
+    @respx.mock
+    def test_get_without_fields_sends_no_params(self, client: NetskopeClient) -> None:
+        route = respx.get(f"{_RULES_URL}/18").mock(
+            return_value=httpx.Response(200, json={"data": _RULE})
+        )
+        rule = client.npa.policy.rules.with_response.get(18).parse()
+        assert not route.calls.last.request.url.params
+        assert isinstance(rule, NpaPolicyRule)
+        assert rule.rule_name == "allow-ssh"
+        assert rule.enabled == "1"
+
+    @respx.mock
+    def test_get_joins_the_requested_fields(self, client: NetskopeClient) -> None:
+        route = respx.get(f"{_RULES_URL}/18").mock(
+            return_value=httpx.Response(200, json={"data": _RULE})
+        )
+        client.npa.policy.rules.with_response.get(18, fields=["rule_name", "enabled"])
+        assert dict(route.calls.last.request.url.params) == {"fields": "rule_name,enabled"}
+
+    def test_get_rejects_an_unusable_rule_id(self, client: NetskopeClient) -> None:
+        with respx.mock:
+            route = respx.route(host="t.goskope.com")
+            with pytest.raises(ValidationError, match="rule_id"):
+                client.npa.policy.rules.with_response.get("../3")
+            assert not route.called
+
+    @respx.mock
+    async def test_async_get(self, aclient: AsyncNetskopeClient) -> None:
+        route = respx.get(f"{_RULES_URL}/18").mock(
+            return_value=httpx.Response(200, json={"data": _RULE})
+        )
+        response = await aclient.npa.policy.rules.with_response.get(18, fields=["rule_name"])
+        assert dict(route.calls.last.request.url.params) == {"fields": "rule_name"}
+        assert response.parse().rule_id == 18
+
+    @respx.mock
+    async def test_async_get_without_fields(self, aclient: AsyncNetskopeClient) -> None:
+        route = respx.get(f"{_RULES_URL}/18").mock(
+            return_value=httpx.Response(200, json={"data": _RULE})
+        )
+        response = await aclient.npa.policy.rules.with_response.get(18)
+        assert not route.calls.last.request.url.params
+        assert response.parse().action == "allow"
+
+
+class TestNpaPolicyGroupResponses:
+    """client.npa.policy.groups.with_response.get / update_request."""
+
+    @respx.mock
+    def test_get(self, client: NetskopeClient) -> None:
+        route = respx.get(f"{_GROUPS_URL}/3").mock(
+            return_value=httpx.Response(200, json={"data": _GROUP})
+        )
+        group = client.npa.policy.groups.with_response.get(3).parse()
+        assert route.calls.last.request.method == "GET"
+        assert isinstance(group, NpaPolicyGroup)
+        assert group.group_name == "engineering"
+
+    @respx.mock
+    def test_update_request_patches_only_the_named_fields(self, client: NetskopeClient) -> None:
+        route = respx.patch(f"{_GROUPS_URL}/3").mock(
+            return_value=httpx.Response(200, json={"data": dict(_GROUP, group_name="platform")})
+        )
+        group = client.npa.policy.groups.with_response.update_request(
+            3, NpaPolicyGroupPatch(group_name="platform")
+        ).parse()
+        assert route.calls.last.request.method == "PATCH"
+        assert sent_json(route) == {"group_name": "platform"}
+        assert group.group_name == "platform"
+
+    def test_update_request_rejects_a_patch_with_no_changes(self, client: NetskopeClient) -> None:
+        with pytest.raises(ValueError, match="At least one policy group field"):
+            NpaPolicyGroupPatch()
+
+    @respx.mock
+    async def test_async_get(self, aclient: AsyncNetskopeClient) -> None:
+        respx.get(f"{_GROUPS_URL}/3").mock(return_value=httpx.Response(200, json={"data": _GROUP}))
+        response = await aclient.npa.policy.groups.with_response.get(3)
+        assert response.parse().group_id == "3"
+
+    @respx.mock
+    async def test_async_update_request(self, aclient: AsyncNetskopeClient) -> None:
+        route = respx.patch(f"{_GROUPS_URL}/3").mock(
+            return_value=httpx.Response(200, json={"data": dict(_GROUP, group_name="platform")})
+        )
+        response = await aclient.npa.policy.groups.with_response.update_request(
+            3, NpaPolicyGroupPatch(group_name="platform")
+        )
+        assert sent_json(route) == {"group_name": "platform"}
+        assert response.parse().group_name == "platform"
+
+
+_NAME_VALIDATION_URL = f"{EXAMPLE_BASE}/api/v2/infrastructure/npa/namevalidation"
+
+
+@respx.mock
+def test_npa_search_private_apps_populates_id_and_name(example_client: NetskopeClient) -> None:
+    """NPA search answers with private_apps_response_item, which names the record id/name.
+
+    Spec: npa_generic.yaml:70-117 for the item and :536-539 for the envelope
+    that carries it, against the ``app_id``/``app_name`` of the steering list
+    item (npa_apps_private.yaml:139-145).  Both spellings must land on the same
+    attributes or every search hit parses to all-``None``.
+    """
+    respx.get(f"{EXAMPLE_BASE}/api/v2/infrastructure/npa/search/private_apps").mock(
+        return_value=httpx.Response(
+            200,
+            json={
+                "status": "success",
+                "total": 1,
+                "data": {"private_apps": [{"id": 3, "name": "testName", "host": "192.168.1.1"}]},
+            },
+        )
+    )
+    page = example_client.npa.with_response.search_private_apps("name sw testName").parse()
+
+    assert [(app.app_id, app.app_name) for app in page.items] == [(3, "testName")]
+
+
+@respx.mock
+def test_npa_search_publishers_reads_the_list_spelling(example_client: NetskopeClient) -> None:
+    """publishers_response_item keeps publisher_id/publisher_name (npa_generic.yaml:125-165)."""
+    respx.get(f"{EXAMPLE_BASE}/api/v2/infrastructure/npa/search/publishers").mock(
+        return_value=httpx.Response(
+            200,
+            json={
+                "status": "success",
+                "total": 1,
+                "data": {
+                    "publishers": [
+                        {
+                            "publisher_id": 6,
+                            "publisher_name": "pub01.local",
+                            "status": "not registered",
+                            "upgrade_request": False,
+                            "lbrokerconnect": True,
+                        }
+                    ]
+                },
+            },
+        )
+    )
+    page = example_client.npa.with_response.search_publishers("name sw pub").parse()
+
+    publisher = page.items[0]
+    assert (publisher.publisher_id, publisher.publisher_name) == (6, "pub01.local")
+    assert publisher.status == PublisherStatus.NOT_REGISTERED
+
+
+@respx.mock
+def test_validate_name_sends_tag_type_for_tags(example_client: NetskopeClient) -> None:
+    """tag_type is required for resourceType tag (npa_generic.yaml:282-292).
+
+    Its enum is the strings ``"1"`` (private app) and ``"2"`` (publisher).
+    """
+    route = respx.get(_NAME_VALIDATION_URL).mock(
+        return_value=httpx.Response(
+            200, json={"status": "success", "data": {"is_valid_name": True}}
+        )
+    )
+    example_client.npa.validate_name("tag", "SSH", tag_type=1)
+
+    assert sent_params(route) == {"resourceType": "tag", "name": "SSH", "tag_type": "1"}
+
+
+@respx.mock
+def test_validate_name_refuses_a_tag_without_its_type(example_client: NetskopeClient) -> None:
+    """A tag name cannot be validated without tag_type (npa_generic.yaml:282-292)."""
+    with pytest.raises(ValidationError, match="tag_type is required"):
+        example_client.npa.validate_name("tag", "SSH")
+    with pytest.raises(ValidationError, match="Invalid tag_type"):
+        example_client.npa.validate_name("tag", "SSH", tag_type="3")
+    assert len(respx.calls) == 0
+
+
+@respx.mock
+def test_validate_name_omits_tag_type_for_other_resources(example_client: NetskopeClient) -> None:
+    """tag_type is "required only for resourceType tag" (npa_generic.yaml:282-284)."""
+    route = respx.get(_NAME_VALIDATION_URL).mock(
+        return_value=httpx.Response(200, json={"status": "success", "data": {}})
+    )
+    result = example_client.npa.with_response.validate_name("private_app", "SSH")
+
+    assert sent_params(route) == {"resourceType": "private_app", "name": "SSH"}
+    # validate_name_response marks nothing required (npa_generic.yaml:188-199).
+    assert result.parse().is_valid_name is None

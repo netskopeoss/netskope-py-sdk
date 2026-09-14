@@ -3,14 +3,17 @@
 from __future__ import annotations
 
 import inspect
+from typing import Any
 
+import httpx
 import pytest
 import respx
 
+from netskope import AsyncNetskopeClient, NetskopeClient
 from netskope.exceptions import ResponseValidationError, ValidationError
 from netskope.models.url_lists import UrlList
 from netskope.response import ApiResponse
-from tests.unit.resources.conftest import sent_json
+from tests.unit.resources.conftest import CONTRACT_BASE, EXAMPLE_BASE, sent_json
 
 BASE = "https://t.goskope.com/api/v2/policy"
 URL = f"{BASE}/urllist"
@@ -287,3 +290,99 @@ async def test_an_empty_url_list_still_seeds_the_update(client, aclient, asynchr
     result = await decode(invoke(aclient if asynchronous else client, typed, name="Renamed"))
     assert sent_json(route) == {"name": "Renamed", "data": {"urls": [], "type": "regex"}}
     assert result.urls == []
+
+
+# --- Gateway contract conformance -------------------------------------------------------------
+#
+# Folded in from the spec-conformance reviews: each test cites the
+# production/endpoints file and line whose shape it pins.
+
+_URLLIST_URL = f"{CONTRACT_BASE}/api/v2/policy/urllist"
+
+
+@pytest.mark.parametrize("asynchronous", [False, True])
+@respx.mock
+async def test_url_list_delete_returns_the_deleted_record(
+    contract_client: NetskopeClient, contract_aclient: AsyncNetskopeClient, asynchronous: bool
+) -> None:
+    """``DELETE /urllist/{id}`` 200 is ``DeletedUrllist``, a full URL-list record.
+
+    Spec: policy/urllist.yaml:276-281 references ``DeletedUrllist`` (:3-35),
+    which declares ``data``, ``id``, ``modify_by``, ``modify_time``,
+    ``modify_type``, ``name`` and ``pending``; no deployment status.
+    """
+    body = {
+        "id": 5,
+        "name": "l1",
+        "data": {"urls": ["bad.com"], "type": "exact"},
+        "modify_type": "Deleted",
+        "pending": 1,
+    }
+    route = respx.delete(f"{_URLLIST_URL}/5").mock(return_value=httpx.Response(200, json=body))
+    accessor = (contract_aclient if asynchronous else contract_client).url_lists.with_response
+    response = accessor.delete(5)
+    if asynchronous:
+        response = await response
+    record = response.parse()
+
+    assert isinstance(record, UrlList)
+    assert (record.id, record.name, record.modify_type, record.pending) == (
+        5,
+        "l1",
+        "Deleted",
+        1,
+    )
+    assert record.urls == ["bad.com"]
+    assert route.call_count == 1
+
+
+@respx.mock
+def test_url_list_list_sends_only_its_two_declared_parameters(
+    contract_client: NetskopeClient,
+) -> None:
+    """``pending`` and ``field`` are the whole declared query (policy/urllist.yaml:132-156)."""
+    records = [{"id": n, "name": f"l{n}", "data": {"urls": [], "type": "exact"}} for n in (1, 2, 3)]
+    route = respx.get(_URLLIST_URL).mock(return_value=httpx.Response(200, json=records))
+
+    assert [
+        item.id for item in contract_client.url_lists.list(pending=1, field="name", page_size=2)
+    ] == [
+        1,
+        2,
+        3,
+    ]
+    assert route.call_count == 1
+    assert dict(route.calls.last.request.url.params) == {"pending": "1", "field": "name"}
+
+    page = contract_client.url_lists.with_response.list_page(limit=2, offset=1).parse()
+    assert [item.id for item in page.items] == [2, 3]
+    assert (page.offset, page.limit) == (1, 2)
+    assert not route.calls.last.request.url.params
+
+
+_EXAMPLE_URLLIST_URL = f"{EXAMPLE_BASE}/api/v2/policy/urllist"
+
+
+@respx.mock
+def test_url_list_deploy_posts_to_urllist_deploy(example_client: NetskopeClient) -> None:
+    """The only URL-list deploy operation is POST /urllist/deploy.
+
+    Spec: policy/urllist.yaml:201-227.  No bare ``/deploy`` path exists in the
+    spec, so ``POST /api/v2/policy/deploy`` was a 404 on every call.
+    """
+    record: dict[str, Any] = {
+        "id": 42,
+        "name": "Block",
+        "data": {"type": "exact", "urls": ["www.test.com"]},
+        "modify_by": "Netskope API",
+        "modify_type": "Created",
+        "pending": 0,
+    }
+    route = respx.post(f"{_EXAMPLE_URLLIST_URL}/deploy").mock(
+        return_value=httpx.Response(200, json=[record])
+    )
+    deployed = example_client.url_lists.with_response.deploy().parse()
+
+    assert route.calls.last.request.url.path == "/api/v2/policy/urllist/deploy"
+    # The deploy response is an array of Urllist (policy/urllist.yaml:209-217).
+    assert [item.id for item in deployed.urllists] == [42]

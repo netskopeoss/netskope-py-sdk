@@ -472,7 +472,7 @@ class TestLegacyPageTotals:
     async def test_a_completed_total_stops_before_another_request(
         self, paginators, kind, metadata
     ) -> None:
-        """SPEC2-PAGE-1: steering/npa_apps_private.yaml:27-30 puts total beside data."""
+        """steering/npa_apps_private.yaml:27-30 puts total beside data."""
         route = respx.get(URL).mock(
             return_value=httpx.Response(200, json={"result": [{"_id": "1"}], **metadata})
         )
@@ -578,7 +578,7 @@ class TestUnpaginatedCollections:
     async def test_an_incomplete_collection_is_not_reported_as_complete(
         self, unpaginated, kind
     ) -> None:
-        """SPEC2-INFRA-11: npa_publishers.yaml:877-879 declares the collection total."""
+        """npa_publishers.yaml:877-879 declares the collection total."""
         with respx.mock(assert_all_mocked=True) as router:
             route = router.get(URL).mock(
                 return_value=httpx.Response(200, json={"result": [{"_id": "1"}], "total": 2})
@@ -606,7 +606,7 @@ class TestLocalPage:
         assert (page.offset, page.limit, page.total) == (5, 2, 1)
 
     def test_a_complete_array_establishes_continuation_without_inventing_a_total(self) -> None:
-        """SPEC2-INFRA-11: policy/urllist.yaml:157-165 returns the entire array."""
+        """policy/urllist.yaml:157-165 returns the entire array."""
         items = [Alert.model_validate({"_id": str(n)}) for n in (1, 2)]
         page = local_page(items, {}, 0, 1)
         assert [item.id for item in page.items] == ["1"]

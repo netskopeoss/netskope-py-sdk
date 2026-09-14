@@ -11,7 +11,7 @@ import respx
 from netskope import AsyncNetskopeClient, NetskopeClient
 from netskope.exceptions import ValidationError
 from netskope.models.private_apps import PrivateApp, PrivateAppProtocol, PrivateAppTag
-from tests.unit.resources.conftest import sent_json
+from tests.unit.resources.conftest import EXAMPLE_BASE, sent_json, sent_params
 
 _BASE = "https://t.goskope.com"
 _APPS_URL = f"{_BASE}/api/v2/steering/apps/private"
@@ -720,3 +720,64 @@ class TestPolicyUsageDecoding:
         )
         response = await aclient.private_apps.with_response.get_policy_in_use([1])
         assert response.parse().data == []
+
+
+# --- Gateway contract conformance -------------------------------------------------------------
+#
+# Folded in from the spec-conformance reviews: each test cites the
+# production/endpoints file and line whose shape it pins.
+
+_EXAMPLE_APPS_URL = f"{EXAMPLE_BASE}/api/v2/steering/apps/private"
+
+
+@respx.mock
+def test_private_app_list_keeps_a_caller_supplied_query_first(
+    example_client: NetskopeClient,
+) -> None:
+    """The spec's own multi-filter example is ``name sw test and clientless_access eq true``.
+
+    Spec: npa_apps_private.yaml:509-510.
+    """
+    route = respx.get(_EXAMPLE_APPS_URL).mock(
+        return_value=httpx.Response(200, json={"data": {"private_apps": []}, "total": 0})
+    )
+    list(example_client.private_apps.list(query="name sw test", host="10.0.0.5"))
+
+    assert sent_params(route)["query"] == "name sw test and host eq 10.0.0.5"
+
+
+def test_private_app_reads_port_from_its_protocol_entries() -> None:
+    """private_apps_item has no top-level port; the port lives in protocols[].
+
+    Spec: npa_apps_private.yaml:133-231 for the item and :180-183 →
+    protocol_response_item:402-422 for the protocol entry that carries ``port``.
+    ``app.port`` was always ``None``, including in the module's own example.
+    """
+    app = PrivateApp.model_validate(
+        {
+            "app_id": 3,
+            "app_name": "[Web-Management]",
+            "host": "192.168.1.1",
+            "protocols": [
+                {"port": "443", "transport": "tcp"},
+                {"port": "8443", "transport": "tcp"},
+            ],
+        }
+    )
+    assert app.port == "443,8443"
+
+
+def test_private_app_reads_service_publisher_assignments() -> None:
+    """The response names the assignments service_publisher_assignments, plural.
+
+    Spec: npa_apps_private.yaml:201-204 →
+    service_publisher_assignment_item (npa_publishers.yaml:962-991).  The SDK
+    declared a scalar ``service_publisher_assignment`` and a ``publishers``
+    array, neither of which the response carries; ``publishers`` now reads the
+    assignments so existing callers see real data.
+    """
+    assignments = [{"primary": True, "publisher_external_id": 1, "publisher_name": "pub01.local"}]
+    app = PrivateApp.model_validate({"app_id": 3, "service_publisher_assignments": assignments})
+    assert app.service_publisher_assignments == assignments
+    assert app.publishers == assignments
+    assert "service_publisher_assignment" not in PrivateApp.model_fields

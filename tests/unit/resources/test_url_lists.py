@@ -6,10 +6,10 @@ import httpx
 import pytest
 import respx
 
-from netskope import NetskopeClient
+from netskope import AsyncNetskopeClient, NetskopeClient
 from netskope.exceptions import ValidationError
 from netskope.models.url_lists import UrlList
-from tests.unit.resources.conftest import sent_json
+from tests.unit.resources.conftest import CONTRACT_BASE, EXAMPLE_BASE, drain, sent_json, sent_params
 
 _URL = "https://t.goskope.com/api/v2/policy/urllist"
 
@@ -131,3 +131,57 @@ class TestUrlListsResource:
         assert route.call_count == 1
         assert stale.call_count == 0
         assert result["status"] == "deployed"
+
+
+# --- Gateway contract conformance -------------------------------------------------------------
+#
+# Folded in from the spec-conformance reviews: each test cites the
+# production/endpoints file and line whose shape it pins.
+
+_URLLIST_URL = f"{CONTRACT_BASE}/api/v2/policy/urllist"
+
+
+@respx.mock
+async def test_async_url_list_list_makes_exactly_one_request(
+    contract_aclient: AsyncNetskopeClient,
+) -> None:
+    """The async iterator holds the whole collection after one request."""
+    records = [{"id": n, "name": f"l{n}"} for n in (1, 2, 3)]
+    route = respx.get(_URLLIST_URL).mock(return_value=httpx.Response(200, json=records))
+    items = await drain(contract_aclient.url_lists.list(page_size=1))
+    assert [item.id for item in items] == [1, 2, 3]
+    assert route.call_count == 1
+    assert not route.calls.last.request.url.params
+
+
+_EXAMPLE_URLLIST_URL = f"{EXAMPLE_BASE}/api/v2/policy/urllist"
+
+
+@respx.mock
+def test_url_list_listing_sends_the_two_declared_filters(example_client: NetskopeClient) -> None:
+    """GET /urllist accepts pending (0|1) and field, singular.
+
+    Spec: policy/urllist.yaml:133-142 and :143-156.
+    """
+    route = respx.get(_EXAMPLE_URLLIST_URL).mock(return_value=httpx.Response(200, json=[]))
+    list(example_client.url_lists.list(pending=1, field="name"))
+
+    params = sent_params(route)
+    assert params["pending"] == "1"
+    assert params["field"] == "name"
+
+    with pytest.raises(ValidationError, match="pending must be"):
+        list(example_client.url_lists.list(pending=2))
+    with pytest.raises(ValidationError, match="field must be"):
+        list(example_client.url_lists.list(field="urls"))
+
+
+def test_url_list_pending_is_an_integer() -> None:
+    """Urllist.pending is {type: integer} (policy/urllist.yaml:119-120).
+
+    A boolean field coerced 0/1 and raised on anything else.
+    """
+    assert UrlList.model_validate({"id": 1, "pending": 2}).pending == 2
+    assert UrlList.model_validate({"id": 1, "pending": 1}).pending == 1
+    for absent in ("count", "json_version"):
+        assert absent not in UrlList.model_fields

@@ -7,23 +7,28 @@ import json
 import httpx
 import pytest
 import respx
+from pydantic import ValidationError as PydanticValidationError
 
 from netskope import AsyncNetskopeClient, NetskopeClient
 from netskope.core.pagination import Page
 from netskope.exceptions import (
     NetskopeError,
+    NotFoundError,
     ResponseValidationError,
     ValidationError,
 )
 from netskope.models.publishers import (
     Publisher,
     PublisherAlertsConfiguration,
+    PublisherAlertsConfigurationPatch,
     PublisherAlertsConfigurationStatus,
+    PublisherApp,
     PublisherCreate,
     PublisherRelease,
+    PublisherStatus,
     PublisherUpdate,
 )
-from tests.unit.resources.conftest import drain, sent_json
+from tests.unit.resources.conftest import CONTRACT_BASE, EXAMPLE_BASE, drain, sent_json
 
 _URL = "https://t.goskope.com/api/v2/infrastructure/publishers"
 _RELEASES_URL = f"{_URL}/releases"
@@ -809,3 +814,370 @@ class TestPublisherRequests:
         for invalid in ({}, {"name": None}):
             with pytest.raises(PydanticValidationError):
                 PublisherUpdate.model_validate(invalid)
+
+
+# --- Gateway contract conformance -------------------------------------------------------------
+#
+# Folded in from the spec-conformance reviews: each test cites the
+# production/endpoints file and line whose shape it pins.
+
+_PUBLISHERS_URL = f"{CONTRACT_BASE}/api/v2/infrastructure/publishers"
+
+
+@respx.mock
+def test_publisher_patch_requires_the_declared_name(contract_client: NetskopeClient) -> None:
+    """``publisher_patch_request`` declares ``required: [name]``.
+
+    Spec: infrastructure/npa_publishers.yaml:338-341, for
+    ``PATCH /publishers/{publisher_id}``.  A body that changed only
+    ``lbrokerconnect`` was reported as a success the gateway had rejected.
+    """
+    with pytest.raises(ValidationError, match="requires name"):
+        contract_client.publishers.update(6, extra_fields={"lbroker_connect": True})
+    assert len(respx.calls) == 0
+
+    route = respx.patch(f"{_PUBLISHERS_URL}/6").mock(
+        return_value=httpx.Response(200, json={"data": {"id": 6, "name": "pub"}})
+    )
+    contract_client.publishers.update(6, name="pub", extra_fields={"lbroker_connect": True})
+    assert sent_json(route) == {"name": "pub", "lbrokerconnect": True}
+
+
+@respx.mock
+async def test_async_publisher_patch_requires_the_declared_name(
+    contract_aclient: AsyncNetskopeClient,
+) -> None:
+    """The async mirror enforces the same ``required: [name]`` (:338-341)."""
+    with pytest.raises(ValidationError, match="requires name"):
+        await contract_aclient.publishers.update(6, extra_fields={"lbroker_connect": True})
+    assert len(respx.calls) == 0
+
+
+@respx.mock
+def test_alerts_put_sends_all_three_required_keys(contract_client: NetskopeClient) -> None:
+    """``publishers_alert_put_request.required`` is all three keys.
+
+    Spec: infrastructure/npa_publishers.yaml:591-594 for the required set,
+    :624-625 for the 1..5 ``eventTypes`` bound and :627-629 for
+    ``selectedUsers`` as one comma-joined string.  A no-argument call used to
+    send ``{}`` to a three-required-property schema and report success.
+    """
+    with pytest.raises(ValidationError, match="requires admin_users, event_types, selected_users"):
+        contract_client.publishers.update_alerts_configuration()
+    assert len(respx.calls) == 0
+
+    route = respx.put(f"{_PUBLISHERS_URL}/alertsconfiguration").mock(
+        return_value=httpx.Response(200, json={"status": "success"})
+    )
+    contract_client.publishers.update_alerts_configuration(
+        admin_users=["admin1@abc.com"],
+        event_types=["UPGRADE_FAILED"],
+        selected_users=["abc@xyz.com", "def@xyz.com"],
+    )
+    assert sent_json(route) == {
+        "adminUsers": ["admin1@abc.com"],
+        "eventTypes": ["UPGRADE_FAILED"],
+        "selectedUsers": "abc@xyz.com,def@xyz.com",
+    }
+
+
+@pytest.mark.parametrize("asynchronous", [False, True])
+@respx.mock
+async def test_alerts_put_returns_a_status_acknowledgment(
+    contract_client: NetskopeClient, contract_aclient: AsyncNetskopeClient, asynchronous: bool
+) -> None:
+    """``publishers_alert_put_response`` declares only ``status``.
+
+    Spec: infrastructure/npa_publishers.yaml:630-638, enum
+    ``success`` / ``not found`` / ``failure``, referenced from the PUT at
+    :1180-1187.  Parsing it into the configuration model produced a hollow
+    object indistinguishable from a configuration that really is empty.
+    """
+    route = respx.put(f"{_PUBLISHERS_URL}/alertsconfiguration").mock(
+        return_value=httpx.Response(200, json={"status": "success"})
+    )
+    client = contract_aclient if asynchronous else contract_client
+    result = client.publishers.update_alerts_configuration(
+        admin_users=["admin1@abc.com"],
+        event_types=["UPGRADE_FAILED"],
+        selected_users="abc@xyz.com",
+    )
+    if asynchronous:
+        result = await result
+
+    assert isinstance(result, PublisherAlertsConfigurationStatus)
+    assert result.status == "success"
+    assert not hasattr(result, "admin_users")
+    assert route.call_count == 1
+
+
+@respx.mock
+def test_publisher_list_sends_no_undeclared_parameters(contract_client: NetskopeClient) -> None:
+    """Only ``fields`` reaches the wire, and the collection is fetched once."""
+    body = {
+        "data": {"publishers": [{"publisher_id": n} for n in (1, 2, 3, 4, 5)]},
+        "total": 5,
+        "status": "success",
+    }
+    route = respx.get(_PUBLISHERS_URL).mock(return_value=httpx.Response(200, json=body))
+
+    # A page size smaller than the collection must not make the parser refuse
+    # the body or ask for a second page that would re-deliver the same records.
+    assert [pub.publisher_id for pub in contract_client.publishers.list(page_size=2)] == [
+        1,
+        2,
+        3,
+        4,
+        5,
+    ]
+    assert route.call_count == 1
+    assert not route.calls.last.request.url.params
+
+    page = contract_client.publishers.list_page(fields=["publisher_id"], offset=1, limit=2)
+    assert [pub.publisher_id for pub in page.items] == [2, 3]
+    assert (page.offset, page.limit, page.total, page.has_more) == (1, 2, 5, True)
+    assert page.metadata == {"total": 5, "status": "success"}
+    assert dict(route.calls.last.request.url.params) == {"fields": "publisher_id"}
+    assert route.call_count == 2
+
+
+@respx.mock
+async def test_async_publisher_list_makes_exactly_one_request(
+    contract_aclient: AsyncNetskopeClient,
+) -> None:
+    """The async iterator makes no extra HTTP call for a collection it already holds."""
+    body = {"publishers": [{"publisher_id": n} for n in (1, 2, 3)], "total": 3}
+    route = respx.get(_PUBLISHERS_URL).mock(return_value=httpx.Response(200, json=body))
+    records = await drain(contract_aclient.publishers.list(page_size=1))
+    assert [pub.publisher_id for pub in records] == [1, 2, 3]
+    assert route.call_count == 1
+    assert not route.calls.last.request.url.params
+
+
+@respx.mock
+def test_status_not_found_on_http_200_raises_not_found(example_client: NetskopeClient) -> None:
+    """`not found` is a declared 200-level status value.
+
+    npa_publishers.yaml:871-876 (status_enum, used by the publishers
+    list/get/create/update operations), npa_apps_private.yaml:25-26,
+    npa_private_tag.yaml:412, npa_generic.yaml:152-156.
+    """
+    respx.get(f"{EXAMPLE_BASE}/api/v2/infrastructure/publishers/7").mock(
+        return_value=httpx.Response(200, json={"status": "not found"})
+    )
+    with pytest.raises(NotFoundError) as excinfo:
+        example_client.publishers.get(7)
+    assert "not found" in str(excinfo.value).lower()
+
+
+_EXAMPLE_PUBLISHERS_URL = f"{EXAMPLE_BASE}/api/v2/infrastructure/publishers"
+
+
+@respx.mock
+def test_publisher_create_sends_the_lbrokerconnect_key(example_client: NetskopeClient) -> None:
+    """publisher_post_request names the flag ``lbrokerconnect``.
+
+    Spec: npa_publishers.yaml:323-326 (post), :354 (patch), :368 (put).  The
+    SDK sent ``lbroker_connect``, which the gateway drops, so the flag never
+    took effect on any create.
+    """
+    route = respx.post(_EXAMPLE_PUBLISHERS_URL).mock(
+        return_value=httpx.Response(200, json={"data": {"id": 6, "name": "npa_publisher_1"}})
+    )
+    example_client.publishers.create("npa_publisher_1", lbroker_connect=True)
+
+    body = sent_json(route)
+    assert body == {"name": "npa_publisher_1", "lbrokerconnect": True}
+    assert "lbroker_connect" not in body
+
+
+@respx.mock
+def test_publisher_update_renames_an_extra_lbroker_connect_field(
+    example_client: NetskopeClient,
+) -> None:
+    """publisher_patch_request carries the same ``lbrokerconnect`` key (npa_publishers.yaml:354)."""
+    route = respx.patch(f"{_EXAMPLE_PUBLISHERS_URL}/6").mock(
+        return_value=httpx.Response(200, json={"data": {"id": 6, "name": "pub01.local"}})
+    )
+    example_client.publishers.update(6, name="pub01.local", extra_fields={"lbroker_connect": False})
+
+    assert sent_json(route) == {"name": "pub01.local", "lbrokerconnect": False}
+
+
+@respx.mock
+def test_publisher_bulk_upgrade_sends_string_ids(example_client: NetskopeClient) -> None:
+    """publishers_bulk_request.publishers.id.items is {type: string}.
+
+    Spec: npa_publishers.yaml:294-299, with the endpoint's own examples at
+    :1230-1244 sending ``["12"]``.
+    """
+    route = respx.put(f"{_EXAMPLE_PUBLISHERS_URL}/bulk").mock(
+        return_value=httpx.Response(200, json={"status": "success"})
+    )
+    example_client.publishers.bulk_upgrade([12, 15])
+
+    assert sent_json(route) == {
+        "publishers": {"apply": {"upgrade_request": True}, "id": ["12", "15"]}
+    }
+
+
+@respx.mock
+def test_publisher_alerts_put_carries_selected_users(example_client: NetskopeClient) -> None:
+    """publishers_alert_put_request requires all three keys.
+
+    Spec: npa_publishers.yaml:589-594 for the required set and :627-629 for
+    ``selectedUsers``, a comma-joined string.  The SDK could not send it at all.
+    """
+    route = respx.put(f"{_EXAMPLE_PUBLISHERS_URL}/alertsconfiguration").mock(
+        return_value=httpx.Response(200, json={"status": "success"})
+    )
+    example_client.publishers.update_alerts_configuration(
+        admin_users=["admin1@abc.com", "admin2@abc.com"],
+        event_types=["CONNECTION_FAILED", "UPGRADE_STARTED"],
+        selected_users=["abc@xyz.com", "def@xyz.com"],
+    )
+
+    assert sent_json(route) == {
+        "adminUsers": ["admin1@abc.com", "admin2@abc.com"],
+        "eventTypes": ["CONNECTION_FAILED", "UPGRADE_STARTED"],
+        "selectedUsers": "abc@xyz.com,def@xyz.com",
+    }
+
+
+@respx.mock
+@pytest.mark.parametrize("event_types", [[], ["UPGRADE_FAILED"] * 6])
+def test_publisher_alerts_put_bounds_event_types(
+    example_client: NetskopeClient, event_types: list[str]
+) -> None:
+    """eventTypes carries minItems: 1 / maxItems: 5 (npa_publishers.yaml:624-625)."""
+    with pytest.raises(ValidationError, match="between 1 and 5"):
+        example_client.publishers.update_alerts_configuration(event_types=event_types)
+    assert len(respx.calls) == 0
+
+
+def test_publisher_alerts_request_model_bounds_event_types() -> None:
+    """The typed path enforces the same 1..5 bound (npa_publishers.yaml:624-625)."""
+
+    def build(event_types: list[str]) -> PublisherAlertsConfigurationPatch:
+        return PublisherAlertsConfigurationPatch(
+            admin_users=["admin1@abc.com"],
+            event_types=event_types,
+            selected_users="abc@xyz.com",
+        )
+
+    build(["UPGRADE_FAILED"])
+    with pytest.raises(PydanticValidationError, match="at most 5"):
+        build(["UPGRADE_FAILED"] * 6)
+    with pytest.raises(PydanticValidationError, match="at least 1"):
+        build([])
+
+
+def test_publisher_alerts_request_model_requires_every_declared_key() -> None:
+    """``publishers_alert_put_request.required`` is all three (npa_publishers.yaml:591-594)."""
+    for partial in (
+        {},
+        {"adminUsers": ["admin1@abc.com"]},
+        {"adminUsers": ["admin1@abc.com"], "eventTypes": ["UPGRADE_FAILED"]},
+        {"eventTypes": ["UPGRADE_FAILED"], "selectedUsers": "abc@xyz.com"},
+    ):
+        with pytest.raises(PydanticValidationError, match=r"[Ff]ield required"):
+            PublisherAlertsConfigurationPatch.model_validate(partial)
+
+
+def test_publisher_alerts_response_reads_selected_users() -> None:
+    """publishers_alert_get_response.data declares selectedUsers (npa_publishers.yaml:580-582)."""
+    config = PublisherAlertsConfiguration.model_validate(
+        {
+            "adminUsers": ["admin1@abc.com"],
+            "eventTypes": ["CONNECTION_FAILED"],
+            "selectedUsers": "abc@xyz.com,def@xyz.com",
+        }
+    )
+    assert config.selected_users == "abc@xyz.com,def@xyz.com"
+
+
+@respx.mock
+def test_publisher_single_object_envelope_populates_id_and_name(
+    example_client: NetskopeClient,
+) -> None:
+    """publisher_response.data names the record id/name, not publisher_id/publisher_name.
+
+    Spec: npa_publishers.yaml:477-481 (``id``) and :493-496 (``name``), with
+    the same spelling in publisher_bulk_item (:198, :214).  Every get/create/
+    update used to parse to ``publisher_id=None``, so the module's own example
+    (``create_registration_token(new_pub.publisher_id)``) passed ``None``.
+    """
+    respx.get(f"{_EXAMPLE_PUBLISHERS_URL}/6").mock(
+        return_value=httpx.Response(
+            200,
+            json={
+                "status": "success",
+                "data": {
+                    "id": 6,
+                    "name": "pub01.local",
+                    "common_name": "e2eabac9e9f715ff",
+                    "lbrokerconnect": False,
+                    "registered": True,
+                    "status": "connected",
+                    "upgrade_request": True,
+                },
+            },
+        )
+    )
+    publisher = example_client.publishers.get(6)
+
+    assert (publisher.publisher_id, publisher.publisher_name) == (6, "pub01.local")
+    # upgrade_request (:537-539) and lbrokerconnect (:490-492), not the
+    # publisher_upgrade_request / lbroker_proxy / sticky_ip_enabled the SDK
+    # declared and the spec has nowhere.
+    assert publisher.upgrade_request is True
+    assert publisher.lbrokerconnect is False
+    for absent in ("publisher_upgrade_request", "lbroker_proxy", "sticky_ip_enabled"):
+        assert absent not in Publisher.model_fields
+
+
+def test_publisher_list_item_keeps_its_own_spelling() -> None:
+    """publishers_get_response keys the list item publisher_id/publisher_name.
+
+    Spec: npa_publishers.yaml:812-818.  Both spellings must reach the same
+    attributes.
+    """
+    publisher = Publisher.model_validate(
+        {"publisher_id": 6, "publisher_name": "pub01.local", "status": "connected"}
+    )
+    assert (publisher.publisher_id, publisher.publisher_name) == (6, "pub01.local")
+
+
+def test_publisher_status_enum_matches_the_spec_value() -> None:
+    """The enum is exactly [connected, not registered] (npa_publishers.yaml:827-832)."""
+    assert PublisherStatus.NOT_REGISTERED.value == "not registered"
+    assert {member.value for member in PublisherStatus} == {"connected", "not registered"}
+
+
+def test_publisher_app_reads_the_publisher_apps_response() -> None:
+    """publishers_private_apps_response.data[] names id/name/private_app_protocol.
+
+    Spec: npa_publishers.yaml:33 (``id``), :40 (``name``), :44
+    (``private_app_protocol``), :30 (``host``).  Against those keys every
+    record used to parse to all-``None``.
+    """
+    app = PublisherApp.model_validate(
+        {
+            "id": 3,
+            "name": "[Web-Management]",
+            "host": "192.168.1.1",
+            "private_app_protocol": "https",
+            "protocols": [{"port": "443", "transport": "tcp"}],
+        }
+    )
+    assert (app.app_id, app.app_name, app.host) == (3, "[Web-Management]", "192.168.1.1")
+    assert app.protocol == "https"
+
+
+def test_publisher_release_declares_only_the_spec_fields() -> None:
+    """release_item declares docker_tag, name and version (npa_publishers.yaml:950-961)."""
+    assert set(PublisherRelease.model_fields) == {"version", "docker_tag", "release_type"}
+    release = PublisherRelease.model_validate(
+        {"docker_tag": "8690", "name": "Latest", "version": "117.0.0.8690"}
+    )
+    assert release.release_type == "Latest"
