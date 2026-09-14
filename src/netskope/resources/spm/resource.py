@@ -41,6 +41,7 @@ from netskope.resources.spm.paths import (
     _app_body,
     _apps_body,
     _inventory_body,
+    _ngl_search,
     _policy_rule_params,
     _posture_score_body,
     _recent_changes_body,
@@ -129,8 +130,10 @@ class SpmResource(SyncResource):
             past_view: Ask for a past view (requires *timestamp*).
 
         Raises:
-            netskope.exceptions.ValidationError: If *group_by* is unknown, or
-                both a filter object and an NGL query are supplied.
+            netskope.exceptions.ValidationError: If *group_by* is unknown, if
+                both a filter object and an NGL query are supplied, or if
+                *ngl_query* is given together with its deprecated alias
+                *filter*.
         """
         body = _inventory_body(
             fields=fields,
@@ -138,7 +141,7 @@ class SpmResource(SyncResource):
             limit=limit,
             offset=offset,
             filters=filters,
-            ngl_query=ngl_query if filter is None else filter,
+            ngl_query=_ngl_search(filter, ngl_query),
             sort=sort,
             timestamp=timestamp,
             past_view=past_view,
@@ -278,7 +281,7 @@ class AsyncSpmResource(AsyncResource):
             limit=limit,
             offset=offset,
             filters=filters,
-            ngl_query=ngl_query if filter is None else filter,
+            ngl_query=_ngl_search(filter, ngl_query),
             sort=sort,
             timestamp=timestamp,
             past_view=past_view,

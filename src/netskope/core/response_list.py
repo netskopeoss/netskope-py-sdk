@@ -46,6 +46,22 @@ def _select(body: dict[str, Any], nested_keys: tuple[str, ...]) -> Any:
     return next(iter(candidates.values()), None)
 
 
+def carries_records(body: Any, *nested_keys: str) -> bool:
+    """Whether this response offers a collection to extract at all.
+
+    A response carrying none is not malformed: an operation that usually
+    answers with records can answer with a bare acknowledgment object instead.
+    Callers that accept both shapes ask this first, which keeps a *missing*
+    collection distinguishable from one that is present and malformed -
+    :func:`extract_response_list` raises for both.
+    """
+    if isinstance(body, list):
+        return True
+    if not isinstance(body, dict):
+        return False
+    return bool(_declared_lists(body, nested_keys) or _envelope_lists(body))
+
+
 def extract_response_list(body: Any, *nested_keys: str) -> list[dict[str, Any]]:
     """Extract a supported list envelope without dropping malformed records."""
     records: Any = None

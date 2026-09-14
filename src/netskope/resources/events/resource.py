@@ -22,13 +22,12 @@ import re
 from datetime import datetime
 from typing import Any
 
-from pydantic import ValidationError as PydanticValidationError
-
+from netskope.core.decoding import decoded
 from netskope.core.ids import extract_list
 from netskope.core.pagination import AsyncPaginatedResponse, Page, SyncPaginatedResponse
 from netskope.core.resource import AsyncResource, SyncResource
 from netskope.datasearch import DATASEARCH_TIMEOUT_DEFAULT
-from netskope.exceptions import NotFoundError, ResponseValidationError, ValidationError
+from netskope.exceptions import NotFoundError, ValidationError
 from netskope.models.alerts import DatasearchBucket
 from netskope.models.events import (
     Event,
@@ -169,25 +168,24 @@ def _prepare_get(
     return _event_path(et), _event_model(et), params
 
 
-def _decode_one(body: Any, model: type[Event], event_id: str) -> Event:
+def _decode_one(body: Any, model: type[Event], event_id: str, path: str) -> Event:
     """Decode a one-record lookup with the guards the typed ``get`` already applies.
 
     A ``_id eq`` query that answers with several rows, or with a row carrying a
     different ``_id``, did not answer the question that was asked, so it is
     refused rather than silently returning the first record.
+
+    Schema failures convert too.  This is a legacy accessor reading a ``_get``
+    body directly, so nothing else stands between the model and the caller, and
+    letting ``pydantic.ValidationError`` out here would contradict the one
+    contract this release states for every response that fails validation.
     """
     items = extract_list(body)
     if not items:
         raise NotFoundError(f"Event {event_id!r} not found", status_code=404)
-    try:
+    with decoded("GET", path):
         event = model.model_validate(_single_record(items, "Event"))
         _matching_identity(event.id, event_id, "Event")
-    except PydanticValidationError:
-        # A schema failure keeps reporting itself; only the two lookup guards
-        # are translated, and they carry the wording the typed get() uses.
-        raise
-    except ValueError as exc:
-        raise ResponseValidationError(f"The API response could not be decoded: {exc}") from exc
     return event
 
 
@@ -398,7 +396,7 @@ class EventsResource(SyncResource):
         """
         path, model, params = _prepare_get(event_id, event_type, timeout)
         body = self._get(path, **params)
-        return _decode_one(body, model, event_id)
+        return _decode_one(body, model, event_id, path)
 
 
 class AsyncEventsResource(AsyncResource):
@@ -545,4 +543,4 @@ class AsyncEventsResource(AsyncResource):
         """
         path, model, params = _prepare_get(event_id, event_type, timeout)
         body = await self._get(path, **params)
-        return _decode_one(body, model, event_id)
+        return _decode_one(body, model, event_id, path)

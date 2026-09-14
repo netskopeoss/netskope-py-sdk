@@ -223,12 +223,15 @@ class UrlListsResource(SyncResource):
         """
         self._delete(_list_path(list_id))
 
-    def deploy(self) -> dict[str, Any]:
+    def deploy(self) -> builtins.list[dict[str, Any]] | dict[str, Any]:
         """Apply every pending URL-list change (``POST /urllist/deploy``).
 
         Returns:
             The deployment result: the API answers with the array of URL lists
-            it applied (``policy/urllist.yaml:209-217``).
+            it applied (``policy/urllist.yaml:209-217``), so the common result
+            is a list, not a mapping. A tenant answering with a status object
+            instead returns that object unchanged; :meth:`with_response.deploy`
+            normalises both into :class:`~netskope.models.url_lists.PolicyDeployment`.
         """
         return self._post(_DEPLOY_PATH)
 
@@ -322,6 +325,6 @@ class AsyncUrlListsResource(AsyncResource):
         """Delete a URL list."""
         await self._delete(_list_path(list_id))
 
-    async def deploy(self) -> dict[str, Any]:
+    async def deploy(self) -> builtins.list[dict[str, Any]] | dict[str, Any]:
         """Apply every pending URL-list change.  See :meth:`UrlListsResource.deploy`."""
         return await self._post(_DEPLOY_PATH)

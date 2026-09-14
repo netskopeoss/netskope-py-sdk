@@ -199,23 +199,26 @@ def local_page(
     applied to the records already in hand, and the complete collection
     establishes ``has_more`` without needing a total.
 
-    The stated ``total`` is reported as received, even when it disagrees with
-    the number of records. ``npa_publishers.yaml:877`` declares it, and the
-    client has no better information about how many records exist than the
-    service that counted them; a disagreement means the service capped its own
-    response, which is worth surfacing rather than hiding. ``has_more`` is
-    derived from the records in hand, not from the total, so a wrong total
-    cannot make the traversal skip anything.
+    A ``total`` that disagrees with the number of records is dropped rather
+    than reported. These operations cannot return a window, so the records in
+    hand are the collection by definition and a disagreeing total is the
+    service's own bookkeeping, not evidence of truncation. Reporting it would
+    also reach :meth:`SyncPaginatedResponse.pages`, whose unpaginated branch
+    refuses a response whose stated total exceeds the records it carries: the
+    caller would lose data the gateway returned successfully.
     """
     total = select_total(metadata)
+    if total is not None and total != len(items):
+        logger.debug(
+            "Discarding the stated total %d: the unpaginated response carries %d records.",
+            total,
+            len(items),
+        )
+        total = None
     window = items[offset:] if offset else items
     if limit is not None:
         window = window[:limit]
-    # The page is built without the total so `build_page`'s records-past-total
-    # guard does not fire: that guard protects a *traversal* from a shrinking
-    # total, and there is no traversal here. The stated total is attached after.
-    page = build_page(window, offset=offset, limit=limit, total=None, metadata=metadata)
-    page.total = total
+    page = build_page(window, offset=offset, limit=limit, total=total, metadata=metadata)
     page.has_more = offset + len(window) < len(items)
     page.windowed_locally = True
     return page

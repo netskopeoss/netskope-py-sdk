@@ -154,7 +154,10 @@ def _validate_publisher_payload(
     try:
         request = model.model_validate(known_fields)
     except PydanticValidationError as exc:
-        raise ValidationError(str(exc)) from exc
+        # Name the fields, never `str(exc)`: pydantic renders the caller's own
+        # input and a docs URL, which every sibling validator here strips.
+        fields = ", ".join(".".join(map(str, error["loc"])) or "payload" for error in exc.errors())
+        raise ValidationError(f"Invalid publisher request: {fields}.") from None
     return _to_wire({**payload, **request.model_dump(mode="json", exclude_unset=True)})
 
 

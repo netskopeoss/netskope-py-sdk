@@ -22,6 +22,25 @@ T = TypeVar("T", bound=BaseModel)
 USERNAME_FILTER_FIELD = "accounts.userName"
 
 
+def _member_query(name: str, limit: int, offset: int) -> UserQuery:
+    """Build the member-lookup query with the bounds the legacy twin enforces.
+
+    ``usermanager.yaml:1190-1204`` bounds ``limit`` to 0..1000 and ``offset`` to
+    nonnegative.  ``resource.py``'s legacy ``_build_query_body`` restates a
+    pydantic failure as :class:`~netskope.exceptions.ValidationError`; without
+    the same conversion the typed twin raises ``pydantic.ValidationError``,
+    which a caller's documented ``except NetskopeError`` does not catch.
+    """
+    try:
+        return UserQuery(
+            filter={"accounts.parentGroups": {"in": [name]}}, limit=limit, offset=offset
+        )
+    except ModelValidationError:
+        raise ValidationError(
+            "Invalid user query: limit must be 0..1000, offset nonnegative, and filter an object."
+        ) from None
+
+
 def _body(query: UserQuery) -> dict[str, Any]:
     try:
         query = UserQuery.model_validate(query.model_dump())
@@ -68,9 +87,7 @@ class UserGroupsResponses(SyncResource):
     def members_page(
         self, name: str, *, limit: int = 100, offset: int = 0
     ) -> ApiResponse[Page[UmUser]]:
-        query = UserQuery(
-            filter={"accounts.parentGroups": {"in": [name]}}, limit=limit, offset=offset
-        )
+        query = _member_query(name, limit, offset)
         response = self._transport.request(
             "POST", "/api/v2/users/getusers", json=_body(query), retry_safe=True
         )
@@ -110,9 +127,7 @@ class AsyncUserGroupsResponses(AsyncResource):
     async def members_page(
         self, name: str, *, limit: int = 100, offset: int = 0
     ) -> ApiResponse[Page[UmUser]]:
-        query = UserQuery(
-            filter={"accounts.parentGroups": {"in": [name]}}, limit=limit, offset=offset
-        )
+        query = _member_query(name, limit, offset)
         response = await self._transport.request(
             "POST", "/api/v2/users/getusers", json=_body(query), retry_safe=True
         )

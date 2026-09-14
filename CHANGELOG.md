@@ -39,7 +39,7 @@ expansion from 8 to 24 resource namespaces.
   inside method bodies. `dem` and `aicc`, previously the two largest modules at
   2,120 and 984 lines, are packages of one module per sub-namespace.
 
-- Publisher and URL-list collections are fetched once, with page windows applied locally; publisher server-side filters are rejected. Local pages derive continuation from the fetched records, and drop a stated total that contradicts them rather than refusing the response.
+- Publisher and URL-list collections are fetched once, with page windows applied locally; publisher server-side filters are rejected. Local pages derive continuation from the fetched records, and drop a stated total that contradicts them rather than refusing the response. `Page.windowed_locally` marks such a page, so a caller comparing the envelope against the page can tell an ordinary local window from a shape mismatch.
 - Publisher PATCH requires `name`, publisher alert-configuration PUT requires all three configuration fields, and notification template POST and PATCH require complete valid bodies. Invalid request bounds and enums now fail before HTTP across DEM, RBI, IPS, NSIQ, RBAC roles, and user management; CCI lookups require one selector.
 - Enrollment token-set GETs and private-app or tag policy-usage POSTs no longer retry, following their declared write access.
 - Typed DNS deploys return pages of deployed objects; publisher alert-configuration and steering updates return acknowledgments. Private-app publisher removal returns applications, and publisher action results retain publisher lists.
@@ -133,8 +133,9 @@ expansion from 8 to 24 resource namespaces.
 - `IncidentUpdateOutcome.count` reports the entry count an acknowledgment
   carried, or `None` when the service returned only a message.
 - Typed event pages accept the audit endpoint's `audit_type` filter, which
-  the legacy iterator already supported. Supplying it to a category that
-  supports JQL is rejected, so the two filter mechanisms cannot be mixed.
+  the legacy iterator already supported. Every other category rejects it. On
+  audit it folds into the same `query` expression as a `type eq` clause, so a
+  caller supplying both gets one combined filter rather than a conflict.
 
 ### Changed
 
@@ -203,8 +204,9 @@ expansion from 8 to 24 resource namespaces.
   and `create()` sent an unrecognized `list_type` to the API unchecked.
 - `ClientStatusEvent` and `IncidentEvent` accept integers in the identity,
   version, status, assignee, and DLP fields that some tenants report as numbers.
-  `EventQueryCapabilities.jql` defaults to `True`, since only the audit category
-  lacks it.
+  `EventQueryCapabilities.jql` defaults to `True`, and no category overrides it:
+  audit declares the same `query` filter as the rest (`events/audit.yaml:12-18`).
+  What audit lacks is field projection, grouping, and ordering.
 - `IncidentUpdateResult.accepted` requires a positive reported count. A negative count no longer claims that updates were applied; `accepted_entries` still reports the sum the service returned.
 - Resource identifiers reject negative integers before the request is sent, alongside the existing rejection of booleans and of strings outside `^[a-zA-Z0-9_\-]+$`. `url_lists.get(-3)` raises rather than spending a round trip on `/api/v2/policy/urllist/-3`. Zero remains a usable identifier.
 - The legacy SCIM resources accept the same identifiers as the typed accessors: an id is percent-encoded into the path by the shared `quote_id` rule (non-empty, no whitespace or control characters, not a dot-only segment) instead of being rejected by a `^[a-zA-Z0-9_\-]+$` pattern. `scim.users.get("user@example.com")` now sends `GET /api/v2/scim/Users/user%40example.com`.
@@ -238,6 +240,37 @@ expansion from 8 to 24 resource namespaces.
 
 ### Fixed
 
+- Typed `url_lists.deploy()` accepts the status-only acknowledgment its model
+  documents. Reading records out of a `{data: [...], status}` envelope was
+  applied to every object response, so an acknowledgment carrying no collection
+  was refused. A collection that is present but malformed still raises.
+- `events.get()` converts a record that fails model validation into
+  `ResponseValidationError`. It read a body directly with no `parse()` boundary
+  behind it, so `pydantic.ValidationError` reached the caller from this one
+  accessor while every sibling converted it.
+- `netskope.core.decoding.decoded()` keeps response values out of the error it
+  raises. `pydantic.ValidationError` is itself a `ValueError`, so its rendered
+  input was being interpolated into a message documented as payload-free; it now
+  reduces to `(location, error_type)` pairs the way `ApiResponse.parse()` does.
+- Event `insertion_start_time`/`insertion_end_time` reject a naive datetime and
+  a non-epoch value, matching the sibling `start_time`/`end_time` bounds.
+  `int(naive.timestamp())` silently read the caller's local zone, and a value
+  that was neither a datetime nor an integer reached the query string unchecked.
+- `users.groups.with_response.members_page()` raises `ValidationError` for a
+  `limit` or `offset` outside the declared bounds, as its legacy twin does,
+  rather than letting `pydantic.ValidationError` escape.
+- Private-app convenience filters refuse a value carrying whitespace or a quote.
+  Each becomes a term of one `query` expression that has no documented quoting,
+  so `app_name="My App"` silently filtered on something else. Pass the whole
+  expression through `query` for such a value.
+- `spm.inventory()` raises when `ngl_query` is supplied together with its
+  deprecated alias `filter`, instead of silently sending the deprecated value
+  and dropping the current one.
+- Publisher request validation names the offending fields instead of echoing
+  pydantic's rendered message, which included the caller's input and a docs URL.
+- Legacy `url_lists.deploy()` is annotated `list[dict] | dict`. The endpoint
+  answers with an array (`policy/urllist.yaml:209-217`), which the previous
+  `dict[str, Any]` excluded.
 - `dem.query` time bounds that cannot be converted to the RFC 3339 shape the
   operation declares raise `ValidationError` instead of a bare `ValueError` from
   `datetime.fromtimestamp`. The usual cause is passing epoch seconds or

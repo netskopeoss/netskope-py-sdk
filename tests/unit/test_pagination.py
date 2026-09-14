@@ -614,17 +614,19 @@ class TestLocalPage:
         assert local_page(items, {}, 1, 1).has_more is False
 
     @pytest.mark.parametrize("total", [1, 3])
-    def test_a_total_that_contradicts_the_rows_is_still_reported(self, total: int) -> None:
+    def test_an_inconsistent_collection_total_is_dropped_not_reported(self, total: int) -> None:
         """npa_publishers.yaml:877-879 reports the collection total.
 
-        It is reported as received even when it disagrees with the rows: the
-        service counted them and the client has not. `has_more` comes from the
-        records in hand, so a wrong total cannot make a traversal skip records.
+        The operation declares no paging parameters, so the records in hand are
+        the collection by definition and a disagreeing total is the service's
+        own bookkeeping. Dropping it keeps the data reachable; reporting it
+        would reach the unpaginated branch of `pages()`, which refuses a
+        response whose stated total exceeds the records it carries.
         """
         items = [Alert.model_validate({"_id": str(n)}) for n in (1, 2)]
         page = local_page(items, {"total": total}, 0, 1)
         assert [item.id for item in page.items] == ["1"]
-        assert page.total == total
+        assert page.total is None
         assert page.has_more is True
 
     def test_no_window_returns_the_whole_collection(self) -> None:

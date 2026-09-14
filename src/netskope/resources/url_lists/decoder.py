@@ -6,7 +6,7 @@ from typing import Any
 
 from netskope.core.pagination import Page, local_page
 from netskope.core.resource import AsyncResource, SyncResource
-from netskope.core.response_list import extract_response_list
+from netskope.core.response_list import carries_records, extract_response_list
 from netskope.models.url_lists import PolicyDeployment, UrlList
 from netskope.resources.shared.npa import page_params
 from netskope.resources.url_lists.paths import (
@@ -48,11 +48,14 @@ def _parse_deployment(body: Any) -> PolicyDeployment:
     if isinstance(body, list):
         return PolicyDeployment(urllists=[_deployed(row) for row in body])
     deployment = PolicyDeployment.model_validate(body)
-    if not deployment.urllists:
+    if not deployment.urllists and carries_records(body, "urllists"):
         # A `{data: [...], status}` envelope keeps its status on the model but
         # leaves the records unread, because `urllists` is the only collection
         # key the model declares. Read them the way every other decoder here
-        # does rather than stranding them in `model_extra`.
+        # does rather than stranding them in `model_extra`. Guarded on the
+        # envelope actually offering a collection: a status-only acknowledgment
+        # offers none, and extracting from it would refuse a response this
+        # model documents as supported.
         rows = extract_response_list(body, "urllists")
         if rows:
             deployment = deployment.model_copy(update={"urllists": [_deployed(r) for r in rows]})

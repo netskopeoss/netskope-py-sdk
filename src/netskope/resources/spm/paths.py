@@ -91,6 +91,18 @@ def _positive_int(value: int, name: str) -> int:
     return value
 
 
+def _ngl_search(filter: str | None, ngl_query: str | None) -> str | None:
+    """Resolve the NGL search string from its current name or deprecated alias.
+
+    Preferring the alias when both are supplied would send the deprecated value
+    and drop the current one without a word.  Every other contradictory pair in
+    :func:`_inventory_body` raises, so this one does too.
+    """
+    if filter is not None and ngl_query is not None:
+        raise ValidationError("Supply either ngl_query or its deprecated alias filter, not both.")
+    return ngl_query if filter is None else filter
+
+
 def _inventory_body(
     *,
     fields: list[str] | None,

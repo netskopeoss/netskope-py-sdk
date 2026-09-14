@@ -423,6 +423,45 @@ class TestDeployKeepsTheRecordContents:
         assert result.urllists[0].urls == ["a.com", "b.com"]
 
     @respx.mock
+    def test_a_status_only_acknowledgment_is_not_refused(self, client: NetskopeClient) -> None:
+        """`PolicyDeployment` documents a tenant that answers with a status object.
+
+        `policy/urllist.yaml:209-217` declares only the array, so this shape is
+        the tolerance the model states rather than a declared response.  Reading
+        the records out of a `{data: [...], status}` envelope must not turn an
+        acknowledgment carrying no collection into a refused response, which is
+        the body `tests/unit/resources/test_url_lists.py` pins on the legacy
+        surface.
+        """
+        respx.post(f"{URL}/deploy").mock(
+            return_value=httpx.Response(200, json={"status": "deployed"})
+        )
+        result = client.url_lists.with_response.deploy().parse()
+        assert result.status == "deployed"
+        assert result.urllists == []
+
+    @respx.mock
+    def test_a_malformed_collection_is_still_refused(self, client: NetskopeClient) -> None:
+        """The status-only tolerance must not swallow a genuinely bad collection."""
+        respx.post(f"{URL}/deploy").mock(
+            return_value=httpx.Response(200, json={"data": ["not-an-object"], "status": "ok"})
+        )
+        with pytest.raises(ResponseValidationError):
+            client.url_lists.with_response.deploy().parse()
+
+    @respx.mock
+    async def test_async_status_only_acknowledgment_is_not_refused(
+        self, aclient: AsyncNetskopeClient
+    ) -> None:
+        """Async twin of the sync tolerance."""
+        respx.post(f"{URL}/deploy").mock(
+            return_value=httpx.Response(200, json={"status": "deployed"})
+        )
+        result = (await aclient.url_lists.with_response.deploy()).parse()
+        assert result.status == "deployed"
+        assert result.urllists == []
+
+    @respx.mock
     async def test_async_array_response_keeps_urls_and_type(
         self, aclient: AsyncNetskopeClient
     ) -> None:

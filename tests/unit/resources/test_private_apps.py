@@ -781,3 +781,32 @@ def test_private_app_reads_service_publisher_assignments() -> None:
     assert app.service_publisher_assignments == assignments
     assert app.publishers == assignments
     assert "service_publisher_assignment" not in PrivateApp.model_fields
+
+
+@pytest.mark.parametrize(
+    "value", ["My App", "a and b", 'quo"te', "it's"], ids=["space", "conjunction", "quote", "apos"]
+)
+@respx.mock
+def test_filter_values_that_would_reshape_the_query_are_refused(
+    client: NetskopeClient, value: str
+) -> None:
+    """Convenience filters become terms of one `query` expression.
+
+    `npa_generic.yaml:495-504` documents the operators and value spellings but
+    no quoting, so a value carrying whitespace or a quote cannot be rendered as
+    a term: `name sw My App` filters on something the caller did not ask for,
+    and `a and b` adds a term. Refusing beats silently returning wrong rows.
+    """
+    with pytest.raises(ValidationError, match="no documented quoting"):
+        list(client.private_apps.list(app_name=value))
+    assert len(respx.calls) == 0
+
+
+@respx.mock
+def test_a_caller_written_expression_is_still_sent_verbatim(client: NetskopeClient) -> None:
+    """The refusal applies to rendered terms, not to `query` the caller wrote."""
+    route = respx.get(_APPS_URL).mock(
+        return_value=httpx.Response(200, json={"data": [], "status": {"total": 0}})
+    )
+    list(client.private_apps.list(query='app_name eq "My App"'))
+    assert route.calls.last.request.url.params["query"] == 'app_name eq "My App"'

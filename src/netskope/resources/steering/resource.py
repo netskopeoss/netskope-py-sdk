@@ -93,11 +93,19 @@ def _steering_settings_payload(settings: dict[str, Any]) -> dict[str, Any]:
 
 
 def _ipsec_page_size(page_size: int) -> int:
-    """Clamp an iterator page size into the declared ``limit`` range."""
+    """Clamp an iterator page size into the declared ``limit`` range.
+
+    A value above the maximum is reduced to it rather than refused: batching is
+    a client-side choice that costs the caller nothing, and the iterator still
+    yields every record.  The typed ``limit`` refuses an out-of-range value
+    instead, because that one reaches the gateway as written
+    (steering/ipsec.yaml:478-486).
+    """
     if isinstance(page_size, bool) or not isinstance(page_size, int) or page_size < 1:
         raise ValidationError(
-            f"Invalid page_size {page_size!r}. Must be an integer between 1 and "
-            f"{IPSEC_MAX_LIMIT} (steering/ipsec.yaml:478-486)."
+            f"Invalid page_size {page_size!r}. Must be a positive integer; "
+            f"a value above {IPSEC_MAX_LIMIT} is reduced to it "
+            f"(steering/ipsec.yaml:478-486)."
         )
     return min(page_size, IPSEC_MAX_LIMIT)
 

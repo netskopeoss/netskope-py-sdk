@@ -9,6 +9,7 @@ already uses.
 from __future__ import annotations
 
 import builtins
+import re
 from typing import Any
 
 from netskope.core.ids import id_strings, validate_id
@@ -32,8 +33,27 @@ _POLICY_IN_USE_PATH = f"{_PATH}/getpolicyinuse"
 _TAGS_POLICY_IN_USE_PATH = f"{_TAGS_PATH}/getpolicyinuse"
 
 
+# Whitespace ends a term and a quote would open one; `npa_generic.yaml:495-504`
+# documents the operators and value spellings but no quoting or escaping.
+_UNRENDERABLE = re.compile(r"[\s\"']")
+
+
 def _query_term(name: str, operator: str, value: Any) -> str:
-    """Render one ``<column> <operator> <value>`` term of a query expression."""
+    """Render one ``<column> <operator> <value>`` term of a query expression.
+
+    A value carrying whitespace or a quote is refused rather than interpolated.
+    The expression has no documented quoting, so there is no spelling that
+    means "match this literal value": ``name sw My App`` is a different filter
+    from the one the caller asked for, and a value containing `` and `` adds a
+    term outright.  Callers needing such a value can write the whole expression
+    themselves through ``query``.
+    """
+    if isinstance(value, str) and _UNRENDERABLE.search(value):
+        raise ValidationError(
+            f"Invalid {name} filter {value!r}: the query expression has no documented "
+            "quoting, so a value containing whitespace or quotes cannot be rendered as "
+            "a term. Pass the full expression through `query` instead."
+        )
     return f"{name} {operator} {value}"
 
 

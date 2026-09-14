@@ -157,6 +157,14 @@ class TestInventory:
         assert route.call_count == 0
 
     @respx.mock
+    def test_ngl_query_and_its_deprecated_alias_are_exclusive(self, client: NetskopeClient) -> None:
+        """Preferring the alias would send the deprecated value and drop the current one."""
+        route = respx.post(url__regex=r".*").mock(return_value=httpx.Response(200, json={}))
+        with pytest.raises(ValidationError, match="not both"):
+            _spm(client).inventory(filter="deprecated", ngl_query="current")
+        assert route.call_count == 0
+
+    @respx.mock
     def test_ngl_query_requires_resource_name_grouping(self, client: NetskopeClient) -> None:
         route = respx.post(url__regex=r".*").mock(return_value=httpx.Response(200, json={}))
         with pytest.raises(ValidationError, match="resource_name"):

@@ -8,6 +8,7 @@ from typing import Any, TypeVar
 
 import httpx
 from pydantic import BaseModel, TypeAdapter
+from pydantic import ValidationError as PydanticValidationError
 
 from netskope.core.pagination import Page, build_page, coerce_total
 from netskope.exceptions import ResponseValidationError
@@ -24,9 +25,22 @@ def decoded(request_method: str, request_path: str) -> Iterator[None]:
     The legacy methods that call a decoder directly on a ``_get`` body have no
     such boundary, so without this a caller's documented ``except
     NetskopeError`` misses the failure and sees a bare ``ValueError`` instead.
+
+    A ``pydantic.ValidationError`` is itself a ``ValueError`` and renders the
+    values it rejected.  It is reduced to ``(location, error_type)`` pairs the
+    way :meth:`ApiResponse.parse` reduces it, because
+    :class:`~netskope.exceptions.ResponseValidationError` documents that
+    response values stay out of the error.
     """
     try:
         yield
+    except PydanticValidationError as exc:
+        raise ResponseValidationError(
+            "The API response does not match the expected schema.",
+            request_method=request_method,
+            request_path=request_path,
+            field_errors=tuple((tuple(error["loc"]), error["type"]) for error in exc.errors()),
+        ) from None
     except ValueError as exc:
         raise ResponseValidationError(
             f"The API response could not be decoded: {exc}",

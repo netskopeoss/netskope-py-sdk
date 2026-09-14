@@ -154,6 +154,23 @@ def audit_type_query(query: str | None, audit_type: str | None) -> str | None:
     return f"({query}) and {clause}" if query else clause
 
 
+def _insertion_epoch(name: str, bound: datetime | int) -> int:
+    """Convert one insertion-time bound the way the sibling time bounds convert.
+
+    ``_AlertQuery._epoch`` rejects a naive datetime rather than guessing a zone:
+    ``int(naive.timestamp())`` silently reads the caller's local time and sends
+    a bound hours away from the one they wrote.  These two parameters are built
+    outside that model, so the rule is restated rather than inherited.
+    """
+    if isinstance(bound, datetime):
+        if bound.tzinfo is None or bound.utcoffset() is None:
+            raise ValidationError(f"{name} must include a timezone.")
+        return int(bound.timestamp())
+    if isinstance(bound, bool) or not isinstance(bound, int):
+        raise ValidationError(f"{name} must be an epoch integer or an aware datetime.")
+    return bound
+
+
 def _insertion_params(
     event_type: str,
     insertion_start_time: datetime | int | None,
@@ -166,10 +183,10 @@ def _insertion_params(
             f"they are declared only for {', '.join(sorted(_INSERTION_TIME_TYPES))}."
         )
     params: dict[str, Any] = {}
-    for key, bound in (
-        ("insertionstarttime", insertion_start_time),
-        ("insertionendtime", insertion_end_time),
+    for key, name, bound in (
+        ("insertionstarttime", "insertion_start_time", insertion_start_time),
+        ("insertionendtime", "insertion_end_time", insertion_end_time),
     ):
         if bound is not None:
-            params[key] = int(bound.timestamp()) if isinstance(bound, datetime) else bound
+            params[key] = _insertion_epoch(name, bound)
     return params

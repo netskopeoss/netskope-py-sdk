@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from datetime import datetime, timedelta, timezone
 from typing import Any, ClassVar
 
 import httpx
@@ -97,6 +98,36 @@ class TestEventsResource:
         list(client.events.list("audit", insertion_start_time=1, insertion_end_time=2))
         params = route.calls.last.request.url.params
         assert params["insertionstarttime"] == "1" and params["insertionendtime"] == "2"
+
+    @respx.mock
+    def test_insertion_bounds_accept_an_aware_datetime(self, client: NetskopeClient) -> None:
+        """An aware datetime converts to the epoch second it names, not a local one."""
+        route = respx.get(_AUDIT_URL).mock(return_value=httpx.Response(200, json=_EMPTY))
+        moment = datetime(2026, 1, 1, tzinfo=timezone(timedelta(hours=-5)))
+        list(client.events.list("audit", insertion_start_time=moment))
+        assert route.calls.last.request.url.params["insertionstarttime"] == "1767243600"
+
+    @respx.mock
+    def test_insertion_bounds_reject_a_naive_datetime_no_http(self, client: NetskopeClient) -> None:
+        """`int(naive.timestamp())` would read the caller's local zone silently.
+
+        The sibling `start_time`/`end_time` bounds refuse a naive datetime
+        rather than guess (`shared/datasearch_query.py:39-46`); these two are
+        built outside that model and must refuse it on the same grounds.
+        """
+        with pytest.raises(ValidationError, match="must include a timezone"):
+            client.events.list("audit", insertion_start_time=datetime(2026, 1, 1))
+        assert len(respx.calls) == 0
+
+    @respx.mock
+    @pytest.mark.parametrize("bound", ["not-a-time", 1.5, True])
+    def test_insertion_bounds_reject_non_epoch_values_no_http(
+        self, client: NetskopeClient, bound: object
+    ) -> None:
+        """A value that is neither an epoch int nor a datetime reached the query string."""
+        with pytest.raises(ValidationError, match="epoch integer or an aware datetime"):
+            client.events.list("audit", insertion_start_time=bound)  # type: ignore[arg-type]
+        assert len(respx.calls) == 0
 
     @respx.mock
     def test_insertion_bounds_rejected_for_datasearch_no_http(self, client: NetskopeClient) -> None:
@@ -336,6 +367,32 @@ def test_event_capabilities_default_to_supporting_jql() -> None:
         ).jql
         is True
     )
+
+
+@pytest.mark.parametrize("asynchronous", [False, True], ids=["sync", "async"])
+@respx.mock
+async def test_get_keeps_a_schema_failure_inside_the_error_hierarchy(
+    client: NetskopeClient, aclient: AsyncNetskopeClient, asynchronous: bool
+) -> None:
+    """`get()` decodes a `_get` body with no `parse()` boundary behind it.
+
+    This release states one contract for a response that fails validation, so
+    this accessor must not be the exception that lets `pydantic.ValidationError`
+    reach the caller, and the rejected value stays out of the message.
+    """
+    respx.get(f"{_BASE}/api/v2/events/datasearch/clientstatus").mock(
+        return_value=httpx.Response(
+            200, json={"result": [{"_id": "abc123", "hostname": {"secret": "value"}}]}
+        )
+    )
+    events = (aclient if asynchronous else client).events
+    with pytest.raises(ResponseValidationError) as caught:
+        if asynchronous:
+            await events.get("abc123", event_type="clientstatus")
+        else:
+            events.get("abc123", event_type="clientstatus")
+    assert "secret" not in str(caught.value)
+    assert {error[0][0] for error in caught.value.field_errors} == {"hostname"}
 
 
 @pytest.mark.parametrize("event_type", ["application", "infrastructure", "audit"])
