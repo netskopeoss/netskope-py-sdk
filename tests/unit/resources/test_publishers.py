@@ -358,32 +358,33 @@ class TestPublishersResource:
         assert len(respx.calls) == 0
 
     @respx.mock
-    def test_list_page_drops_a_total_that_contradicts_the_rows(
+    def test_list_page_reports_a_total_that_contradicts_the_rows(
         self, client: NetskopeClient
     ) -> None:
         body = {"publishers": [{"publisher_id": n} for n in (1, 2, 3)], "total": 1}
         route = respx.get(_URL).mock(return_value=httpx.Response(200, json=body))
         page = client.publishers.list_page()
         assert [publisher.publisher_id for publisher in page.items] == [1, 2, 3]
-        assert page.total is None
+        assert page.total == 1
         assert route.call_count == 1
 
     @respx.mock
-    def test_list_returns_rows_a_reported_total_would_have_refused(
+    def test_list_returns_rows_alongside_a_contradicting_total(
         self, client: NetskopeClient
     ) -> None:
-        """A contradicting total must not reach the unpaginated branch of ``pages()``.
+        """The stated total reaches the caller without costing them the rows.
 
-        That branch raises :class:`PaginationError` when the stated total
-        exceeds the records the response carries, so a total reported verbatim
-        makes ``list()`` yield nothing while ``list_page()`` still returns the
-        same rows.  Dropping it in ``local_page`` is what keeps the two
-        surfaces agreeing on a response the gateway sent successfully.
+        The unpaginated branch of ``pages()`` refuses a response whose stated
+        total exceeds the records it carries, which would make ``list()`` yield
+        nothing while ``list_page()`` returned the same rows.  A locally
+        windowed page is exempt: it holds the whole collection by definition,
+        so the guard has nothing to protect here.
         """
         body = {"publishers": [{"publisher_id": n} for n in (1, 2, 3)], "total": 9}
         route = respx.get(_URL).mock(return_value=httpx.Response(200, json=body))
         assert [pub.publisher_id for pub in client.publishers.list()] == [1, 2, 3]
-        assert route.call_count == 1
+        assert client.publishers.list_page().total == 9
+        assert route.call_count == 2
 
     @respx.mock
     def test_list_and_list_page_report_the_same_envelope_failure(
@@ -758,21 +759,21 @@ class TestAsyncPublishersResource:
         assert len(respx.calls) == 0
 
     @respx.mock
-    async def test_list_page_drops_a_total_that_contradicts_the_rows(
+    async def test_list_page_reports_a_total_that_contradicts_the_rows(
         self, aclient: AsyncNetskopeClient
     ) -> None:
         body = {"publishers": [{"publisher_id": n} for n in (1, 2, 3)], "total": 1}
         route = respx.get(_URL).mock(return_value=httpx.Response(200, json=body))
         page = await aclient.publishers.list_page()
         assert [publisher.publisher_id for publisher in page.items] == [1, 2, 3]
-        assert page.total is None
+        assert page.total == 1
         assert route.call_count == 1
 
     @respx.mock
-    async def test_list_returns_rows_a_reported_total_would_have_refused(
+    async def test_list_returns_rows_alongside_a_contradicting_total(
         self, aclient: AsyncNetskopeClient
     ) -> None:
-        """Async twin of the sync guard; see that test for the reasoning."""
+        """Async twin; see the sync test for the reasoning."""
         body = {"publishers": [{"publisher_id": n} for n in (1, 2, 3)], "total": 9}
         route = respx.get(_URL).mock(return_value=httpx.Response(200, json=body))
         pubs = await drain(aclient.publishers.list())

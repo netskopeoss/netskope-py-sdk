@@ -199,26 +199,24 @@ def local_page(
     applied to the records already in hand, and the complete collection
     establishes ``has_more`` without needing a total.
 
-    A ``total`` that disagrees with the number of records is dropped rather
-    than reported. These operations cannot return a window, so the records in
-    hand are the collection by definition and a disagreeing total is the
-    service's own bookkeeping, not evidence of truncation. Reporting it would
-    also reach :meth:`SyncPaginatedResponse.pages`, whose unpaginated branch
-    refuses a response whose stated total exceeds the records it carries: the
-    caller would lose data the gateway returned successfully.
+    The stated ``total`` is reported as received, even when it disagrees with
+    the number of records. ``npa_publishers.yaml:877`` declares it, and the
+    service that counted the rows knows something the client does not: a
+    disagreement means the service capped its own response, which is worth
+    surfacing rather than hiding. ``has_more`` is derived from the records in
+    hand, not from the total, so a wrong total cannot make a traversal skip
+    anything, and ``windowed_locally`` tells the traversal guard that these
+    records are the whole collection.
     """
     total = select_total(metadata)
-    if total is not None and total != len(items):
-        logger.debug(
-            "Discarding the stated total %d: the unpaginated response carries %d records.",
-            total,
-            len(items),
-        )
-        total = None
     window = items[offset:] if offset else items
     if limit is not None:
         window = window[:limit]
-    page = build_page(window, offset=offset, limit=limit, total=total, metadata=metadata)
+    # Built without the total so `build_page`'s records-past-total guard does
+    # not fire: that guard protects a *traversal* from a shrinking total, and
+    # there is no traversal here. The stated total is attached afterwards.
+    page = build_page(window, offset=offset, limit=limit, total=None, metadata=metadata)
+    page.total = total
     page.has_more = offset + len(window) < len(items)
     page.windowed_locally = True
     return page
@@ -509,7 +507,15 @@ class SyncPaginatedResponse(Generic[T]):
         if not self._paginated:
             page = self._fetch_page(0, 0)
             if page is not None:
-                if page.total is not None and page.total > len(page.items):
+                # A locally windowed page carries the whole collection by
+                # definition, so its stated total disagreeing with the records
+                # is the service's own bookkeeping, not truncation. Refusing it
+                # here would deny the caller rows the gateway returned.
+                if (
+                    page.total is not None
+                    and page.total > len(page.items)
+                    and not page.windowed_locally
+                ):
                     raise PaginationError(
                         "The unpaginated response is incomplete.",
                         request_method=self._method,
@@ -649,7 +655,15 @@ class AsyncPaginatedResponse(Generic[T]):
         if not self._paginated:
             page = await self._fetch_page(0, 0)
             if page is not None:
-                if page.total is not None and page.total > len(page.items):
+                # A locally windowed page carries the whole collection by
+                # definition, so its stated total disagreeing with the records
+                # is the service's own bookkeeping, not truncation. Refusing it
+                # here would deny the caller rows the gateway returned.
+                if (
+                    page.total is not None
+                    and page.total > len(page.items)
+                    and not page.windowed_locally
+                ):
                     raise PaginationError(
                         "The unpaginated response is incomplete.",
                         request_method=self._method,
